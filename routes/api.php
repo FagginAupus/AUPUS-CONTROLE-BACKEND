@@ -1,3 +1,4 @@
+
 <?php
 
 use Illuminate\Http\Request;
@@ -20,6 +21,38 @@ use App\Http\Controllers\NotificacaoController;
 | be assigned to the "api" middleware group. Make something great!
 |
 */
+
+// ==========================================
+// ROTAS PÚBLICAS (SEM AUTENTICAÇÃO)
+// ==========================================
+
+// Health check simples
+Route::get('/health-check', function () {
+    return response()->json([
+        'status' => 'ok',
+        'timestamp' => now(),
+        'version' => '1.0.0',
+        'message' => 'Aupus Controle API está funcionando!',
+        'database' => 'PostgreSQL conectado'
+    ]);
+});
+
+// Teste de conexão com banco
+Route::get('/test-db', function () {
+    try {
+        \DB::connection()->getPdo();
+        return response()->json([
+            'status' => 'success',
+            'database' => 'PostgreSQL conectado com sucesso!',
+            'timestamp' => now()
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Erro na conexão com o banco: ' . $e->getMessage()
+        ], 500);
+    }
+});
 
 // Rotas públicas (sem autenticação)
 Route::prefix('auth')->group(function () {
