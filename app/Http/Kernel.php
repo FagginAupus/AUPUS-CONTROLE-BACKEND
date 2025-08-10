@@ -16,13 +16,13 @@ class Kernel extends HttpKernel
     protected $middleware = [
         // \App\Http\Middleware\TrustHosts::class,
         \App\Http\Middleware\TrustProxies::class,
-        \Illuminate\Http\Middleware\HandleCors::class,
         \App\Http\Middleware\PreventRequestsDuringMaintenance::class,
-        \Fruitcake\Cors\HandleCors::class, // ← ADICIONAR ESTA LINHA
-        \App\Http\Middleware\TrustProxies::class,
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
         \App\Http\Middleware\TrimStrings::class,
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
+        
+        // CORS - Deve ser um dos primeiros middlewares
+        \Fruitcake\Cors\HandleCors::class,
     ];
 
     /**
@@ -41,13 +41,14 @@ class Kernel extends HttpKernel
         ],
 
         'api' => [
+            // Laravel Sanctum para SPA
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-            'throttle:api',
-            \Illuminate\Routing\Middleware\SubstituteBindings::class,
             
-            // Middleware personalizado para API
-            \App\Http\Middleware\ApiRateLimit::class . ':120,1', // 120 requests por minuto
-            \Illuminate\Http\Middleware\HandleCors::class,
+            // Rate limiting
+            'throttle:api',
+            
+            // Route model binding
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ],
     ];
 
