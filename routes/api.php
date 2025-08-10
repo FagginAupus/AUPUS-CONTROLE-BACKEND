@@ -37,6 +37,26 @@ Route::get('/health-check', function () {
     ]);
 });
 
+// Health check do sistema (versão simples)
+Route::get('/sistema/health', function () {
+    try {
+        \DB::connection()->getPdo();
+        return response()->json([
+            'status' => 'healthy',
+            'database' => 'connected',
+            'timestamp' => now(),
+            'message' => 'Sistema Aupus funcionando!'
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'unhealthy', 
+            'database' => 'error',
+            'error' => $e->getMessage(),
+            'timestamp' => now()
+        ], 500);
+    }
+});
+
 // Teste de conexão com banco
 Route::get('/test-db', function () {
     try {
