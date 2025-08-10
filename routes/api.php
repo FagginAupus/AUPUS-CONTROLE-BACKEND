@@ -314,57 +314,6 @@ Route::middleware('auth:api')->group(function () {
             ]);
         });
     });
-
-    // ==========================================
-    // SISTEMA - Informações do sistema
-    // ==========================================
-    Route::prefix('sistema')->group(function () {
-        Route::get('info', function () {
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'nome' => \App\Models\Configuracao::getEmpresaNome(),
-                    'versao' => \App\Models\Configuracao::getSistemaVersao(),
-                    'ambiente' => config('app.env'),
-                    'timezone' => config('app.timezone'),
-                    'database' => config('database.default'),
-                    'cache_driver' => config('cache.default'),
-                    'timestamp' => now()->toISOString()
-                ]
-            ]);
-        });
-        
-        Route::get('health', function () {
-            try {
-                // Testar conexão com banco
-                \DB::connection()->getPdo();
-                $dbStatus = 'ok';
-            } catch (\Exception $e) {
-                $dbStatus = 'error';
-            }
-            
-            // Testar cache
-            try {
-                \Cache::put('health_check', 'ok', 10);
-                $cacheTest = \Cache::get('health_check');
-                $cacheStatus = $cacheTest === 'ok' ? 'ok' : 'error';
-            } catch (\Exception $e) {
-                $cacheStatus = 'error';
-            }
-            
-            $overallStatus = ($dbStatus === 'ok' && $cacheStatus === 'ok') ? 'healthy' : 'unhealthy';
-            
-            return response()->json([
-                'success' => true,
-                'status' => $overallStatus,
-                'checks' => [
-                    'database' => $dbStatus,
-                    'cache' => $cacheStatus,
-                    'timestamp' => now()->toISOString()
-                ]
-            ]);
-        });
-    });
 });
 
 // ==========================================
