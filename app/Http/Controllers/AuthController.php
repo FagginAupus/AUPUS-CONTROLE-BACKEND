@@ -1,443 +1,428 @@
-<?php
+// src/context/AuthContext.jsx - CORREÇÃO FINAL apenas do getMyTeam
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import storageService from '../services/storageService';
 
-namespace App\Http\Controllers;
+const AuthContext = createContext();
 
-use App\Models\Usuario;
-use App\Models\Notificacao;
-use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Validator;
-use Tymon\JWTAuth\Facades\JWTAuth;
-use Tymon\JWTAuth\Exceptions\JWTException;
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth deve ser usado dentro de um AuthProvider');
+  }
+  return context;
+};
 
-class AuthController extends Controller
-{
-    /**
-     * Create a new AuthController instance.
-     */
-    public function __construct()
-    {
-        $this->middleware('auth:api', ['except' => ['login', 'register']]);
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Verificar se há usuário logado ao inicializar
+  useEffect(() => {
+    const initializeAuth = async () => {
+      try {
+        // Verificar se há token válido
+        const token = localStorage.getItem('aupus_token');
+        if (token) {
+          // Tentar obter usuário atual da API ou localStorage
+          const userData = await storageService.getCurrentUser();
+          if (userData) {
+            setUser(userData);
+            setIsAuthenticated(true);
+            console.log('✅ Usuário restaurado:', userData.nome || userData.name);
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ Erro ao restaurar sessão:', error);
+        // Limpar dados inválidos
+        localStorage.removeItem('aupus_user');
+        localStorage.removeItem('aupus_token');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeAuth();
+  }, []);
+
+  // Função para fazer login
+  const login = async (username, password) => {
+    try {
+      setLoading(true);
+      console.log('🔐 Iniciando login...');
+      
+      // Tentar login via storageService (que usa API ou localStorage)
+      const credentials = { email: username, password };
+      const result = await storageService.login(credentials);
+      
+      if (result.success) {
+        const userData = result.user;
+        setUser(userData);
+        setIsAuthenticated(true);
+        console.log('✅ Login realizado com sucesso:', userData.nome || userData.name);
+        return { success: true, user: userData };
+      }
+      
+      // Se falhou na API, tentar método local original (fallback)
+      return await loginLocal(username, password);
+      
+    } catch (error) {
+      console.error('❌ Erro no login:', error);
+      return { success: false, message: error.message || 'Erro interno do sistema' };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Método de login local (fallback para compatibilidade)
+  const loginLocal = async (username, password) => {
+    try {
+      // Verificar usuário admin padrão
+      if (username === 'admin' && password === '123') {
+        const adminUser = {
+          id: 'admin',
+          username: 'admin',
+          name: 'Administrador',
+          nome: 'Administrador', // Para compatibilidade com API
+          email: 'admin@aupus.com',
+          role: 'admin',
+          permissions: {
+            canCreateConsultors: true,
+            canAccessAll: true,
+            canManageUGs: true,
+            canManageCalibration: true,
+            canSeeAllData: true
+          },
+          createdBy: null,
+          subordinates: []
+        };
+        
+        setUser(adminUser);
+        setIsAuthenticated(true);
+        localStorage.setItem('aupus_user', JSON.stringify(adminUser));
+        console.log('✅ Login admin local realizado');
+        return { success: true, user: adminUser };
+      }
+
+      // Verificar usuários cadastrados localmente
+      const users = getUsersFromStorage();
+      const foundUser = users.find(u => 
+        (u.username === username || u.email === username) && u.password === password
+      );
+      
+      if (foundUser) {
+        // Não salvar a senha no contexto
+        const { password: _, ...userWithoutPassword } = foundUser;
+        
+        setUser(userWithoutPassword);
+        setIsAuthenticated(true);
+        localStorage.setItem('aupus_user', JSON.stringify(userWithoutPassword));
+        console.log('✅ Login local realizado:', userWithoutPassword.name);
+        return { success: true, user: userWithoutPassword };
+      }
+
+      return { success: false, message: 'Usuário ou senha inválidos' };
+      
+    } catch (error) {
+      console.error('❌ Erro no login local:', error);
+      return { success: false, message: 'Erro interno do sistema' };
+    }
+  };
+
+  // Função para fazer logout
+  const logout = async () => {
+    try {
+      console.log('🚪 Iniciando logout...');
+      
+      // Fazer logout via storageService
+      await storageService.logout();
+      
+      // Limpar estado local
+      setUser(null);
+      setIsAuthenticated(false);
+      
+      console.log('✅ Logout realizado com sucesso');
+    } catch (error) {
+      console.error('❌ Erro no logout:', error);
+      // Mesmo com erro, limpar dados locais
+      setUser(null);
+      setIsAuthenticated(false);
+      localStorage.removeItem('aupus_user');
+      localStorage.removeItem('aupus_token');
+    }
+  };
+
+  // Função para criar usuário (consultor, gerente, vendedor)
+  const createUser = async (userData) => {
+    try {
+      // Verificar se usuário atual tem permissão
+      if (!canCreateUser(userData.role)) {
+        throw new Error('Você não tem permissão para criar este tipo de usuário');
+      }
+
+      const users = getUsersFromStorage();
+      
+      // Verificar se username já existe
+      if (users.find(u => u.username === userData.username)) {
+        throw new Error('Nome de usuário já existe');
+      }
+
+      // Definir permissões baseadas no role
+      const permissions = getPermissionsByRole(userData.role);
+      
+      const newUser = {
+        id: Date.now().toString(),
+        username: userData.username,
+        password: userData.password,
+        name: userData.name,
+        role: userData.role,
+        permissions,
+        createdBy: user.id,
+        createdAt: new Date().toISOString(),
+        subordinates: [],
+        managerId: userData.managerId || null // ID do gerente para vendedores
+      };
+
+      users.push(newUser);
+      saveUsersToStorage(users);
+
+      // Adicionar aos subordinados do usuário atual ou do gerente
+      const supervisorId = userData.managerId || user.id;
+      addSubordinateToUser(supervisorId, newUser.id);
+
+      console.log('✅ Usuário criado:', newUser.name);
+      return newUser;
+      
+    } catch (error) {
+      console.error('❌ Erro ao criar usuário:', error);
+      throw error;
+    }
+  };
+
+  // Função para verificar se pode criar usuário
+  const canCreateUser = (role) => {
+    if (!user) return false;
+    
+    switch (user.role) {
+      case 'admin':
+        return ['consultor', 'gerente'].includes(role);
+      case 'consultor':
+        return ['gerente', 'vendedor'].includes(role);
+      case 'gerente':
+        return role === 'vendedor';
+      default:
+        return false;
+    }
+  };
+
+  // Verificar permissão
+  const hasPermission = (permission) => {
+    if (!user) return false;
+    if (user.role === 'admin') return true; // Admin tem todas as permissões
+    return user.permissions?.[permission] || false;
+  };
+
+  // Verificar acesso a página
+  const canAccessPage = (page) => {
+    if (!user) return false;
+    
+    switch (page) {
+      case 'dashboard':
+        return true; // Todos podem acessar dashboard
+      case 'prospec':
+      case 'controle':
+        return ['admin', 'consultor', 'gerente', 'vendedor'].includes(user.role);
+      case 'ugs':
+        return user.role === 'admin';
+      case 'relatorios':
+        return ['admin', 'consultor', 'gerente'].includes(user.role);
+      default:
+        return false;
+    }
+  };
+
+  // Obter IDs da equipe
+  const getMyTeamIds = () => {
+    if (!user) return [];
+    
+    if (user.role === 'admin') {
+      // Admin vê todos
+      const users = getUsersFromStorage();
+      return users.map(u => u.id);
+    }
+    
+    // Incluir o próprio usuário + subordinados
+    return [user.id, ...(user.subordinates || [])];
+  };
+
+  // ✅ CORREÇÃO PRINCIPAL: getMyTeam deve SEMPRE retornar um array
+  const getMyTeam = () => {
+    if (!user) {
+      console.log('❌ getMyTeam: Nenhum usuário logado, retornando array vazio');
+      return [];
+    }
+    
+    try {
+      const users = getUsersFromStorage();
+      const teamIds = getMyTeamIds();
+      
+      const team = users
+        .filter(u => teamIds.includes(u.id))
+        .map(u => ({
+          id: u.id,
+          name: u.name || u.nome,
+          username: u.username,
+          role: u.role,
+          email: u.email
+        }));
+      
+      // Se não há equipe, retornar pelo menos o próprio usuário
+      if (team.length === 0 && user) {
+        console.log('⚠️ getMyTeam: Equipe vazia, retornando apenas usuário atual');
+        return [{
+          id: user.id,
+          name: user.name || user.nome,
+          username: user.username || user.email,
+          role: user.role,
+          email: user.email
+        }];
+      }
+      
+      console.log('✅ getMyTeam: Retornando equipe com', team.length, 'membros');
+      return team;
+      
+    } catch (error) {
+      console.error('❌ Erro em getMyTeam:', error);
+      // Fallback final: retornar apenas o usuário atual
+      if (user) {
+        return [{
+          id: user.id,
+          name: user.name || user.nome || 'Usuário',
+          username: user.username || user.email,
+          role: user.role,
+          email: user.email
+        }];
+      }
+      return [];
+    }
+  };
+
+  // Funções auxiliares (mantidas do código original)
+  const getUsersFromStorage = () => {
+    try {
+      const users = localStorage.getItem('aupus_users');
+      return users ? JSON.parse(users) : [];
+    } catch (error) {
+      console.error('Erro ao carregar usuários:', error);
+      return [];
+    }
+  };
+
+  const saveUsersToStorage = (users) => {
+    try {
+      localStorage.setItem('aupus_users', JSON.stringify(users));
+    } catch (error) {
+      console.error('Erro ao salvar usuários:', error);
+    }
+  };
+
+  const getPermissionsByRole = (role) => {
+    switch (role) {
+      case 'admin':
+        return {
+          canCreateConsultors: true,
+          canAccessAll: true,
+          canManageUGs: true,
+          canManageCalibration: true,
+          canSeeAllData: true
+        };
+      case 'consultor':
+        return {
+          canCreateConsultors: false,
+          canAccessAll: false,
+          canManageUGs: false,
+          canManageCalibration: true,
+          canSeeAllData: false
+        };
+      default:
+        return {
+          canCreateConsultors: false,
+          canAccessAll: false,
+          canManageUGs: false,
+          canManageCalibration: false,
+          canSeeAllData: false
+        };
+    }
+  };
+
+  const addSubordinateToUser = (supervisorId, subordinateId) => {
+    const users = getUsersFromStorage();
+    const supervisor = users.find(u => u.id === supervisorId);
+    
+    if (supervisor) {
+      if (!supervisor.subordinates) supervisor.subordinates = [];
+      if (!supervisor.subordinates.includes(subordinateId)) {
+        supervisor.subordinates.push(subordinateId);
+        saveUsersToStorage(users);
+      }
+    }
+  };
+
+  // Obter nome do consultor responsável para uma proposta
+  const getConsultorName = (propostaConsultor) => {
+    if (user?.role !== 'admin') {
+      return propostaConsultor; // Para não-admins, mostrar quem realmente fez
     }
 
-    /**
-     * Login do usuário
-     */
-    public function login(Request $request): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'email' => 'required|email',
-            'password' => 'required|string|min:3',
-        ], [
-            'email.required' => 'Email é obrigatório',
-            'email.email' => 'Email deve ter formato válido',
-            'password.required' => 'Senha é obrigatória',
-            'password.min' => 'Senha deve ter pelo menos 3 caracteres'
-        ]);
+    // Para admin, encontrar o consultor responsável
+    const users = getUsersFromStorage();
+    const autor = users.find(u => u.name === propostaConsultor || u.username === propostaConsultor);
+    
+    if (!autor) return propostaConsultor;
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dados de validação inválidos',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        try {
-            // Buscar usuário pelo email
-            $usuario = Usuario::where('email', $request->email)->first();
-            
-            if (!$usuario) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Credenciais inválidas'
-                ], 401);
-            }
-
-            // Verificar se usuário está ativo
-            if (!$usuario->is_active) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário inativo. Entre em contato com o administrador.'
-                ], 403);
-            }
-
-            // Verificar senha
-            if (!Hash::check($request->password, $usuario->senha)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Credenciais inválidas'
-                ], 401);
-            }
-
-            // Gerar token JWT
-            $token = JWTAuth::fromUser($usuario);
-
-            if (!$token) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Erro interno do servidor'
-                ], 500);
-            }
-
-            // Dados do usuário para retorno
-            $userData = [
-                'id' => $usuario->id,
-                'nome' => $usuario->nome,
-                'email' => $usuario->email,
-                'role' => $usuario->role,
-                'is_active' => $usuario->is_active,
-                'telefone' => $usuario->telefone,
-                'created_at' => $usuario->created_at,
-                'permissions' => $this->getUserPermissions($usuario)
-            ];
-
-            return response()->json([
-                'success' => true,
-                'message' => "Bem-vindo(a), {$usuario->nome}!",
-                'data' => [
-                    'user' => $userData,
-                    'token' => $token,
-                    'token_type' => 'Bearer',
-                    'expires_in' => config('jwt.ttl') * 60 // em segundos
-                ]
-            ]);
-
-        } catch (JWTException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro ao criar token de acesso'
-            ], 500);
-        }
+    // Se o autor é um consultor, retornar ele mesmo
+    if (autor.role === 'consultor') {
+      return autor.name;
     }
 
-    /**
-     * Logout do usuário
-     */
-    public function logout(): JsonResponse
-    {
-        try {
-            JWTAuth::invalidate(JWTAuth::getToken());
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Logout realizado com sucesso'
-            ]);
-        } catch (JWTException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro ao realizar logout'
-            ], 500);
-        }
-    }
+    // Se é gerente ou vendedor, encontrar o consultor responsável
+    const findConsultor = (userId) => {
+      const currentUser = users.find(u => u.id === userId);
+      if (!currentUser) return null;
+      
+      if (currentUser.role === 'consultor') {
+        return currentUser.name;
+      }
+      
+      if (currentUser.createdBy) {
+        return findConsultor(currentUser.createdBy);
+      }
+      
+      return null;
+    };
 
-    /**
-     * Renovar token JWT
-     */
-    public function refresh(): JsonResponse
-    {
-        try {
-            $token = JWTAuth::refresh();
-            $usuario = JWTAuth::user();
-            
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'token' => $token,
-                    'token_type' => 'Bearer',
-                    'expires_in' => config('jwt.ttl') * 60,
-                    'user' => [
-                        'id' => $usuario->id,
-                        'nome' => $usuario->nome,
-                        'email' => $usuario->email,
-                        'role' => $usuario->role
-                    ]
-                ]
-            ]);
-        } catch (JWTException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Token não pode ser renovado'
-            ], 401);
-        }
-    }
+    const consultorName = findConsultor(autor.id);
+    return consultorName || propostaConsultor;
+  };
 
-    /**
-     * Obter dados do usuário atual
-     */
-    public function me(): JsonResponse
-    {
-        try {
-            $usuario = JWTAuth::user();
-            
-            if (!$usuario) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não encontrado'
-                ], 404);
-            }
+  const value = {
+    user,
+    isAuthenticated,
+    loading,
+    login,
+    logout,
+    createUser,
+    canCreateUser,
+    hasPermission,
+    canAccessPage,
+    getMyTeamIds,
+    getMyTeam,
+    getConsultorName
+  };
 
-            // Verificar se ainda está ativo
-            if (!$usuario->is_active) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário foi inativado'
-                ], 403);
-            }
-
-            // Carregar relacionamentos
-            $usuario->load(['manager', 'subordinados']);
-
-            // Obter estatísticas do dashboard
-            $estatisticas = $this->getDashboardStats($usuario);
-
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'user' => [
-                        'id' => $usuario->id,
-                        'nome' => $usuario->nome,
-                        'email' => $usuario->email,
-                        'role' => $usuario->role,
-                        'is_active' => $usuario->is_active,
-                        'telefone' => $usuario->telefone,
-                        'cidade' => $usuario->cidade,
-                        'estado' => $usuario->estado,
-                        'created_at' => $usuario->created_at,
-                        'manager' => $usuario->manager ? [
-                            'id' => $usuario->manager->id,
-                            'nome' => $usuario->manager->nome,
-                            'email' => $usuario->manager->email
-                        ] : null,
-                        'subordinados' => $usuario->subordinados->map(function ($sub) {
-                            return [
-                                'id' => $sub->id,
-                                'nome' => $sub->nome,
-                                'email' => $sub->email,
-                                'role' => $sub->role
-                            ];
-                        })
-                    ],
-                    'permissions' => $this->getUserPermissions($usuario),
-                    'statistics' => $estatisticas,
-                    'notifications_count' => Notificacao::porUsuario($usuario->id)->naoLidas()->count()
-                ]
-            ]);
-        } catch (JWTException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Token inválido'
-            ], 401);
-        }
-    }
-
-    /**
-     * Registrar novo usuário (apenas admins e consultores)
-     */
-    public function register(Request $request): JsonResponse
-    {
-        $currentUser = JWTAuth::user();
-
-        // Verificar se usuário atual pode criar usuários
-        if (!$currentUser || (!$currentUser->isAdmin() && !$currentUser->isConsultor())) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Acesso negado. Apenas administradores e consultores podem criar usuários.'
-            ], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'nome' => 'required|string|min:3|max:200',
-            'email' => 'required|email|unique:usuarios,email',
-            'password' => 'required|string|min:6',
-            'role' => 'required|in:admin,consultor,gerente,vendedor',
-            'telefone' => 'nullable|string|max:20',
-            'cidade' => 'nullable|string|max:100',
-            'estado' => 'nullable|string|max:2',
-            'manager_id' => 'nullable|exists:usuarios,id'
-        ], [
-            'nome.required' => 'Nome é obrigatório',
-            'email.required' => 'Email é obrigatório',
-            'email.email' => 'Email deve ter formato válido',
-            'email.unique' => 'Este email já está em uso',
-            'password.required' => 'Senha é obrigatória',
-            'password.min' => 'Senha deve ter pelo menos 6 caracteres',
-            'role.required' => 'Role é obrigatório',
-            'role.in' => 'Role deve ser: admin, consultor, gerente ou vendedor'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dados de validação inválidos',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        // Verificar hierarquia - Consultor não pode criar Admin ou Consultor
-        if ($currentUser->isConsultor() && in_array($request->role, ['admin', 'consultor'])) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Consultores não podem criar administradores ou outros consultores'
-            ], 403);
-        }
-
-        try {
-            $novoUsuario = Usuario::create([
-                'nome' => $request->nome,
-                'email' => $request->email,
-                'senha' => $request->password, // Será hasheado pelo mutator
-                'role' => $request->role,
-                'telefone' => $request->telefone,
-                'cidade' => $request->cidade,
-                'estado' => $request->estado,
-                'manager_id' => $request->manager_id ?? $currentUser->id,
-                'is_active' => true
-            ]);
-
-            // Criar notificação de boas-vindas
-            Notificacao::criarUsuarioCriado($novoUsuario, $currentUser);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Usuário criado com sucesso!',
-                'data' => [
-                    'user' => [
-                        'id' => $novoUsuario->id,
-                        'nome' => $novoUsuario->nome,
-                        'email' => $novoUsuario->email,
-                        'role' => $novoUsuario->role,
-                        'is_active' => $novoUsuario->is_active,
-                        'created_at' => $novoUsuario->created_at
-                    ]
-                ]
-            ], 201);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro ao criar usuário: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Alterar senha do usuário atual
-     */
-    public function changePassword(Request $request): JsonResponse
-    {
-        $usuario = JWTAuth::user();
-
-        $validator = Validator::make($request->all(), [
-            'current_password' => 'required|string',
-            'new_password' => 'required|string|min:6|confirmed',
-        ], [
-            'current_password.required' => 'Senha atual é obrigatória',
-            'new_password.required' => 'Nova senha é obrigatória',
-            'new_password.min' => 'Nova senha deve ter pelo menos 6 caracteres',
-            'new_password.confirmed' => 'Confirmação de senha não confere'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dados de validação inválidos',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        // Verificar senha atual
-        if (!Hash::check($request->current_password, $usuario->senha)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Senha atual incorreta'
-            ], 400);
-        }
-
-        // Alterar senha
-        $usuario->senha = $request->new_password;
-        $usuario->save();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Senha alterada com sucesso!'
-        ]);
-    }
-
-    /**
-     * Obter permissões do usuário baseadas na role
-     */
-    private function getUserPermissions(Usuario $usuario): array
-    {
-        // Baseado na hierarquia do frontend
-        $basePermissions = [
-            'canAccessDashboard' => true,
-            'canAccessProspec' => true,
-            'canAccessControle' => true,
-            'canAccessRelatorios' => true
-        ];
-
-        switch ($usuario->role) {
-            case 'admin':
-                return array_merge($basePermissions, [
-                    'canCreateUsers' => true,
-                    'canManageUGs' => true,
-                    'canManageCalibration' => true,
-                    'canSeeAllData' => true,
-                    'canAccessSettings' => true,
-                    'canManageHierarchy' => true,
-                    'canDeletePropostas' => true,
-                    'canEditAllPropostas' => true
-                ]);
-
-            case 'consultor':
-                return array_merge($basePermissions, [
-                    'canCreateUsers' => true,
-                    'canManageUGs' => true,
-                    'canManageCalibration' => true,
-                    'canSeeTeamData' => true,
-                    'canEditTeamPropostas' => true
-                ]);
-
-            case 'gerente':
-                return array_merge($basePermissions, [
-                    'canCreateUsers' => true,
-                    'canSeeTeamData' => true,
-                    'canEditTeamPropostas' => true
-                ]);
-
-            case 'vendedor':
-            default:
-                return array_merge($basePermissions, [
-                    'canEditOwnPropostas' => true
-                ]);
-        }
-    }
-
-    /**
-     * Obter estatísticas do dashboard para o usuário
-     */
-    private function getDashboardStats(Usuario $usuario): array
-    {
-        // Implementar baseado nos models criados
-        return [
-            'propostas' => [
-                'total' => 0,
-                'aguardando' => 0,
-                'fechado' => 0,
-                'perdido' => 0
-            ],
-            'controle' => [
-                'total' => 0,
-                'ativos' => 0,
-                'com_ug' => 0
-            ],
-            'ugs' => [
-                'total' => 0,
-                'capacidade_total' => 0
-            ]
-        ];
-    }
-}
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
