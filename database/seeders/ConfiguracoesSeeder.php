@@ -10,6 +10,11 @@ class ConfiguracoesSeeder extends Seeder
 {
     public function run(): void
     {
+        // Limpar tabela antes de popular (apenas em desenvolvimento)
+        if (app()->environment('local')) {
+            Configuracao::truncate();
+        }
+
         $configs = [
             [
                 'id' => (string) Str::uuid(),
@@ -21,10 +26,26 @@ class ConfiguracoesSeeder extends Seeder
             ],
             [
                 'id' => (string) Str::uuid(),
+                'chave' => 'calibragem_bandeira',
+                'valor' => '0.00',
+                'tipo' => 'number',
+                'descricao' => 'Calibragem específica para bandeira tarifária',
+                'grupo' => 'calibragem'
+            ],
+            [
+                'id' => (string) Str::uuid(),
                 'chave' => 'empresa_nome',
                 'valor' => 'Aupus Energia',
                 'tipo' => 'string',
                 'descricao' => 'Nome da empresa',
+                'grupo' => 'geral'
+            ],
+            [
+                'id' => (string) Str::uuid(),
+                'chave' => 'empresa_slogan',
+                'valor' => 'Entre nessa onda!',
+                'tipo' => 'string',
+                'descricao' => 'Slogan da empresa',
                 'grupo' => 'geral'
             ],
             [
@@ -46,7 +67,11 @@ class ConfiguracoesSeeder extends Seeder
                     'beneficio5' => 'Geração distribuída',
                     'beneficio6' => 'Compensação elétrica',
                     'beneficio7' => 'Créditos de energia',
-                    'beneficio8' => 'Monitoramento online'
+                    'beneficio8' => 'Monitoramento online',
+                    'beneficio9' => 'Valorização do imóvel',
+                    'beneficio10' => 'Baixa manutenção',
+                    'beneficio11' => 'Tecnologia alemã',
+                    'beneficio12' => 'Garantia de 25 anos'
                 ]),
                 'tipo' => 'json',
                 'descricao' => 'Lista de benefícios padrão para propostas',
@@ -79,7 +104,14 @@ class ConfiguracoesSeeder extends Seeder
         ];
 
         foreach ($configs as $config) {
-            Configuracao::create($config);
+            // Usar updateOrCreate para evitar duplicatas
+            Configuracao::updateOrCreate(
+                ['chave' => $config['chave']], // Buscar por chave
+                $config // Dados para criar/atualizar
+            );
         }
+
+        $this->command->info('Configurações padrão criadas/atualizadas com sucesso!');
+        $this->command->info('Total de configurações: ' . count($configs));
     }
 }

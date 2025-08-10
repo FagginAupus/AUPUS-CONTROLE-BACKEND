@@ -7,16 +7,11 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Cache;
 use Tymon\JWTAuth\Facades\JWTAuth;
-use Tymon\JWTAuth\Exceptions\TokenExpiredException;
-use Tymon\JWTAuth\Exceptions\TokenInvalidException;
-use Tymon\JWTAuth\Exceptions\JWTException;
 
 class AuthController extends Controller
 {
-    // Removido o constructor com middleware - Laravel 12 usa outra abordagem
-
     /**
      * Login do usuário
      */
@@ -26,10 +21,6 @@ class AuthController extends Controller
         $validator = Validator::make($request->all(), [
             'email' => 'required|string',
             'password' => 'required|string|min:3',
-        ], [
-            'email.required' => 'Login é obrigatório',
-            'password.required' => 'Senha é obrigatória',
-            'password.min' => 'Senha deve ter pelo menos 3 caracteres'
         ]);
 
         if ($validator->fails()) {
@@ -40,25 +31,25 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Rate limiting básico
-        $rateLimitKey = 'login_attempts:' . $request->ip() . ':' . $request->email;
-        
-        if (RateLimiter::tooManyAttempts($rateLimitKey, 5)) {
-            $seconds = RateLimiter::availableIn($rateLimitKey);
-            return response()->json([
-                'success' => false,
-                'message' => "Muitas tentativas de login. Tente novamente em {$seconds} segundos.",
-            ], 429);
-        }
-
         try {
-            // Tentar encontrar usuário por nome ou email
-            $usuario = Usuario::where('nome', $request->email)
-                             ->orWhere('email', $request->email)
-                             ->first();
+            // Rate limiting manual (sem usar RateLimiter que está causando problema)
+            $rateLimitKey = 'login_attempts:' . $request->ip() . ':' . $request->email;
+            $attempts = Cache::get($rateLimitKey, 0);
+            
+            if ($attempts >= 5) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Muitas tentativas de login. Tente novamente em alguns minutos.'
+                ], 429);
+            }
+
+            // Buscar usuário por email
+            $usuario = Usuario::where('email', $request->email)->first();
 
             if (!$usuario) {
-                RateLimiter::hit($rateLimitKey, 300);
+                // Incrementar tentativas
+                Cache::put($rateLimitKey, $attempts + 1, now()->addMinutes(5));
+                
                 return response()->json([
                     'success' => false,
                     'message' => 'Credenciais inválidas'
@@ -75,19 +66,23 @@ class AuthController extends Controller
 
             // Verificar senha
             if (!Hash::check($request->password, $usuario->senha)) {
-                RateLimiter::hit($rateLimitKey, 300);
+                // Incrementar tentativas
+                Cache::put($rateLimitKey, $attempts + 1, now()->addMinutes(5));
+                
                 return response()->json([
                     'success' => false,
                     'message' => 'Credenciais inválidas'
                 ], 401);
             }
 
+            // Limpar tentativas após login bem-sucedido
+            Cache::forget($rateLimitKey);
+
             // Tentar gerar token JWT
             try {
                 $token = JWTAuth::fromUser($usuario);
             } catch (\Exception $e) {
-                // Se JWT falhar, retornar sucesso sem token para teste
-                \Log::warning('JWT não configurado, fazendo login sem token', [
+                \Log::warning('JWT não configurado, usando token temporário', [
                     'user_id' => $usuario->id,
                     'error' => $e->getMessage()
                 ]);
@@ -95,13 +90,9 @@ class AuthController extends Controller
                 $token = 'temp_token_' . base64_encode($usuario->id . '_' . time());
             }
 
-            // Limpar tentativas de login
-            RateLimiter::clear($rateLimitKey);
-
             // Atualizar último login
-            $usuario->update([
-                'updated_at' => now()
-            ]);
+            $usuario->updated_at = now();
+            $usuario->save();
 
             // Log da atividade
             \Log::info('Login realizado com sucesso', [
@@ -124,7 +115,7 @@ class AuthController extends Controller
                 ],
                 'token' => $token,
                 'token_type' => 'bearer',
-                'expires_in' => 86400 // 24 horas
+                'expires_in' => 86400
             ], 200);
 
         } catch (\Exception $e) {
@@ -136,7 +127,7 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor: ' . $e->getMessage()
+                'message' => 'Erro interno do servidor'
             ], 500);
         }
     }
@@ -147,7 +138,6 @@ class AuthController extends Controller
     public function logout(): JsonResponse
     {
         try {
-            // Tentar fazer logout com JWT
             try {
                 $usuario = JWTAuth::user();
                 if ($usuario) {
@@ -158,7 +148,6 @@ class AuthController extends Controller
                 }
                 JWTAuth::invalidate();
             } catch (\Exception $e) {
-                // Se JWT falhar, apenas retornar sucesso
                 \Log::info('Logout sem JWT');
             }
 
@@ -274,7 +263,6 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            // Verificar senha atual
             if (!Hash::check($request->current_password, $usuario->senha)) {
                 return response()->json([
                     'success' => false,
@@ -282,7 +270,6 @@ class AuthController extends Controller
                 ], 400);
             }
 
-            // Atualizar senha
             $usuario->update([
                 'senha' => Hash::make($request->new_password)
             ]);
@@ -316,39 +303,51 @@ class AuthController extends Controller
      */
     private function getUserPermissions($usuario): array
     {
-        $role = $usuario->role ?? 'user';
-
-        $basePermissions = [
-            'view_dashboard' => true,
-            'view_own_data' => true,
+        $role = $usuario->role ?? 'vendedor';
+        
+        $permissions = [
+            'admin' => [
+                'canCreateConsultors' => true,
+                'canAccessAll' => true,
+                'canManageUGs' => true,
+                'canManageCalibration' => true,
+                'canSeeAllData' => true,
+                'canManageUsers' => true,
+                'canAccessReports' => true,
+                'canEditConfigurations' => true
+            ],
+            'consultor' => [
+                'canCreateConsultors' => false,
+                'canAccessAll' => true,
+                'canManageUGs' => true,
+                'canManageCalibration' => false,
+                'canSeeAllData' => true,
+                'canManageUsers' => true,
+                'canAccessReports' => true,
+                'canEditConfigurations' => false
+            ],
+            'gerente' => [
+                'canCreateConsultors' => false,
+                'canAccessAll' => false,
+                'canManageUGs' => false,
+                'canManageCalibration' => false,
+                'canSeeAllData' => false,
+                'canManageUsers' => false,
+                'canAccessReports' => true,
+                'canEditConfigurations' => false
+            ],
+            'vendedor' => [
+                'canCreateConsultors' => false,
+                'canAccessAll' => false,
+                'canManageUGs' => false,
+                'canManageCalibration' => false,
+                'canSeeAllData' => false,
+                'canManageUsers' => false,
+                'canAccessReports' => false,
+                'canEditConfigurations' => false
+            ]
         ];
 
-        return match($role) {
-            'admin' => array_merge($basePermissions, [
-                'manage_users' => true,
-                'manage_system' => true,
-                'view_all_data' => true,
-                'manage_propostas' => true,
-                'manage_controle' => true,
-                'manage_ugs' => true,
-                'view_reports' => true,
-            ]),
-            'consultor' => array_merge($basePermissions, [
-                'manage_team' => true,
-                'view_team_data' => true,
-                'manage_propostas' => true,
-                'manage_controle' => true,
-                'manage_ugs' => true,
-                'view_reports' => true,
-            ]),
-            'gerente' => array_merge($basePermissions, [
-                'manage_propostas' => true,
-                'view_basic_reports' => true,
-            ]),
-            'vendedor' => array_merge($basePermissions, [
-                'create_propostas' => true,
-            ]),
-            default => $basePermissions
-        };
+        return $permissions[$role] ?? $permissions['vendedor'];
     }
 }
