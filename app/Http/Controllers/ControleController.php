@@ -14,15 +14,19 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Carbon\Carbon;
+use Illuminate\Routing\Controllers\HasMiddleware;
+use Illuminate\Routing\Controllers\Middleware;
 
-class ControleController extends Controller
+class ControleController extends Controller implements HasMiddleware
 {
     /**
-     * Constructor
+     * Get the middleware that should be assigned to the controller.
      */
-    public function __construct()
+    public static function middleware(): array
     {
-        $this->middleware('auth:api');
+        return [
+            new Middleware('auth:api'),
+        ];
     }
 
     /**
