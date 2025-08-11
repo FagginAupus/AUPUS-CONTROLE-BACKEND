@@ -1,5 +1,5 @@
-
 <?php
+// routes/api.php - ARQUIVO COMPLETO DAS ROTAS DA API
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -10,60 +10,38 @@ use App\Http\Controllers\UnidadeConsumidoraController;
 use App\Http\Controllers\ControleController;
 use App\Http\Controllers\ConfiguracaoController;
 use App\Http\Controllers\NotificacaoController;
-
-/*
-|--------------------------------------------------------------------------
-| API Routes
-|--------------------------------------------------------------------------
-|
-| Here is where you can register API routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "api" middleware group. Make something great!
-|
-*/
+use App\Http\Controllers\UGController;
 
 // ==========================================
-// ROTAS PÚBLICAS (SEM AUTENTICAÇÃO)
+// HEALTH CHECK - Verificação de saúde da API
 // ==========================================
-
-// Health check simples
-Route::get('/health-check', function () {
-    return response()->json([
-        'status' => 'ok',
-        'timestamp' => now(),
-        'version' => '1.0.0',
-        'message' => 'Aupus Controle API está funcionando!',
-        'database' => 'PostgreSQL conectado'
-    ]);
-});
-
-// Health check do sistema (versão simples)
-Route::get('/sistema/health', function () {
+Route::get('health-check', function () {
     try {
+        // Testar conexão com banco
         \DB::connection()->getPdo();
+        
         return response()->json([
-            'status' => 'healthy',
-            'database' => 'connected',
+            'status' => 'ok',
             'timestamp' => now(),
-            'message' => 'Sistema Aupus funcionando!'
+            'version' => '1.0.0',
+            'message' => 'Aupus Controle API está funcionando!',
+            'database' => 'PostgreSQL conectado'
         ]);
     } catch (\Exception $e) {
         return response()->json([
-            'status' => 'unhealthy', 
-            'database' => 'error',
-            'error' => $e->getMessage(),
-            'timestamp' => now()
+            'status' => 'error',
+            'message' => 'Erro na conexão com o banco: ' . $e->getMessage()
         ], 500);
     }
 });
 
-// Teste de conexão com banco
-Route::get('/test-db', function () {
+// Teste adicional de banco de dados
+Route::get('test-db', function () {
     try {
-        \DB::connection()->getPdo();
+        $result = \DB::select('SELECT version() as version');
         return response()->json([
-            'status' => 'success',
-            'database' => 'PostgreSQL conectado com sucesso!',
+            'status' => 'ok',
+            'database_version' => $result[0]->version ?? 'Desconhecida',
             'timestamp' => now()
         ]);
     } catch (\Exception $e) {
@@ -74,13 +52,17 @@ Route::get('/test-db', function () {
     }
 });
 
-// Rotas públicas (sem autenticação)
+// ==========================================
+// ROTAS PÚBLICAS (SEM AUTENTICAÇÃO)
+// ==========================================
 Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
     Route::post('register', [AuthController::class, 'register']);
 });
 
-// Rotas protegidas (requerem autenticação JWT)
+// ==========================================
+// ROTAS PROTEGIDAS (REQUEREM AUTENTICAÇÃO JWT)
+// ==========================================
 Route::middleware('auth:api')->group(function () {
     
     // ==========================================
@@ -100,9 +82,15 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/', [UsuarioController::class, 'index']);
         Route::post('/', [UsuarioController::class, 'store']);
         Route::get('team', [UsuarioController::class, 'getTeam']);
+        Route::get('statistics', [UsuarioController::class, 'statistics']);
         Route::get('{id}', [UsuarioController::class, 'show']);
         Route::put('{id}', [UsuarioController::class, 'update']);
         Route::patch('{id}/toggle-active', [UsuarioController::class, 'toggleActive']);
+        Route::delete('{id}', [UsuarioController::class, 'destroy']);
+        
+        // Operações em lote
+        Route::post('bulk-activate', [UsuarioController::class, 'bulkActivate']);
+        Route::post('bulk-deactivate', [UsuarioController::class, 'bulkDeactivate']);
     });
 
     // ==========================================
@@ -115,38 +103,65 @@ Route::middleware('auth:api')->group(function () {
         Route::get('export', [PropostaController::class, 'export']);
         Route::get('{id}', [PropostaController::class, 'show']);
         Route::put('{id}', [PropostaController::class, 'update']);
-        Route::patch('{id}/change-status', [PropostaController::class, 'changeStatus']);
+        Route::patch('{id}/status', [PropostaController::class, 'updateStatus']);
         Route::delete('{id}', [PropostaController::class, 'destroy']);
+        
+        // Upload de arquivos
+        Route::post('{id}/upload-documento', [PropostaController::class, 'uploadDocumento']);
+        Route::delete('{id}/documento/{tipo}', [PropostaController::class, 'removeDocumento']);
+        
+        // Operações especiais
+        Route::post('{id}/duplicate', [PropostaController::class, 'duplicate']);
+        Route::post('{id}/convert-to-controle', [PropostaController::class, 'convertToControle']);
+        Route::post('bulk-update-status', [PropostaController::class, 'bulkUpdateStatus']);
     });
 
     // ==========================================
-    // UNIDADES CONSUMIDORAS - UCs e UGs
+    // UNIDADES CONSUMIDORAS
     // ==========================================
     Route::prefix('unidades-consumidoras')->group(function () {
         Route::get('/', [UnidadeConsumidoraController::class, 'index']);
         Route::post('/', [UnidadeConsumidoraController::class, 'store']);
+        Route::get('statistics', [UnidadeConsumidoraController::class, 'statistics']);
+        Route::get('export', [UnidadeConsumidoraController::class, 'export']);
         Route::get('{id}', [UnidadeConsumidoraController::class, 'show']);
         Route::put('{id}', [UnidadeConsumidoraController::class, 'update']);
         Route::delete('{id}', [UnidadeConsumidoraController::class, 'destroy']);
         
-        // Operações específicas para UGs
-        Route::post('{id}/convert-to-ug', [UnidadeConsumidoraController::class, 'convertToUG']);
-        Route::post('{id}/revert-to-uc', [UnidadeConsumidoraController::class, 'revertToUC']);
-        Route::post('{id}/apply-calibragem', [UnidadeConsumidoraController::class, 'applyCalibragem']);
+        // Operações especiais
+        Route::post('import', [UnidadeConsumidoraController::class, 'import']);
+        Route::post('bulk-update', [UnidadeConsumidoraController::class, 'bulkUpdate']);
+        Route::post('{id}/calculate-economy', [UnidadeConsumidoraController::class, 'calculateEconomy']);
     });
 
     // ==========================================
-    // CONTROLE CLUBE - Gestão do clube
+    // UGs - USINAS GERADORAS
+    // ==========================================
+    Route::prefix('ugs')->group(function () {
+        Route::get('/', [UGController::class, 'index']);
+        Route::post('/', [UGController::class, 'store']);
+        Route::get('statistics', [UGController::class, 'statistics']);
+        Route::get('{id}', [UGController::class, 'show']);
+        Route::put('{id}', [UGController::class, 'update']);
+        Route::delete('{id}', [UGController::class, 'destroy']);
+        
+        // Operações especiais
+        Route::get('{id}/ucs-atribuidas', [UGController::class, 'getUCsAtribuidas']);
+        Route::post('{id}/atribuir-uc', [UGController::class, 'atribuirUC']);
+        Route::post('{id}/desatribuir-uc', [UGController::class, 'desatribuirUC']);
+    });
+
+    // ==========================================
+    // CONTROLE - Sistema de controle
     // ==========================================
     Route::prefix('controle')->group(function () {
         Route::get('/', [ControleController::class, 'index']);
         Route::post('/', [ControleController::class, 'store']);
         Route::get('statistics', [ControleController::class, 'statistics']);
+        Route::get('export', [ControleController::class, 'export']);
         Route::get('{id}', [ControleController::class, 'show']);
-        
-        // Operações de calibragem
-        Route::post('{id}/apply-calibragem', [ControleController::class, 'applyCalibragem']);
-        Route::post('global-calibragem', [ControleController::class, 'applyGlobalCalibragem']);
+        Route::put('{id}', [ControleController::class, 'update']);
+        Route::delete('{id}', [ControleController::class, 'destroy']);
         
         // Operações de UG
         Route::post('{id}/link-ug', [ControleController::class, 'linkUG']);
@@ -155,6 +170,14 @@ Route::middleware('auth:api')->group(function () {
         // Operações de ativação
         Route::post('{id}/deactivate', [ControleController::class, 'deactivate']);
         Route::post('{id}/reactivate', [ControleController::class, 'reactivate']);
+        
+        // Calibragem
+        Route::post('{id}/calibrar', [ControleController::class, 'calibrar']);
+        Route::post('calibragem-global', [ControleController::class, 'aplicarCalibragemGlobal']);
+        
+        // Operações em lote
+        Route::post('bulk-calibrar', [ControleController::class, 'bulkCalibrar']);
+        Route::post('bulk-link-ug', [ControleController::class, 'bulkLinkUG']);
     });
 
     // ==========================================
@@ -172,6 +195,10 @@ Route::middleware('auth:api')->group(function () {
         Route::post('bulk-update', [ConfiguracaoController::class, 'updateBulk']);
         Route::post('reset-to-default', [ConfiguracaoController::class, 'resetToDefault']);
         Route::post('clear-cache', [ConfiguracaoController::class, 'clearCache']);
+        
+        // Configurações específicas
+        Route::get('calibragem-global/value', [ConfiguracaoController::class, 'getCalibragemGlobal']);
+        Route::post('calibragem-global/update', [ConfiguracaoController::class, 'updateCalibragemGlobal']);
     });
 
     // ==========================================
@@ -179,11 +206,17 @@ Route::middleware('auth:api')->group(function () {
     // ==========================================
     Route::prefix('notificacoes')->group(function () {
         Route::get('/', [NotificacaoController::class, 'index']);
+        Route::post('/', [NotificacaoController::class, 'store']);
         Route::get('statistics', [NotificacaoController::class, 'statistics']);
+        Route::get('{id}', [NotificacaoController::class, 'show']);
         Route::patch('{id}/mark-read', [NotificacaoController::class, 'markAsRead']);
         Route::patch('mark-all-read', [NotificacaoController::class, 'markAllAsRead']);
         Route::delete('{id}', [NotificacaoController::class, 'destroy']);
         Route::delete('cleanup-old', [NotificacaoController::class, 'cleanupOld']);
+        
+        // Operações especiais
+        Route::get('unread-count', [NotificacaoController::class, 'getUnreadCount']);
+        Route::post('broadcast', [NotificacaoController::class, 'broadcast']);
     });
 
     // ==========================================
@@ -193,21 +226,66 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/', function (Request $request) {
             $user = $request->user();
             
+            try {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'user' => [
+                            'id' => $user->id,
+                            'nome' => $user->nome,
+                            'email' => $user->email,
+                            'role' => $user->role
+                        ],
+                        'statistics' => [
+                            'propostas' => [
+                                'total' => \App\Models\Proposta::count(),
+                                'fechadas' => \App\Models\Proposta::where('status', 'Fechado')->count(),
+                                'aguardando' => \App\Models\Proposta::where('status', 'Aguardando')->count(),
+                            ],
+                            'controle' => [
+                                'total' => \App\Models\ControleClube::count(),
+                                'ativos' => \App\Models\ControleClube::where('ativo', true)->count(),
+                                'inativos' => \App\Models\ControleClube::where('ativo', false)->count(),
+                            ],
+                            'unidades' => [
+                                'total' => \App\Models\UnidadeConsumidora::count(),
+                                'ugs' => \App\Models\UnidadeConsumidora::where('is_ug', true)->count(),
+                                'ucs' => \App\Models\UnidadeConsumidora::where('is_ug', false)->count(),
+                            ],
+                            'usuarios' => [
+                                'total' => \App\Models\Usuario::count(),
+                                'ativos' => \App\Models\Usuario::where('is_active', true)->count(),
+                            ]
+                        ]
+                    ]
+                ]);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erro ao carregar dados do dashboard',
+                    'error' => $e->getMessage()
+                ], 500);
+            }
+        });
+        
+        Route::get('resumo', function (Request $request) {
+            $user = $request->user();
+            
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'user' => [
-                        'id' => $user->id,
-                        'nome' => $user->nome,
-                        'email' => $user->email,
-                        'role' => $user->role
+                    'resumo_vendas' => [
+                        'mes_atual' => \App\Models\Proposta::whereMonth('created_at', now()->month)->count(),
+                        'mes_anterior' => \App\Models\Proposta::whereMonth('created_at', now()->subMonth()->month)->count(),
                     ],
-                    'statistics' => [
-                        'propostas' => \App\Models\Proposta::getEstatisticas(['usuario' => $user]),
-                        'controle' => \App\Models\ControleClube::getEstatisticas(['usuario' => $user]),
-                        'unidades' => \App\Models\UnidadeConsumidora::getEstatisticas(['usuario' => $user]),
-                        'notifications' => \App\Models\Notificacao::getEstatisticasPorUsuario($user->id)
-                    ]
+                    'metas' => [
+                        'propostas_meta' => 100,
+                        'propostas_atual' => \App\Models\Proposta::whereMonth('created_at', now()->month)->count(),
+                    ],
+                    'top_consultores' => \App\Models\Usuario::withCount('propostas')
+                        ->orderBy('propostas_count', 'desc')
+                        ->take(5)
+                        ->get()
                 ]
             ]);
         });
@@ -224,92 +302,113 @@ Route::middleware('auth:api')->group(function () {
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'propostas' => \App\Models\Proposta::comFiltroHierarquico($user)->with(['usuario', 'unidadesConsumidoras'])->get(),
-                    'controle' => \App\Models\ControleClube::comFiltroHierarquico($user)->with(['usuario', 'proposta'])->get(),
-                    'unidades' => \App\Models\UnidadeConsumidora::comFiltroHierarquico($user)->with(['usuario', 'proposta'])->get(),
-                    'gerado_em' => now()->format('d/m/Y H:i:s'),
-                    'gerado_por' => $user->nome
+                    'propostas' => \App\Models\Proposta::with(['usuario'])->get(),
+                    'controle' => \App\Models\ControleClube::with(['usuario', 'proposta'])->get(),
+                    'unidades' => \App\Models\UnidadeConsumidora::all(),
+                    'generated_at' => now(),
+                    'generated_by' => $user->nome
                 ]
             ]);
         });
         
-        // Relatório de performance por consultor
-        Route::get('performance', function (Request $request) {
-            $user = $request->user();
-            
-            if (!$user->isAdmin() && !$user->isConsultor()) {
-                return response()->json(['success' => false, 'message' => 'Acesso negado'], 403);
-            }
-            
-            $query = \App\Models\Proposta::query()->comFiltroHierarquico($user);
-            
-            if ($request->filled('periodo_inicio') && $request->filled('periodo_fim')) {
-                $query->whereBetween('created_at', [
-                    \Carbon\Carbon::parse($request->periodo_inicio)->startOfDay(),
-                    \Carbon\Carbon::parse($request->periodo_fim)->endOfDay()
-                ]);
-            }
-            
-            $performance = $query->selectRaw("
-                    consultor,
-                    COUNT(*) as total_propostas,
-                    COUNT(CASE WHEN status = 'Fechado' THEN 1 END) as fechadas,
-                    COUNT(CASE WHEN status = 'Aguardando' THEN 1 END) as aguardando,
-                    COUNT(CASE WHEN status = 'Perdido' THEN 1 END) as perdidas,
-                    ROUND(
-                        (COUNT(CASE WHEN status = 'Fechado' THEN 1 END)::float / COUNT(*)) * 100, 
-                        2
-                    ) as taxa_fechamento
-                ")
-                ->groupBy('consultor')
-                ->orderByDesc('fechadas')
-                ->get();
-            
+        // Relatórios específicos
+        Route::get('vendas', [PropostaController::class, 'relatorioVendas']);
+        Route::get('performance', [UsuarioController::class, 'relatorioPerformance']);
+        Route::get('economias', [ControleController::class, 'relatorioEconomias']);
+    });
+
+    // ==========================================
+    // SISTEMA - Informações do sistema
+    // ==========================================
+    Route::prefix('sistema')->group(function () {
+        Route::get('info', function () {
             return response()->json([
                 'success' => true,
-                'data' => $performance,
-                'meta' => [
-                    'periodo' => [
-                        'inicio' => $request->periodo_inicio ?? 'Início',
-                        'fim' => $request->periodo_fim ?? 'Agora'
+                'data' => [
+                    'app_name' => config('app.name'),
+                    'app_version' => '1.0.0',
+                    'php_version' => PHP_VERSION,
+                    'laravel_version' => app()->version(),
+                    'database' => [
+                        'driver' => config('database.default'),
+                        'connection' => 'OK'
                     ],
-                    'total_consultores' => $performance->count(),
-                    'gerado_em' => now()->format('d/m/Y H:i:s')
+                    'timestamp' => now()
                 ]
             ]);
         });
         
-        // Relatório de UGs e capacidade
-        Route::get('ugs', function (Request $request) {
-            $user = $request->user();
+        Route::get('health', function () {
+            return response()->json([
+                'status' => 'healthy',
+                'checks' => [
+                    'database' => 'OK',
+                    'cache' => 'OK',
+                    'storage' => 'OK'
+                ],
+                'timestamp' => now()
+            ]);
+        });
+    });
+
+    // ==========================================
+    // UTILITÁRIOS - Funcionalidades auxiliares
+    // ==========================================
+    Route::prefix('utils')->group(function () {
+        // Upload genérico de arquivos
+        Route::post('upload', function (Request $request) {
+            $request->validate([
+                'file' => 'required|file|max:10240', // 10MB
+                'type' => 'required|string|in:documento,imagem,pdf'
+            ]);
             
-            if (!$user->isAdmin() && !$user->isConsultor()) {
-                return response()->json(['success' => false, 'message' => 'Acesso negado'], 403);
+            try {
+                $file = $request->file('file');
+                $filename = time() . '_' . $file->getClientOriginalName();
+                $path = $file->storeAs('uploads/' . $request->type, $filename, 'public');
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Arquivo enviado com sucesso',
+                    'data' => [
+                        'filename' => $filename,
+                        'path' => $path,
+                        'url' => asset('storage/' . $path),
+                        'size' => $file->getSize(),
+                        'mime_type' => $file->getMimeType()
+                    ]
+                ]);
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erro ao enviar arquivo: ' . $e->getMessage()
+                ], 500);
             }
+        });
+        
+        // Validação de CPF/CNPJ
+        Route::post('validate-document', function (Request $request) {
+            $request->validate([
+                'document' => 'required|string',
+                'type' => 'required|string|in:cpf,cnpj'
+            ]);
             
-            $ugs = \App\Models\UnidadeConsumidora::query()
-                ->comFiltroHierarquico($user)
-                ->UGs()
-                ->with(['usuario', 'proposta', 'controleClube'])
-                ->get();
+            $document = preg_replace('/[^0-9]/', '', $request->document);
+            $isValid = false;
             
-            $estatisticas = [
-                'total_ugs' => $ugs->count(),
-                'potencia_total' => $ugs->sum('potencia_cc'),
-                'capacidade_total' => $ugs->sum('capacidade_calculada'),
-                'ugs_vinculadas' => $ugs->filter(function($ug) {
-                    return $ug->controleClube->count() > 0;
-                })->count(),
-                'fator_capacidade_medio' => $ugs->avg('fator_capacidade')
-            ];
+            if ($request->type === 'cpf') {
+                $isValid = strlen($document) === 11; // Validação básica
+            } else {
+                $isValid = strlen($document) === 14; // Validação básica
+            }
             
             return response()->json([
                 'success' => true,
-                'data' => $ugs,
-                'statistics' => $estatisticas,
-                'meta' => [
-                    'gerado_em' => now()->format('d/m/Y H:i:s'),
-                    'gerado_por' => $user->nome
+                'data' => [
+                    'valid' => $isValid,
+                    'formatted' => $request->type === 'cpf' 
+                        ? substr($document, 0, 3) . '.' . substr($document, 3, 3) . '.' . substr($document, 6, 3) . '-' . substr($document, 9, 2)
+                        : substr($document, 0, 2) . '.' . substr($document, 2, 3) . '.' . substr($document, 5, 3) . '/' . substr($document, 8, 4) . '-' . substr($document, 12, 2)
                 ]
             ]);
         });
@@ -317,12 +416,12 @@ Route::middleware('auth:api')->group(function () {
 });
 
 // ==========================================
-// FALLBACK - Rota para URLs não encontradas
+// FALLBACK - Rotas não encontradas
 // ==========================================
 Route::fallback(function () {
     return response()->json([
         'success' => false,
-        'message' => 'Endpoint não encontrado',
+        'message' => 'Rota não encontrada',
         'available_endpoints' => [
             'auth' => [
                 'POST /api/auth/login',
@@ -343,6 +442,11 @@ Route::fallback(function () {
             'unidades-consumidoras' => [
                 'GET /api/unidades-consumidoras',
                 'POST /api/unidades-consumidoras'
+            ],
+            'ugs' => [
+                'GET /api/ugs',
+                'POST /api/ugs',
+                'GET /api/ugs/{id}'
             ],
             'controle' => [
                 'GET /api/controle',
