@@ -16,7 +16,7 @@ use Tymon\JWTAuth\Exceptions\JWTException;
 class AuthController extends Controller
 {
     /**
-     * Login do usuário - VERSÃO CORRIGIDA
+     * Login do usuário - VERSÃO CORRIGIDA FINAL
      */
     public function login(Request $request): JsonResponse
     {
@@ -68,16 +68,14 @@ class AuthController extends Controller
         }
 
         try {
-            // Buscar usuário na base de dados
-            $usuario = Usuario::where('email', $request->email)
-                             ->whereNull('deleted_at')
-                             ->first();
+            // Buscar usuário pelo email
+            $usuario = Usuario::where('email', $request->email)->first();
 
             if (!$usuario) {
                 // Incrementar tentativas
                 Cache::put($rateLimitKey, $attempts + 1, now()->addMinutes(5));
                 
-                Log::warning('❌ Email não encontrado', [
+                Log::warning('❌ Usuário não encontrado', [
                     'email' => $request->email,
                     'ip' => $request->ip()
                 ]);
@@ -90,10 +88,10 @@ class AuthController extends Controller
 
             // Verificar se usuário está ativo
             if (!$usuario->is_active) {
-                Log::warning('⚠️ Usuário inativo tentou login', [
+                Log::warning('❌ Usuário inativo tentou fazer login', [
                     'user_id' => $usuario->id,
-                    'user_name' => $usuario->nome,
-                    'email' => $request->email
+                    'email' => $request->email,
+                    'ip' => $request->ip()
                 ]);
 
                 return response()->json([
@@ -102,8 +100,8 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            // Verificar senha
-            if (!Hash::check($request->password, $usuario->senha)) {
+            // CORREÇÃO: Usar o método checkPassword em vez de Hash::check direto
+            if (!$usuario->checkPassword($request->password)) {
                 // Incrementar tentativas
                 Cache::put($rateLimitKey, $attempts + 1, now()->addMinutes(5));
                 
@@ -335,10 +333,11 @@ class AuthController extends Controller
         }
 
         try {
+            // CORREÇÃO: Usar senha sem hash manual, o modelo vai hashear
             $usuario = Usuario::create([
                 'nome' => $request->nome,
                 'email' => $request->email,
-                'senha' => Hash::make($request->password),
+                'senha' => $request->password, // Sem Hash::make aqui
                 'role' => $request->role,
                 'is_active' => true
             ]);
@@ -400,8 +399,8 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Verificar senha atual
-        if (!Hash::check($request->current_password, $usuario->senha)) {
+        // Verificar senha atual usando o método correto
+        if (!$usuario->checkPassword($request->current_password)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Senha atual incorreta'
@@ -409,8 +408,9 @@ class AuthController extends Controller
         }
 
         try {
+            // CORREÇÃO: Usar senha direta, o modelo vai hashear
             $usuario->update([
-                'senha' => Hash::make($request->new_password)
+                'senha' => $request->new_password // Sem Hash::make aqui
             ]);
 
             Log::info('🔐 Senha alterada', [

@@ -25,13 +25,21 @@ class UsuarioSeeder extends Seeder
             return strtoupper(Str::ulid()->toBase32());
         };
 
+        // Corrigir campo telefone se necessário
+        try {
+            DB::statement('ALTER TABLE usuarios ALTER COLUMN telefone TYPE VARCHAR(20)');
+            $this->command->info('✅ Campo telefone ajustado para VARCHAR(20)');
+        } catch (\Exception $e) {
+            // Ignorar erro se já estiver correto
+        }
+
         // Criar usuário admin
         $adminId = $generateUlid();
         DB::table('usuarios')->insert([
             'id' => $adminId,
             'nome' => 'Administrador',
             'email' => 'admin@aupus.com',
-            'senha' => Hash::make('123456'),
+            'senha' => Hash::make('123456'), // Hash explícito no seeder
             'telefone' => '62999999999',
             'status' => 'ativo',
             'role' => 'admin',
