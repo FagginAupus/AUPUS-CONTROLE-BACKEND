@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use Tymon\JWTAuth\Exceptions\JWTException;
 
 class AuthController extends Controller
 {
@@ -20,10 +21,10 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         // Log da tentativa de login
-        Log::info('Tentativa de login iniciada', [
+        Log::info('🔐 Tentativa de login iniciada', [
             'email' => $request->email,
             'ip' => $request->ip(),
-            'user_agent' => $request->userAgent()
+            'timestamp' => now()
         ]);
 
         // Validação dos dados de entrada
@@ -38,7 +39,7 @@ class AuthController extends Controller
         ]);
 
         if ($validator->fails()) {
-            Log::warning('Dados inválidos no login', [
+            Log::warning('❌ Dados inválidos no login', [
                 'email' => $request->email,
                 'errors' => $validator->errors()->toArray()
             ]);
@@ -55,7 +56,7 @@ class AuthController extends Controller
         $attempts = Cache::get($rateLimitKey, 0);
 
         if ($attempts >= 5) {
-            Log::warning('Rate limit excedido', [
+            Log::warning('⚠️ Rate limit excedido', [
                 'ip' => $request->ip(),
                 'attempts' => $attempts
             ]);
@@ -67,22 +68,16 @@ class AuthController extends Controller
         }
 
         try {
-            // Buscar usuário com query raw para evitar problemas com Eloquent
-            $usuarioData = DB::select("
-                SELECT 
-                    id, nome, email, senha, role, telefone, 
-                    is_active, manager_id, created_at, updated_at
-                FROM usuarios 
-                WHERE email = ? 
-                AND deleted_at IS NULL
-                LIMIT 1
-            ", [$request->email]);
+            // Buscar usuário na base de dados
+            $usuario = Usuario::where('email', $request->email)
+                             ->whereNull('deleted_at')
+                             ->first();
 
-            if (empty($usuarioData)) {
+            if (!$usuario) {
                 // Incrementar tentativas
                 Cache::put($rateLimitKey, $attempts + 1, now()->addMinutes(5));
                 
-                Log::warning('Email não encontrado', [
+                Log::warning('❌ Email não encontrado', [
                     'email' => $request->email,
                     'ip' => $request->ip()
                 ]);
@@ -93,13 +88,11 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            $usuarioData = $usuarioData[0];
-
             // Verificar se usuário está ativo
-            if (!$usuarioData->is_active) {
-                Log::warning('Usuário inativo tentou login', [
-                    'user_id' => $usuarioData->id,
-                    'user_name' => $usuarioData->nome,
+            if (!$usuario->is_active) {
+                Log::warning('⚠️ Usuário inativo tentou login', [
+                    'user_id' => $usuario->id,
+                    'user_name' => $usuario->nome,
                     'email' => $request->email
                 ]);
 
@@ -110,12 +103,12 @@ class AuthController extends Controller
             }
 
             // Verificar senha
-            if (!Hash::check($request->password, $usuarioData->senha)) {
+            if (!Hash::check($request->password, $usuario->senha)) {
                 // Incrementar tentativas
                 Cache::put($rateLimitKey, $attempts + 1, now()->addMinutes(5));
                 
-                Log::warning('Senha incorreta', [
-                    'user_id' => $usuarioData->id,
+                Log::warning('❌ Senha incorreta', [
+                    'user_id' => $usuario->id,
                     'email' => $request->email,
                     'ip' => $request->ip()
                 ]);
@@ -129,78 +122,55 @@ class AuthController extends Controller
             // Limpar tentativas após login bem-sucedido
             Cache::forget($rateLimitKey);
 
-            // Criar instância do modelo para o JWT (sem tocar em timestamps)
-            $usuario = new Usuario();
-            $usuario->id = $usuarioData->id;
-            $usuario->nome = $usuarioData->nome;
-            $usuario->email = $usuarioData->email;
-            $usuario->role = $usuarioData->role ?? 'user';
-            $usuario->telefone = $usuarioData->telefone;
-            $usuario->is_active = $usuarioData->is_active;
-            $usuario->manager_id = $usuarioData->manager_id;
-
-            // Marcar como existente para evitar tentativas de save
-            $usuario->exists = true;
-
-            // Tentar gerar token JWT
+            // Gerar token JWT
             try {
                 $token = JWTAuth::fromUser($usuario);
-                Log::info('Token JWT gerado com sucesso', ['user_id' => $usuario->id]);
-            } catch (\Exception $e) {
-                Log::warning('JWT não configurado, usando token temporário', [
-                    'user_id' => $usuario->id,
-                    'error' => $e->getMessage()
-                ]);
                 
-                $token = 'temp_token_' . base64_encode($usuario->id . '_' . time());
-            }
+                if (!$token) {
+                    throw new \Exception('Falha na geração do token');
+                }
 
-            // ATUALIZAR updated_at usando query raw para evitar Carbon
-            try {
-                DB::update("
-                    UPDATE usuarios 
-                    SET updated_at = CURRENT_TIMESTAMP 
-                    WHERE id = ?
-                ", [$usuario->id]);
-                
-                Log::debug('updated_at atualizado com sucesso', ['user_id' => $usuario->id]);
-            } catch (\Exception $e) {
-                // Se falhar, apenas loga mas não interrompe o login
-                Log::warning('Não foi possível atualizar updated_at', [
+                // Log do sucesso
+                Log::info('✅ Login realizado com sucesso', [
                     'user_id' => $usuario->id,
-                    'error' => $e->getMessage()
+                    'user_name' => $usuario->nome,
+                    'user_role' => $usuario->role,
+                    'ip' => $request->ip(),
+                    'token_generated' => true
                 ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Login realizado com sucesso',
+                    'user' => [
+                        'id' => $usuario->id,
+                        'name' => $usuario->nome,
+                        'email' => $usuario->email,
+                        'role' => $usuario->role ?? 'user',
+                        'telefone' => $usuario->telefone,
+                        'is_active' => $usuario->is_active,
+                        'permissions' => $usuario->getPermissoes()
+                    ],
+                    'token' => $token,
+                    'token_type' => 'bearer',
+                    'expires_in' => 86400
+                ], 200);
+
+            } catch (JWTException $e) {
+                Log::error('❌ Erro ao gerar token JWT', [
+                    'user_id' => $usuario->id,
+                    'error' => $e->getMessage(),
+                    'ip' => $request->ip()
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erro na geração do token de acesso'
+                ], 500);
             }
-
-            // Log de sucesso
-            Log::info('Login realizado com sucesso', [
-                'user_id' => $usuario->id,
-                'user_name' => $usuario->nome,
-                'email' => $usuario->email,
-                'role' => $usuario->role,
-                'ip' => $request->ip()
-            ]);
-
-            // Resposta de sucesso
-            return response()->json([
-                'success' => true,
-                'message' => 'Login realizado com sucesso',
-                'user' => [
-                    'id' => $usuario->id,
-                    'name' => $usuario->nome,
-                    'email' => $usuario->email,
-                    'role' => $usuario->role ?? 'user',
-                    'telefone' => $usuario->telefone,
-                    'is_active' => $usuario->is_active,
-                    'permissions' => $this->getUserPermissions($usuario->role ?? 'user')
-                ],
-                'token' => $token,
-                'token_type' => 'bearer',
-                'expires_in' => 86400
-            ], 200);
 
         } catch (\Exception $e) {
-            Log::error('Erro crítico durante login', [
+            Log::error('❌ Erro crítico durante login', [
                 'email' => $request->email,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -220,17 +190,19 @@ class AuthController extends Controller
     public function logout(): JsonResponse
     {
         try {
-            try {
+            $token = JWTAuth::getToken();
+            
+            if ($token) {
                 $usuario = JWTAuth::user();
+                
                 if ($usuario) {
-                    Log::info('Logout realizado', [
+                    Log::info('🚪 Logout realizado', [
                         'user_id' => $usuario->id,
                         'user_name' => $usuario->nome
                     ]);
                 }
-                JWTAuth::invalidate();
-            } catch (\Exception $e) {
-                Log::info('Logout sem JWT válido', ['error' => $e->getMessage()]);
+                
+                JWTAuth::invalidate($token);
             }
 
             return response()->json([
@@ -239,7 +211,7 @@ class AuthController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::warning('Erro no logout', ['error' => $e->getMessage()]);
+            Log::warning('⚠️ Erro no logout', ['error' => $e->getMessage()]);
             
             return response()->json([
                 'success' => true,
@@ -257,7 +229,14 @@ class AuthController extends Controller
             $newToken = JWTAuth::refresh();
             $usuario = JWTAuth::user();
 
-            Log::info('Token renovado', ['user_id' => $usuario->id]);
+            if (!$usuario) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não encontrado'
+                ], 401);
+            }
+
+            Log::info('🔄 Token renovado', ['user_id' => $usuario->id]);
 
             return response()->json([
                 'success' => true,
@@ -266,7 +245,7 @@ class AuthController extends Controller
                     'name' => $usuario->nome,
                     'email' => $usuario->email,
                     'role' => $usuario->role ?? 'user',
-                    'permissions' => $this->getUserPermissions($usuario->role ?? 'user')
+                    'permissions' => $usuario->getPermissoes()
                 ],
                 'token' => $newToken,
                 'token_type' => 'bearer',
@@ -274,7 +253,7 @@ class AuthController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::warning('Erro ao renovar token', ['error' => $e->getMessage()]);
+            Log::warning('❌ Erro ao renovar token', ['error' => $e->getMessage()]);
 
             return response()->json([
                 'success' => false,
@@ -307,12 +286,14 @@ class AuthController extends Controller
                     'role' => $usuario->role ?? 'user',
                     'telefone' => $usuario->telefone,
                     'is_active' => $usuario->is_active,
-                    'permissions' => $this->getUserPermissions($usuario->role ?? 'user')
+                    'permissions' => $usuario->getPermissoes()
                 ]
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro ao obter dados do usuário', ['error' => $e->getMessage()]);
+            Log::error('❌ Erro ao obter dados do usuário', [
+                'error' => $e->getMessage()
+            ]);
 
             return response()->json([
                 'success' => false,
@@ -322,71 +303,136 @@ class AuthController extends Controller
     }
 
     /**
-     * Obter permissões do usuário baseadas no role
+     * Registrar novo usuário (apenas para admins)
      */
-    private function getUserPermissions(string $role): array
+    public function register(Request $request): JsonResponse
     {
-        switch ($role) {
-            case 'admin':
-                return [
-                    'canCreateConsultors' => true,
-                    'canAccessAll' => true,
-                    'canManageUGs' => true,
-                    'canManageCalibration' => true,
-                    'canSeeAllData' => true,
-                    'canManageUsers' => true,
-                    'canViewReports' => true,
-                    'canEditSystem' => true
-                ];
+        // Verificar se é admin (em ambiente de produção)
+        if (config('app.env') === 'production') {
+            $currentUser = JWTAuth::parseToken()->authenticate();
+            
+            if (!$currentUser || !$currentUser->isAdmin()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Apenas administradores podem registrar usuários'
+                ], 403);
+            }
+        }
 
-            case 'consultor':
-                return [
-                    'canCreateConsultors' => true,
-                    'canAccessAll' => false,
-                    'canManageUGs' => true,
-                    'canManageCalibration' => true,
-                    'canSeeAllData' => false,
-                    'canManageUsers' => false,
-                    'canViewReports' => true,
-                    'canEditSystem' => false
-                ];
+        $validator = Validator::make($request->all(), [
+            'nome' => 'required|string|min:3|max:255',
+            'email' => 'required|email|unique:usuarios,email',
+            'password' => 'required|string|min:6',
+            'role' => 'required|in:admin,gestor,consultor'
+        ]);
 
-            case 'gerente':
-                return [
-                    'canCreateConsultors' => false,
-                    'canAccessAll' => false,
-                    'canManageUGs' => true,
-                    'canManageCalibration' => true,
-                    'canSeeAllData' => false,
-                    'canManageUsers' => false,
-                    'canViewReports' => true,
-                    'canEditSystem' => false
-                ];
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dados inválidos',
+                'errors' => $validator->errors()
+            ], 422);
+        }
 
-            case 'vendedor':
-            default:
-                return [
-                    'canCreateConsultors' => false,
-                    'canAccessAll' => false,
-                    'canManageUGs' => false,
-                    'canManageCalibration' => false,
-                    'canSeeAllData' => false,
-                    'canManageUsers' => false,
-                    'canViewReports' => false,
-                    'canEditSystem' => false
-                ];
+        try {
+            $usuario = Usuario::create([
+                'nome' => $request->nome,
+                'email' => $request->email,
+                'senha' => Hash::make($request->password),
+                'role' => $request->role,
+                'is_active' => true
+            ]);
+
+            Log::info('👤 Novo usuário criado', [
+                'user_id' => $usuario->id,
+                'email' => $usuario->email,
+                'role' => $usuario->role
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Usuário criado com sucesso',
+                'user' => [
+                    'id' => $usuario->id,
+                    'name' => $usuario->nome,
+                    'email' => $usuario->email,
+                    'role' => $usuario->role
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao criar usuário', [
+                'error' => $e->getMessage(),
+                'email' => $request->email
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao criar usuário'
+            ], 500);
         }
     }
 
     /**
-     * Health check para verificar se a autenticação está funcionando
+     * Alterar senha
      */
-    public function healthCheck(): JsonResponse
+    public function changePassword(Request $request): JsonResponse
     {
-        return response()->json([
-            'success' => true,
-            'message' => 'AuthController funcionando corretamente',
-            'timestamp' => now()->toISOString()
+        $usuario = JWTAuth::user();
+
+        if (!$usuario) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required|string',
+            'new_password' => 'required|string|min:6|confirmed'
         ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dados inválidos',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        // Verificar senha atual
+        if (!Hash::check($request->current_password, $usuario->senha)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Senha atual incorreta'
+            ], 400);
+        }
+
+        try {
+            $usuario->update([
+                'senha' => Hash::make($request->new_password)
+            ]);
+
+            Log::info('🔐 Senha alterada', [
+                'user_id' => $usuario->id,
+                'email' => $usuario->email
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Senha alterada com sucesso'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao alterar senha', [
+                'user_id' => $usuario->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao alterar senha'
+            ], 500);
+        }
     }
 }
