@@ -27,7 +27,17 @@ class Proposta extends Model
         'bandeira', 
         'status',
         'observacoes',
-        'beneficios'
+        'beneficios',
+        // ✅ ADICIONAR ESTAS LINHAS
+        'telefone',
+        'email',
+        'endereco',
+        'unidades_consumidoras',
+        'numero_uc',
+        'apelido',
+        'media_consumo',
+        'ligacao',
+        'distribuidora',
     ];
 
     protected $casts = [
@@ -35,6 +45,8 @@ class Proposta extends Model
         'economia' => 'decimal:2',
         'bandeira' => 'decimal:2',
         'beneficios' => 'array',
+        'unidades_consumidoras' => 'array', // ✅ ADICIONAR
+        'media_consumo' => 'decimal:2',     // ✅ ADICIONAR
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
@@ -255,6 +267,8 @@ class Proposta extends Model
             $this->attributes['beneficios'] = json_encode($decoded ?: []);
         } elseif (is_array($value)) {
             $this->attributes['beneficios'] = json_encode($value);
+        } elseif (is_null($value)) {  // ✅ ADICIONE ESTA LINHA
+            $this->attributes['beneficios'] = json_encode([]);
         } else {
             $this->attributes['beneficios'] = json_encode([]);
         }
@@ -265,8 +279,13 @@ class Proposta extends Model
      */
     public function getBeneficiosAttribute($value)
     {
-        if (empty($value)) {
+        if (empty($value) || is_null($value)) {
             return [];
+        }
+
+        // Se já for um array, retornar diretamente
+        if (is_array($value)) {  // ✅ ADICIONE ESTA VERIFICAÇÃO
+            return $value;
         }
 
         $decoded = json_decode($value, true);
@@ -342,5 +361,38 @@ class Proposta extends Model
             'atrasada' => $this->estaAtrasada(),
             'pode_editar' => $this->podeSerEditada()
         ];
+    }
+    /**
+     * Converter dados para formato esperado pelo frontend
+     */
+    public function toFrontendFormat(): array
+    {
+        return [
+            'id' => $this->id,
+            'numeroProposta' => $this->numero_proposta,
+            'nomeCliente' => $this->nome_cliente,
+            'consultor' => $this->consultor,
+            'data' => $this->data_proposta?->format('Y-m-d'),
+            'status' => $this->status,
+            'economia' => $this->economia,
+            'bandeira' => $this->bandeira,
+            'recorrencia' => $this->recorrencia,
+            'observacoes' => $this->observacoes,
+            'beneficios' => $this->beneficios ?: [],
+            'created_at' => $this->created_at,
+            'updated_at' => $this->updated_at,
+            // Campos adicionais para compatibilidade
+            'numeroUC' => null,
+            'apelido' => null,
+            'media' => null,
+        ];
+    }
+    
+    /**
+     * Scope para ordenação padrão
+     */
+    public function scopeOrdenacaoPadrao($query)
+    {
+        return $query->orderBy('created_at', 'desc');
     }
 }

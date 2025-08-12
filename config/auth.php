@@ -9,7 +9,7 @@ return [
     */
 
     'defaults' => [
-        'guard' => env('AUTH_GUARD', 'api'),
+        'guard' => env('AUTH_GUARD', 'api'), // ✅ API como padrão
         'passwords' => env('AUTH_PASSWORD_BROKER', 'usuarios'),
     ],
 
@@ -66,5 +66,18 @@ return [
     */
 
     'password_timeout' => 10800,
+
+    /*
+    |--------------------------------------------------------------------------
+    | ✅ ADICIONADO: Configuração de Redirecionamento
+    |--------------------------------------------------------------------------
+    | Define para onde redirecionar usuários não autenticados
+    */
+    
+    // Rota para redirecionamento quando não autenticado
+    'login_route' => 'login',
+    
+    // URL para redirecionamento em APIs
+    'api_login_url' => '/api/auth/login',
 
 ];
