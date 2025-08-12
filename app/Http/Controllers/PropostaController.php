@@ -4,33 +4,37 @@ namespace App\Http\Controllers;
 
 use App\Models\Proposta;
 use App\Models\Usuario;
-use App\Models\Notificacao;
-use App\Models\Configuracao;
-use App\Models\UnidadeConsumidora;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Tymon\JWTAuth\Facades\JWTAuth;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
 
 class PropostaController extends Controller
 {
     /**
-     * Constructor - Removido o middleware incorreto
+     * Gerar número sequencial para proposta
      */
-    public function __construct()
+    private function gerarNumeroProposta(): string
     {
-        // Middleware será aplicado nas rotas, não no controller
+        $ano = now()->year;
+        $ultimaProposta = Proposta::whereYear('created_at', $ano)
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        $numeroSequencial = $ultimaProposta ? 
+            (intval(substr($ultimaProposta->numero_proposta, -4)) + 1) : 1;
+
+        return sprintf('%d-%04d', $ano, $numeroSequencial);
     }
 
     /**
-     * Listar propostas com filtros hierárquicos
+     * Listar propostas
      */
     public function index(Request $request): JsonResponse
     {
         try {
-            // Se JWT está sendo usado, pegue o usuário assim
             $currentUser = auth('api')->user();
             
             if (!$currentUser) {
@@ -40,46 +44,46 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            $query = Proposta::query()
-                            ->with(['usuario', 'unidadesConsumidoras'])
-                            ->orderBy('created_at', 'desc');
+            $query = Proposta::with(['usuario']);
+
+            // Filtros hierárquicos baseados no papel do usuário
+            if ($currentUser->role !== 'admin') {
+                // Usuários não-admin veem apenas suas próprias propostas e da sua equipe
+                if ($currentUser->role === 'manager') {
+                    // Manager vê suas propostas + propostas de usuários subordinados
+                    $subordinados = Usuario::where('manager_id', $currentUser->id)->pluck('id')->toArray();
+                    $usuariosPermitidos = array_merge([$currentUser->id], $subordinados);
+                    $query->whereIn('usuario_id', $usuariosPermitidos);
+                } else {
+                    // Usuário comum vê apenas suas próprias propostas
+                    $query->where('usuario_id', $currentUser->id);
+                }
+            }
 
             // Filtros de busca
+            if ($request->filled('nome_cliente')) {
+                $query->where('nome_cliente', 'ilike', '%' . $request->nome_cliente . '%');
+            }
+
             if ($request->filled('status')) {
-                $statusList = is_array($request->status) ? $request->status : [$request->status];
-                $query->whereIn('status', $statusList);
+                $query->where('status', $request->status);
             }
 
             if ($request->filled('consultor')) {
-                $query->where('consultor', 'ILIKE', "%{$request->consultor}%");
-            }
-
-            if ($request->filled('nome_cliente')) {
-                $query->where('nome_cliente', 'ILIKE', "%{$request->nome_cliente}%");
-            }
-
-            if ($request->filled('numero_proposta')) {
-                $query->where('numero_proposta', 'ILIKE', "%{$request->numero_proposta}%");
+                $query->where('consultor', 'ilike', '%' . $request->consultor . '%');
             }
 
             if ($request->filled('data_inicio') && $request->filled('data_fim')) {
-                $query->whereBetween('data_proposta', [
-                    Carbon::parse($request->data_inicio)->format('Y-m-d'),
-                    Carbon::parse($request->data_fim)->format('Y-m-d')
-                ]);
+                $query->whereBetween('data_proposta', [$request->data_inicio, $request->data_fim]);
             }
 
-            if ($request->filled('search')) {
-                $search = $request->search;
-                $query->where(function ($q) use ($search) {
-                    $q->where('numero_proposta', 'ILIKE', "%{$search}%")
-                      ->orWhere('nome_cliente', 'ILIKE', "%{$search}%")
-                      ->orWhere('consultor', 'ILIKE', "%{$search}%");
-                });
-            }
+            // Ordenação
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortDirection = $request->get('sort_direction', 'desc');
+            $query->orderBy($sortBy, $sortDirection);
 
             // Paginação
-            $perPage = $request->get('per_page', 20);
+            $perPage = min($request->get('per_page', 15), 100);
             $propostas = $query->paginate($perPage);
 
             return response()->json([
@@ -94,7 +98,7 @@ class PropostaController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('Erro ao listar propostas', [
+            Log::error('Erro ao listar propostas', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -125,17 +129,11 @@ class PropostaController extends Controller
                 'nome_cliente' => 'required|string|min:3|max:200',
                 'consultor' => 'required|string|max:100',
                 'data_proposta' => 'required|date',
-                'telefone' => 'nullable|string|max:20',
-                'email' => 'nullable|email|max:100',
-                'endereco' => 'nullable|string|max:255',
                 'numero_proposta' => 'nullable|string|max:50|unique:propostas,numero_proposta',
                 'economia' => 'nullable|numeric|min:0|max:100',
                 'bandeira' => 'nullable|numeric|min:0|max:100',
-                'recorrencia' => 'nullable|string|max:10',
+                'recorrencia' => 'nullable|string|max:50',
                 'observacoes' => 'nullable|string|max:1000',
-                'valor_financiamento' => 'nullable|numeric|min:0',
-                'prazo_financiamento' => 'nullable|integer|min:1',
-                'kit' => 'nullable|array',
                 'beneficios' => 'nullable|array',
             ]);
 
@@ -150,29 +148,30 @@ class PropostaController extends Controller
             DB::beginTransaction();
 
             // Gerar número da proposta se não fornecido
-            if (!$request->numero_proposta) {
-                $request->merge(['numero_proposta' => $this->gerarNumeroProposta()]);
-            }
+            $numeroProposta = $request->numero_proposta ?: $this->gerarNumeroProposta();
 
-            $data = $request->all();
-            $data['usuario_id'] = $currentUser->id;
-            $data['concessionaria_id'] = $currentUser->concessionaria_atual_id;
-            $data['organizacao_id'] = $currentUser->organizacao_atual_id;
-            $data['status'] = 'Em Análise';
+            $proposta = new Proposta();
+            $proposta->numero_proposta = $numeroProposta;
+            $proposta->data_proposta = $request->data_proposta;
+            $proposta->nome_cliente = $request->nome_cliente;
+            $proposta->consultor = $request->consultor;
+            $proposta->usuario_id = $currentUser->id;
+            $proposta->recorrencia = $request->recorrencia ?? '3%';
+            $proposta->economia = $request->economia ?? 20.00;
+            $proposta->bandeira = $request->bandeira ?? 20.00;
+            $proposta->status = 'Aguardando';
+            $proposta->observacoes = $request->observacoes;
             
-            // Converter arrays para JSON
-            if (isset($data['kit'])) {
-                $data['kit'] = json_encode($data['kit']);
-            }
-            if (isset($data['beneficios'])) {
-                $data['beneficios'] = json_encode($data['beneficios']);
+            // Processar benefícios se fornecidos
+            if ($request->has('beneficios') && is_array($request->beneficios)) {
+                $proposta->beneficios = $request->beneficios;
             }
 
-            $proposta = Proposta::create($data);
+            $proposta->save();
 
             DB::commit();
 
-            \Log::info('Proposta criada', [
+            Log::info('Proposta criada com sucesso', [
                 'proposta_id' => $proposta->id,
                 'numero_proposta' => $proposta->numero_proposta,
                 'nome_cliente' => $proposta->nome_cliente,
@@ -182,21 +181,28 @@ class PropostaController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Proposta criada com sucesso!',
-                'data' => $proposta
+                'data' => $proposta->fresh()
             ], 201);
 
         } catch (\Exception $e) {
             DB::rollBack();
             
-            \Log::error('Erro ao criar proposta', [
+            Log::error('Erro ao criar proposta', [
                 'request_data' => $request->all(),
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor'
+                'message' => 'Erro interno do servidor',
+                'debug' => config('app.debug') ? [
+                    'error' => $e->getMessage(),
+                    'line' => $e->getLine(),
+                    'file' => basename($e->getFile())
+                ] : null
             ], 500);
         }
     }
@@ -216,7 +222,15 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            $proposta = Proposta::with(['usuario', 'unidadesConsumidoras'])->findOrFail($id);
+            $proposta = Proposta::with(['usuario'])->findOrFail($id);
+
+            // Verificar permissões
+            if ($currentUser->role !== 'admin' && $proposta->usuario_id !== $currentUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Não autorizado'
+                ], 403);
+            }
 
             return response()->json([
                 'success' => true,
@@ -229,7 +243,7 @@ class PropostaController extends Controller
                 'message' => 'Proposta não encontrada'
             ], 404);
         } catch (\Exception $e) {
-            \Log::error('Erro ao buscar proposta', [
+            Log::error('Erro ao buscar proposta', [
                 'proposta_id' => $id,
                 'error' => $e->getMessage()
             ]);
@@ -258,21 +272,24 @@ class PropostaController extends Controller
 
             $proposta = Proposta::findOrFail($id);
 
+            // Verificar permissões
+            if ($currentUser->role !== 'admin' && $proposta->usuario_id !== $currentUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Não autorizado'
+                ], 403);
+            }
+
             $validator = Validator::make($request->all(), [
                 'nome_cliente' => 'sometimes|required|string|min:3|max:200',
                 'consultor' => 'sometimes|required|string|max:100',
                 'data_proposta' => 'sometimes|required|date',
-                'telefone' => 'nullable|string|max:20',
-                'email' => 'nullable|email|max:100',
-                'endereco' => 'nullable|string|max:255',
-                'economia' => 'sometimes|numeric|min:0|max:100',
-                'bandeira' => 'sometimes|numeric|min:0|max:100',
-                'recorrencia' => 'sometimes|string|max:10',
+                'economia' => 'nullable|numeric|min:0|max:100',
+                'bandeira' => 'nullable|numeric|min:0|max:100',
+                'recorrencia' => 'nullable|string|max:50',
                 'observacoes' => 'nullable|string|max:1000',
-                'valor_financiamento' => 'nullable|numeric|min:0',
-                'prazo_financiamento' => 'nullable|integer|min:1',
-                'kit' => 'nullable|array',
                 'beneficios' => 'nullable|array',
+                'status' => 'nullable|string|in:Aguardando,Fechado,Perdido,Não Fechado,Cancelado'
             ]);
 
             if ($validator->fails()) {
@@ -285,19 +302,28 @@ class PropostaController extends Controller
 
             DB::beginTransaction();
 
-            $data = $request->all();
+            // Atualizar campos fornecidos
+            $campos = ['nome_cliente', 'consultor', 'data_proposta', 'economia', 'bandeira', 'recorrencia', 'observacoes', 'status'];
             
-            // Converter arrays para JSON
-            if (isset($data['kit'])) {
-                $data['kit'] = json_encode($data['kit']);
-            }
-            if (isset($data['beneficios'])) {
-                $data['beneficios'] = json_encode($data['beneficios']);
+            foreach ($campos as $campo) {
+                if ($request->has($campo)) {
+                    $proposta->{$campo} = $request->{$campo};
+                }
             }
 
-            $proposta->update($data);
+            // Processar benefícios se fornecidos
+            if ($request->has('beneficios')) {
+                $proposta->beneficios = is_array($request->beneficios) ? $request->beneficios : [];
+            }
+
+            $proposta->save();
 
             DB::commit();
+
+            Log::info('Proposta atualizada com sucesso', [
+                'proposta_id' => $id,
+                'user_id' => $currentUser->id
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -313,7 +339,7 @@ class PropostaController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             
-            \Log::error('Erro ao atualizar proposta', [
+            Log::error('Erro ao atualizar proposta', [
                 'proposta_id' => $id,
                 'request_data' => $request->all(),
                 'error' => $e->getMessage()
@@ -323,7 +349,7 @@ class PropostaController extends Controller
                 'success' => false,
                 'message' => 'Erro interno do servidor'
             ], 500);
-            }
+        }
     }
 
     /**
@@ -343,8 +369,16 @@ class PropostaController extends Controller
 
             $proposta = Proposta::findOrFail($id);
 
+            // Verificar permissões
+            if ($currentUser->role !== 'admin' && $proposta->usuario_id !== $currentUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Não autorizado'
+                ], 403);
+            }
+
             $validator = Validator::make($request->all(), [
-                'status' => 'required|string|in:Em Análise,Aprovado,Reprovado,Fechado,Cancelado',
+                'status' => 'required|string|in:Aguardando,Fechado,Perdido,Não Fechado,Cancelado',
                 'observacoes' => 'nullable|string|max:500'
             ]);
 
@@ -369,7 +403,7 @@ class PropostaController extends Controller
 
             DB::commit();
 
-            \Log::info('Status da proposta alterado', [
+            Log::info('Status da proposta alterado', [
                 'proposta_id' => $id,
                 'status_anterior' => $statusAnterior,
                 'status_novo' => $request->status,
@@ -390,9 +424,8 @@ class PropostaController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             
-            \Log::error('Erro ao alterar status da proposta', [
+            Log::error('Erro ao atualizar status', [
                 'proposta_id' => $id,
-                'status_novo' => $request->status,
                 'error' => $e->getMessage()
             ]);
 
@@ -404,7 +437,7 @@ class PropostaController extends Controller
     }
 
     /**
-     * Excluir proposta
+     * Excluir proposta (soft delete)
      */
     public function destroy(string $id): JsonResponse
     {
@@ -420,31 +453,24 @@ class PropostaController extends Controller
 
             $proposta = Proposta::findOrFail($id);
 
-            $numeroProposta = $proposta->numero_proposta;
-            $nomeCliente = $proposta->nome_cliente;
-
-            DB::beginTransaction();
-
-            // Excluir UCs vinculadas se existirem
-            if (method_exists($proposta, 'unidadesConsumidoras')) {
-                $proposta->unidadesConsumidoras()->delete();
+            // Verificar permissões
+            if ($currentUser->role !== 'admin' && $proposta->usuario_id !== $currentUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Não autorizado'
+                ], 403);
             }
 
-            // Excluir a proposta (soft delete)
             $proposta->delete();
 
-            DB::commit();
-
-            \Log::info('Proposta excluída', [
+            Log::info('Proposta excluída', [
                 'proposta_id' => $id,
-                'numero_proposta' => $numeroProposta,
-                'nome_cliente' => $nomeCliente,
                 'user_id' => $currentUser->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => "Proposta {$numeroProposta} excluída com sucesso!"
+                'message' => 'Proposta excluída com sucesso!'
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -453,9 +479,7 @@ class PropostaController extends Controller
                 'message' => 'Proposta não encontrada'
             ], 404);
         } catch (\Exception $e) {
-            DB::rollBack();
-            
-            \Log::error('Erro ao excluir proposta', [
+            Log::error('Erro ao excluir proposta', [
                 'proposta_id' => $id,
                 'error' => $e->getMessage()
             ]);
@@ -468,29 +492,9 @@ class PropostaController extends Controller
     }
 
     /**
-     * Gerar número único para proposta
+     * Duplicar proposta
      */
-    private function gerarNumeroProposta(): string
-    {
-        $ano = date('Y');
-        $ultimaProposta = Proposta::where('numero_proposta', 'LIKE', "{$ano}/%")
-                                 ->orderBy('numero_proposta', 'desc')
-                                 ->first();
-
-        if ($ultimaProposta) {
-            $ultimoNumero = (int) explode('/', $ultimaProposta->numero_proposta)[1];
-            $novoNumero = str_pad($ultimoNumero + 1, 3, '0', STR_PAD_LEFT);
-        } else {
-            $novoNumero = '001';
-        }
-
-        return "{$ano}/{$novoNumero}";
-    }
-
-    /**
-     * Estatísticas das propostas
-     */
-    public function statistics(Request $request): JsonResponse
+    public function duplicate(string $id): JsonResponse
     {
         try {
             $currentUser = auth('api')->user();
@@ -502,22 +506,57 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            $stats = [
-                'total' => Proposta::count(),
-                'em_analise' => Proposta::where('status', 'Em Análise')->count(),
-                'aprovadas' => Proposta::where('status', 'Aprovado')->count(),
-                'reprovadas' => Proposta::where('status', 'Reprovado')->count(),
-                'fechadas' => Proposta::where('status', 'Fechado')->count(),
-                'canceladas' => Proposta::where('status', 'Cancelado')->count(),
-            ];
+            $propostaOriginal = Proposta::findOrFail($id);
+
+            // Verificar permissões
+            if ($currentUser->role !== 'admin' && $propostaOriginal->usuario_id !== $currentUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Não autorizado'
+                ], 403);
+            }
+
+            DB::beginTransaction();
+
+            $novaProposta = new Proposta();
+            $novaProposta->numero_proposta = $this->gerarNumeroProposta();
+            $novaProposta->data_proposta = now();
+            $novaProposta->nome_cliente = $propostaOriginal->nome_cliente . ' (Cópia)';
+            $novaProposta->consultor = $propostaOriginal->consultor;
+            $novaProposta->usuario_id = $currentUser->id;
+            $novaProposta->recorrencia = $propostaOriginal->recorrencia;
+            $novaProposta->economia = $propostaOriginal->economia;
+            $novaProposta->bandeira = $propostaOriginal->bandeira;
+            $novaProposta->status = 'Aguardando';
+            $novaProposta->observacoes = 'Cópia da proposta ' . $propostaOriginal->numero_proposta;
+            $novaProposta->beneficios = $propostaOriginal->beneficios;
+
+            $novaProposta->save();
+
+            DB::commit();
+
+            Log::info('Proposta duplicada', [
+                'proposta_original_id' => $id,
+                'nova_proposta_id' => $novaProposta->id,
+                'user_id' => $currentUser->id
+            ]);
 
             return response()->json([
                 'success' => true,
-                'data' => $stats
-            ]);
+                'message' => 'Proposta duplicada com sucesso!',
+                'data' => $novaProposta->fresh()
+            ], 201);
 
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Proposta não encontrada'
+            ], 404);
         } catch (\Exception $e) {
-            \Log::error('Erro ao buscar estatísticas', [
+            DB::rollBack();
+            
+            Log::error('Erro ao duplicar proposta', [
+                'proposta_id' => $id,
                 'error' => $e->getMessage()
             ]);
 

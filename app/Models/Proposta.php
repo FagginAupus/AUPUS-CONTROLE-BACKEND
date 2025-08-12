@@ -24,7 +24,7 @@ class Proposta extends Model
         'usuario_id',
         'recorrencia',
         'economia',
-        'bandeira',
+        'bandeira', 
         'status',
         'observacoes',
         'beneficios'
@@ -47,320 +47,300 @@ class Proposta extends Model
         'status' => 'Aguardando'
     ];
 
-    // Relacionamentos
+    // Boot method para eventos do modelo
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Garantir que beneficios seja sempre um array
+        static::creating(function ($proposta) {
+            if (empty($proposta->beneficios)) {
+                $proposta->beneficios = [];
+            }
+        });
+
+        static::updating(function ($proposta) {
+            if (empty($proposta->beneficios)) {
+                $proposta->beneficios = [];
+            }
+        });
+    }
+
+    // ========================================
+    // RELACIONAMENTOS
+    // ========================================
+
+    /**
+     * Usuário que criou a proposta
+     */
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'usuario_id');
     }
 
+    /**
+     * Registros no controle clube associados
+     */
     public function controleClube(): HasMany
     {
         return $this->hasMany(ControleClube::class, 'proposta_id');
     }
 
+    /**
+     * Unidades consumidoras associadas
+     */
     public function unidadesConsumidoras(): HasMany
     {
         return $this->hasMany(UnidadeConsumidora::class, 'proposta_id');
     }
 
-    // Scopes
+    // ========================================
+    // SCOPES
+    // ========================================
+
+    /**
+     * Propostas aguardando
+     */
     public function scopeAguardando($query)
     {
         return $query->where('status', 'Aguardando');
     }
 
+    /**
+     * Propostas fechadas
+     */
     public function scopeFechado($query)
     {
         return $query->where('status', 'Fechado');
     }
 
+    /**
+     * Propostas perdidas
+     */
     public function scopePerdido($query)
     {
         return $query->where('status', 'Perdido');
     }
 
+    /**
+     * Propostas não fechadas
+     */
     public function scopeNaoFechado($query)
     {
         return $query->where('status', 'Não Fechado');
     }
 
+    /**
+     * Propostas canceladas
+     */
     public function scopeCancelado($query)
     {
         return $query->where('status', 'Cancelado');
     }
 
+    /**
+     * Filtrar por consultor
+     */
     public function scopePorConsultor($query, $consultor)
     {
-        return $query->where('consultor', $consultor);
+        return $query->where('consultor', 'ilike', "%{$consultor}%");
     }
 
+    /**
+     * Filtrar por período de data
+     */
     public function scopePorPeriodo($query, $dataInicio, $dataFim)
     {
-        return $query->whereBetween('data_proposta', [$dataInicio, $dataFim]);
+        return $query->whereBetween('data_proposta', [
+            Carbon::parse($dataInicio)->startOfDay(),
+            Carbon::parse($dataFim)->endOfDay()
+        ]);
     }
 
+    /**
+     * Filtrar por usuário
+     */
     public function scopePorUsuario($query, $usuarioId)
     {
         return $query->where('usuario_id', $usuarioId);
     }
 
+    /**
+     * Filtro hierárquico baseado no usuário logado
+     */
     public function scopeComFiltroHierarquico($query, Usuario $usuario)
     {
-        if ($usuario->isAdmin()) {
-            return $query; // Admin vê tudo
+        if ($usuario->role === 'admin') {
+            // Admin vê todas as propostas
+            return $query;
         }
-        
-        if ($usuario->isConsultor()) {
-            $subordinados = $usuario->getAllSubordinates();
-            $consultoresPermitidos = array_merge([$usuario->nome], array_column($subordinados, 'nome'));
-            return $query->whereIn('consultor', $consultoresPermitidos);
+
+        if ($usuario->role === 'manager') {
+            // Manager vê suas propostas + propostas da equipe
+            $subordinados = Usuario::where('manager_id', $usuario->id)->pluck('id')->toArray();
+            $usuariosPermitidos = array_merge([$usuario->id], $subordinados);
+            return $query->whereIn('usuario_id', $usuariosPermitidos);
         }
-        
-        // Gerente e Vendedor veem apenas suas próprias propostas
-        return $query->where('consultor', $usuario->nome);
+
+        // Usuário comum vê apenas suas propostas
+        return $query->where('usuario_id', $usuario->id);
     }
 
-    // Accessors
-    public function getStatusColorAttribute(): string
+    /**
+     * Busca textual
+     */
+    public function scopeBusca($query, $termo)
     {
-        return match($this->status) {
-            'Aguardando' => 'warning',
-            'Fechado' => 'success',
-            'Perdido' => 'danger',
-            'Não Fechado' => 'secondary',
-            'Cancelado' => 'dark',
-            default => 'secondary'
-        };
+        return $query->where(function ($q) use ($termo) {
+            $q->where('nome_cliente', 'ilike', "%{$termo}%")
+              ->orWhere('numero_proposta', 'ilike', "%{$termo}%")
+              ->orWhere('consultor', 'ilike', "%{$termo}%");
+        });
     }
 
-    public function getStatusIconAttribute(): string
+    // ========================================
+    // ACCESSORS & MUTATORS
+    // ========================================
+
+    /**
+     * Formatar economia com percentual
+     */
+    public function getEconomiaFormatadaAttribute(): string
     {
-        return match($this->status) {
-            'Aguardando' => '⏳',
-            'Fechado' => '✅',
-            'Perdido' => '❌',
-            'Não Fechado' => '⏸️',
-            'Cancelado' => '🚫',
-            default => '❓'
-        };
+        return number_format($this->economia, 1) . '%';
     }
 
+    /**
+     * Formatar bandeira com percentual
+     */
+    public function getBandeiraFormatadaAttribute(): string
+    {
+        return number_format($this->bandeira, 1) . '%';
+    }
+
+    /**
+     * Data formatada em pt-BR
+     */
     public function getDataPropostaFormatadaAttribute(): string
     {
         return $this->data_proposta ? $this->data_proposta->format('d/m/Y') : '';
     }
 
-    public function getEconomiaFormatadaAttribute(): string
+    /**
+     * Status com cor para frontend
+     */
+    public function getStatusComCorAttribute(): array
     {
-        return number_format($this->economia, 2, ',', '.') . '%';
-    }
+        $cores = [
+            'Aguardando' => '#f59e0b',
+            'Fechado' => '#10b981', 
+            'Perdido' => '#ef4444',
+            'Não Fechado' => '#6b7280',
+            'Cancelado' => '#64748b'
+        ];
 
-    public function getBandeiraFormatadaAttribute(): string
-    {
-        return number_format($this->bandeira, 2, ',', '.') . '%';
-    }
-
-    public function getTempoAguardandoAttribute(): int
-    {
-        if ($this->status !== 'Aguardando') return 0;
-        
-        return Carbon::parse($this->data_proposta)->diffInDays(Carbon::now());
-    }
-
-    public function getTempoAguardandoTextoAttribute(): string
-    {
-        $dias = $this->tempo_aguardando;
-        
-        if ($dias == 0) return 'Hoje';
-        if ($dias == 1) return '1 dia';
-        if ($dias <= 7) return "{$dias} dias";
-        if ($dias <= 30) return ceil($dias / 7) . ' semanas';
-        
-        return ceil($dias / 30) . ' meses';
-    }
-
-    // Métodos de Negócio
-    public function fecharProposta(array $dadosControle = []): bool
-    {
-        $this->status = 'Fechado';
-        $saved = $this->save();
-
-        if ($saved && !empty($dadosControle)) {
-            // Criar registro no controle clube
-            $this->criarControleClube($dadosControle);
-        }
-
-        return $saved;
-    }
-
-    public function perderProposta(string $motivo = ''): bool
-    {
-        $this->status = 'Perdido';
-        
-        if ($motivo) {
-            $observacoesAtuais = $this->observacoes ?? '';
-            $this->observacoes = $observacoesAtuais . "\n\nMotivo da perda: " . $motivo;
-        }
-
-        return $this->save();
-    }
-
-    public function cancelarProposta(string $motivo = ''): bool
-    {
-        $this->status = 'Cancelado';
-        
-        if ($motivo) {
-            $observacoesAtuais = $this->observacoes ?? '';
-            $this->observacoes = $observacoesAtuais . "\n\nMotivo do cancelamento: " . $motivo;
-        }
-
-        return $this->save();
-    }
-
-    public function reativarProposta(): bool
-    {
-        if (in_array($this->status, ['Perdido', 'Cancelado', 'Não Fechado'])) {
-            $this->status = 'Aguardando';
-            return $this->save();
-        }
-
-        return false;
-    }
-
-    private function criarControleClube(array $dados): ControleClube
-    {
-        return ControleClube::create([
-            'proposta_id' => $this->id,
-            'numero_proposta' => $this->numero_proposta,
-            'numero_uc' => $dados['numero_uc'] ?? null,
-            'nome_cliente' => $this->nome_cliente,
-            'consultor' => $this->consultor,
-            'usuario_id' => $this->usuario_id,
-            'consumo_medio' => $dados['consumo_medio'] ?? null,
-            'geracao_prevista' => $dados['geracao_prevista'] ?? null,
-            'economia_percentual' => $this->economia,
-            'desconto_bandeira' => $this->bandeira,
-            'recorrencia' => $this->recorrencia,
-            'data_inicio_clube' => $dados['data_inicio_clube'] ?? Carbon::now()->toDateString(),
-            'ativo' => true
-        ]);
-    }
-
-    // Validações
-    public function isValidForFechamento(): array
-    {
-        $errors = [];
-
-        if ($this->status !== 'Aguardando') {
-            $errors[] = 'Apenas propostas aguardando podem ser fechadas';
-        }
-
-        if (empty($this->nome_cliente)) {
-            $errors[] = 'Nome do cliente é obrigatório';
-        }
-
-        if (empty($this->consultor)) {
-            $errors[] = 'Consultor é obrigatório';
-        }
-
-        // Verificar se tem UCs vinculadas
-        if ($this->unidadesConsumidoras()->count() === 0) {
-            $errors[] = 'Pelo menos uma unidade consumidora deve estar vinculada';
-        }
-
-        return $errors;
-    }
-
-    // Estatísticas
-    public static function getEstatisticas($filtros = [])
-    {
-        $query = self::query();
-
-        if (isset($filtros['usuario_id'])) {
-            $query->where('usuario_id', $filtros['usuario_id']);
-        }
-
-        if (isset($filtros['consultor'])) {
-            $query->where('consultor', $filtros['consultor']);
-        }
-
-        if (isset($filtros['periodo'])) {
-            $query->whereBetween('data_proposta', $filtros['periodo']);
-        }
-
-        if (isset($filtros['usuario']) && $filtros['usuario'] instanceof Usuario) {
-            $query->comFiltroHierarquico($filtros['usuario']);
-        }
-
-        $total = $query->count();
-        
         return [
-            'total' => $total,
-            'aguardando' => $query->clone()->where('status', 'Aguardando')->count(),
-            'fechado' => $query->clone()->where('status', 'Fechado')->count(),
-            'perdido' => $query->clone()->where('status', 'Perdido')->count(),
-            'nao_fechado' => $query->clone()->where('status', 'Não Fechado')->count(),
-            'cancelado' => $query->clone()->where('status', 'Cancelado')->count(),
-            'taxa_fechamento' => $total > 0 ? 
-                ($query->clone()->where('status', 'Fechado')->count() / $total) * 100 : 0,
-            'tempo_medio_fechamento' => self::getTempoMedioFechamento($filtros)
+            'status' => $this->status,
+            'cor' => $cores[$this->status] ?? '#6b7280'
         ];
     }
 
-    private static function getTempoMedioFechamento($filtros = []): float
+    /**
+     * Garantir que beneficios seja sempre um array
+     */
+    public function setBeneficiosAttribute($value)
     {
-        $query = self::query()->where('status', 'Fechado');
-        
-        if (isset($filtros['periodo'])) {
-            $query->whereBetween('data_proposta', $filtros['periodo']);
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $this->attributes['beneficios'] = json_encode($decoded ?: []);
+        } elseif (is_array($value)) {
+            $this->attributes['beneficios'] = json_encode($value);
+        } else {
+            $this->attributes['beneficios'] = json_encode([]);
         }
-        
-        $propostas = $query->get();
-        
-        if ($propostas->isEmpty()) return 0;
-        
-        $somaDias = $propostas->sum(function($proposta) {
-            return Carbon::parse($proposta->data_proposta)->diffInDays($proposta->updated_at);
-        });
-        
-        return round($somaDias / $propostas->count(), 1);
     }
 
-    // Boot method para eventos
-    protected static function boot()
+    /**
+     * Sempre retornar beneficios como array
+     */
+    public function getBeneficiosAttribute($value)
     {
-        parent::boot();
+        if (empty($value)) {
+            return [];
+        }
 
-        static::creating(function ($proposta) {
-            if (empty($proposta->numero_proposta)) {
-                $proposta->numero_proposta = self::gerarNumeroProposta();
-            }
-            
-            if (empty($proposta->data_proposta)) {
-                $proposta->data_proposta = Carbon::now()->toDateString();
-            }
-        });
-
-        static::updating(function ($proposta) {
-            // Log de mudanças de status
-            if ($proposta->isDirty('status')) {
-                $statusOriginal = $proposta->getOriginal('status');
-                $statusNovo = $proposta->status;
-                
-                \Log::info("Proposta {$proposta->numero_proposta}: Status alterado de '{$statusOriginal}' para '{$statusNovo}'");
-            }
-        });
+        $decoded = json_decode($value, true);
+        return is_array($decoded) ? $decoded : [];
     }
 
-    private static function gerarNumeroProposta(): string
+    // ========================================
+    // MÉTODOS AUXILIARES
+    // ========================================
+
+    /**
+     * Verificar se proposta pode ser editada
+     */
+    public function podeSerEditada(): bool
     {
-        $ano = Carbon::now()->format('Y');
-        $ultimoNumero = self::whereYear('created_at', Carbon::now()->year)
-                           ->whereRaw("numero_proposta LIKE '{$ano}-%'")
-                           ->count();
-        
-        $proximoNumero = str_pad($ultimoNumero + 1, 4, '0', STR_PAD_LEFT);
-        
-        return "{$ano}-{$proximoNumero}";
+        return !in_array($this->status, ['Fechado', 'Cancelado']);
+    }
+
+    /**
+     * Verificar se proposta está ativa
+     */
+    public function estaAtiva(): bool
+    {
+        return in_array($this->status, ['Aguardando', 'Fechado']);
+    }
+
+    /**
+     * Obter próximo status sugerido
+     */
+    public function getProximoStatusSugerido(): array
+    {
+        $proximosStatus = [
+            'Aguardando' => ['Fechado', 'Perdido', 'Não Fechado'],
+            'Fechado' => ['Cancelado'],
+            'Perdido' => ['Aguardando'],
+            'Não Fechado' => ['Aguardando', 'Perdido'],
+            'Cancelado' => ['Aguardando']
+        ];
+
+        return $proximosStatus[$this->status] ?? [];
+    }
+
+    /**
+     * Calcular idade da proposta em dias
+     */
+    public function getIdadeDias(): int
+    {
+        return $this->created_at->diffInDays(now());
+    }
+
+    /**
+     * Verificar se proposta está atrasada (mais de 30 dias sem fechamento)
+     */
+    public function estaAtrasada(): bool
+    {
+        return $this->status === 'Aguardando' && $this->getIdadeDias() > 30;
+    }
+
+    /**
+     * Obter resumo da proposta para listagem
+     */
+    public function getResumo(): array
+    {
+        return [
+            'id' => $this->id,
+            'numero_proposta' => $this->numero_proposta,
+            'nome_cliente' => $this->nome_cliente,
+            'consultor' => $this->consultor,
+            'data_proposta' => $this->data_proposta_formatada,
+            'status' => $this->status_com_cor,
+            'economia' => $this->economia_formatada,
+            'idade_dias' => $this->getIdadeDias(),
+            'atrasada' => $this->estaAtrasada(),
+            'pode_editar' => $this->podeSerEditada()
+        ];
     }
 }
