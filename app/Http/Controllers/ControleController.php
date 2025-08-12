@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Cache;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Routing\Controllers\HasMiddleware;
 use Illuminate\Routing\Controllers\Middleware;
 
@@ -40,7 +41,7 @@ class ConfiguracaoController extends Controller implements HasMiddleware
         }
 
         // Apenas admins podem visualizar configurações
-        if (!$currentUser->isAdmin()) {
+        if ($currentUser->role !== 'admin') {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem acessar configurações'
@@ -241,7 +242,7 @@ class ConfiguracaoController extends Controller implements HasMiddleware
     /**
      * Atualizar configuração
      */
-    public function update(Request $request, string $chave): JsonResponse
+    public function update(Request $request, string $id): JsonResponse
     {
         $currentUser = JWTAuth::user();
 
@@ -261,7 +262,7 @@ class ConfiguracaoController extends Controller implements HasMiddleware
         }
 
         try {
-            $configuracao = Configuracao::porChave($chave)->first();
+            $configuracao = Configuracao::findOrFail($id);
 
             if (!$configuracao) {
                 return response()->json([
@@ -553,7 +554,7 @@ class ConfiguracaoController extends Controller implements HasMiddleware
                 if (is_string($valor)) {
                     $decoded = json_decode($valor, true);
                     if (json_last_error() !== JSON_ERROR_NONE) {
-                        throw new \InvalidArgumentException('JSON inválido');
+                        throw new \InvalidArgumentException('JSON inválido: ' . json_last_error_msg());
                     }
                     return $decoded;
                 }
@@ -583,5 +584,62 @@ class ConfiguracaoController extends Controller implements HasMiddleware
             'created_at' => $configuracao->created_at?->format('Y-m-d H:i:s'),
             'updated_at' => $configuracao->updated_at?->format('Y-m-d H:i:s'),
         ];
+    }
+    /**
+     * Excluir configuração
+     */
+    public function destroy(string $chave): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+
+        if (!$currentUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
+        }
+
+        if ($currentUser->role !== 'admin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Apenas administradores podem excluir configurações'
+            ], 403);
+        }
+
+        try {
+            $configuracao = Configuracao::porChave($chave)->first();
+
+            if (!$configuracao) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Configuração não encontrada'
+                ], 404);
+            }
+
+            $configuracao->delete();
+            Cache::forget("config.{$chave}");
+
+            \Log::info('Configuração excluída', [
+                'chave' => $chave,
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Configuração excluída com sucesso!'
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Erro ao excluir configuração', [
+                'chave' => $chave,
+                'user_id' => $currentUser->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
     }
 }

@@ -1,5 +1,4 @@
 <?php
-// routes/api.php - ARQUIVO COMPLETO DAS ROTAS DA API
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -7,22 +6,27 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\PropostaController;
 use App\Http\Controllers\UnidadeConsumidoraController;
-use App\Http\Controllers\ControleController;
+use App\Http\Controllers\ControleController; // ADICIONADO
 use App\Http\Controllers\ConfiguracaoController;
 use App\Http\Controllers\NotificacaoController;
-use App\Http\Controllers\UGController;
+
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+*/
 
 // ==========================================
-// HEALTH CHECK - Verificação de saúde da API
+// HEALTH CHECK - Verificar se API está funcionando
 // ==========================================
-Route::get('health-check', function () {
+Route::get('/health-check', function () {
     try {
-        // Testar conexão com banco
-        \DB::connection()->getPdo();
+        // Teste básico de conexão com o banco
+        $dbConnection = \DB::connection()->getPdo();
         
         return response()->json([
             'status' => 'ok',
-            'timestamp' => now(),
+            'timestamp' => now()->toISOString(),
             'version' => '1.0.0',
             'message' => 'Aupus Controle API está funcionando!',
             'database' => 'PostgreSQL conectado'
@@ -117,6 +121,22 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // ==========================================
+    // CONTROLE CLUBE - Gestão do controle (CORRIGIDO)
+    // ==========================================
+    Route::prefix('controle')->group(function () {
+        Route::get('/', [ControleController::class, 'index']);
+        Route::post('/', [ControleController::class, 'store']);
+        Route::get('statistics', [ControleController::class, 'statistics']);
+        Route::get('{id}', [ControleController::class, 'show']);
+        Route::put('{id}', [ControleController::class, 'update']);
+        Route::delete('{id}', [ControleController::class, 'destroy']);
+        
+        // Operações especiais
+        Route::post('bulk-calibragem', [ControleController::class, 'bulkCalibragem']);
+        Route::post('bulk-toggle-status', [ControleController::class, 'bulkToggleStatus']);
+    });
+
+    // ==========================================
     // UNIDADES CONSUMIDORAS
     // ==========================================
     Route::prefix('unidades-consumidoras')->group(function () {
@@ -135,70 +155,35 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // ==========================================
-    // UGs - USINAS GERADORAS
+    // UGS (USINAS GERADORAS)
     // ==========================================
     Route::prefix('ugs')->group(function () {
-        Route::get('/', [UGController::class, 'index']);
-        Route::post('/', [UGController::class, 'store']);
-        Route::get('statistics', [UGController::class, 'statistics']);
-        Route::get('{id}', [UGController::class, 'show']);
-        Route::put('{id}', [UGController::class, 'update']);
-        Route::delete('{id}', [UGController::class, 'destroy']);
+        Route::get('/', [UnidadeConsumidoraController::class, 'indexUGs']);
+        Route::post('/', [UnidadeConsumidoraController::class, 'storeUG']);
+        Route::get('statistics', [UnidadeConsumidoraController::class, 'statisticsUGs']);
+        Route::get('{id}', [UnidadeConsumidoraController::class, 'showUG']);
+        Route::put('{id}', [UnidadeConsumidoraController::class, 'updateUG']);
+        Route::delete('{id}', [UnidadeConsumidoraController::class, 'destroyUG']);
         
-        // Operações especiais
-        Route::get('{id}/ucs-atribuidas', [UGController::class, 'getUCsAtribuidas']);
-        Route::post('{id}/atribuir-uc', [UGController::class, 'atribuirUC']);
-        Route::post('{id}/desatribuir-uc', [UGController::class, 'desatribuirUC']);
+        // Operações especiais para UGs
+        Route::post('{id}/assign-ucs', [UnidadeConsumidoraController::class, 'assignUCsToUG']);
+        Route::post('{id}/calculate-capacity', [UnidadeConsumidoraController::class, 'calculateUGCapacity']);
+        Route::get('{id}/available-ucs', [UnidadeConsumidoraController::class, 'getAvailableUCs']);
     });
 
     // ==========================================
-    // CONTROLE - Sistema de controle
-    // ==========================================
-    Route::prefix('controle')->group(function () {
-        Route::get('/', [ControleController::class, 'index']);
-        Route::post('/', [ControleController::class, 'store']);
-        Route::get('statistics', [ControleController::class, 'statistics']);
-        Route::get('export', [ControleController::class, 'export']);
-        Route::get('{id}', [ControleController::class, 'show']);
-        Route::put('{id}', [ControleController::class, 'update']);
-        Route::delete('{id}', [ControleController::class, 'destroy']);
-        
-        // Operações de UG
-        Route::post('{id}/link-ug', [ControleController::class, 'linkUG']);
-        Route::post('{id}/unlink-ug', [ControleController::class, 'unlinkUG']);
-        
-        // Operações de ativação
-        Route::post('{id}/deactivate', [ControleController::class, 'deactivate']);
-        Route::post('{id}/reactivate', [ControleController::class, 'reactivate']);
-        
-        // Calibragem
-        Route::post('{id}/calibrar', [ControleController::class, 'calibrar']);
-        Route::post('calibragem-global', [ControleController::class, 'aplicarCalibragemGlobal']);
-        
-        // Operações em lote
-        Route::post('bulk-calibrar', [ControleController::class, 'bulkCalibrar']);
-        Route::post('bulk-link-ug', [ControleController::class, 'bulkLinkUG']);
-    });
-
-    // ==========================================
-    // CONFIGURAÇÕES - Settings do sistema
+    // CONFIGURAÇÕES - Configurações do sistema
     // ==========================================
     Route::prefix('configuracoes')->group(function () {
         Route::get('/', [ConfiguracaoController::class, 'index']);
         Route::post('/', [ConfiguracaoController::class, 'store']);
         Route::get('grupo/{grupo}', [ConfiguracaoController::class, 'getByGroup']);
-        Route::get('export', [ConfiguracaoController::class, 'export']);
-        Route::get('{chave}', [ConfiguracaoController::class, 'show']);
-        Route::put('{chave}', [ConfiguracaoController::class, 'update']);
+        Route::put('{id}', [ConfiguracaoController::class, 'update']);
+        Route::delete('{id}', [ConfiguracaoController::class, 'destroy']);
         
-        // Operações em lote
-        Route::post('bulk-update', [ConfiguracaoController::class, 'updateBulk']);
-        Route::post('reset-to-default', [ConfiguracaoController::class, 'resetToDefault']);
-        Route::post('clear-cache', [ConfiguracaoController::class, 'clearCache']);
-        
-        // Configurações específicas
-        Route::get('calibragem-global/value', [ConfiguracaoController::class, 'getCalibragemGlobal']);
-        Route::post('calibragem-global/update', [ConfiguracaoController::class, 'updateCalibragemGlobal']);
+        // Operações especiais
+        Route::post('bulk-update', [ConfiguracaoController::class, 'bulkUpdate']);
+        Route::post('reset-group/{grupo}', [ConfiguracaoController::class, 'resetGroup']);
     });
 
     // ==========================================
@@ -207,12 +192,9 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('notificacoes')->group(function () {
         Route::get('/', [NotificacaoController::class, 'index']);
         Route::post('/', [NotificacaoController::class, 'store']);
-        Route::get('statistics', [NotificacaoController::class, 'statistics']);
-        Route::get('{id}', [NotificacaoController::class, 'show']);
-        Route::patch('{id}/mark-read', [NotificacaoController::class, 'markAsRead']);
-        Route::patch('mark-all-read', [NotificacaoController::class, 'markAllAsRead']);
+        Route::patch('{id}/read', [NotificacaoController::class, 'markAsRead']);
+        Route::post('mark-all-read', [NotificacaoController::class, 'markAllAsRead']);
         Route::delete('{id}', [NotificacaoController::class, 'destroy']);
-        Route::delete('cleanup-old', [NotificacaoController::class, 'cleanupOld']);
         
         // Operações especiais
         Route::get('unread-count', [NotificacaoController::class, 'getUnreadCount']);
@@ -305,16 +287,37 @@ Route::middleware('auth:api')->group(function () {
                     'propostas' => \App\Models\Proposta::with(['usuario'])->get(),
                     'controle' => \App\Models\ControleClube::with(['usuario', 'proposta'])->get(),
                     'unidades' => \App\Models\UnidadeConsumidora::all(),
-                    'generated_at' => now(),
+                    'generated_at' => now()->toISOString(),
                     'generated_by' => $user->nome
                 ]
             ]);
         });
         
-        // Relatórios específicos
-        Route::get('vendas', [PropostaController::class, 'relatorioVendas']);
-        Route::get('performance', [UsuarioController::class, 'relatorioPerformance']);
-        Route::get('economias', [ControleController::class, 'relatorioEconomias']);
+        // Relatório de performance
+        Route::get('performance', function (Request $request) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'consultores_ranking' => \App\Models\Usuario::withCount(['propostas' => function ($query) {
+                        $query->where('status', 'Fechado');
+                    }])
+                    ->orderBy('propostas_count', 'desc')
+                    ->get(),
+                    
+                    'conversao_mensal' => \App\Models\Proposta::selectRaw('
+                        EXTRACT(YEAR FROM created_at) as ano,
+                        EXTRACT(MONTH FROM created_at) as mes,
+                        COUNT(*) as total_propostas,
+                        SUM(CASE WHEN status = "Fechado" THEN 1 ELSE 0 END) as fechadas
+                    ')
+                    ->groupByRaw('EXTRACT(YEAR FROM created_at), EXTRACT(MONTH FROM created_at)')
+                    ->orderBy('ano', 'desc')
+                    ->orderBy('mes', 'desc')
+                    ->take(12)
+                    ->get()
+                ]
+            ]);
+        });
     });
 
     // ==========================================
@@ -327,90 +330,48 @@ Route::middleware('auth:api')->group(function () {
                 'data' => [
                     'app_name' => config('app.name'),
                     'app_version' => '1.0.0',
-                    'php_version' => PHP_VERSION,
                     'laravel_version' => app()->version(),
+                    'php_version' => PHP_VERSION,
                     'database' => [
                         'driver' => config('database.default'),
-                        'connection' => 'OK'
+                        'version' => \DB::select('SELECT version() as version')[0]->version ?? 'Unknown'
                     ],
-                    'timestamp' => now()
+                    'environment' => config('app.env'),
+                    'debug_mode' => config('app.debug'),
+                    'timezone' => config('app.timezone'),
+                    'locale' => config('app.locale'),
+                    'url' => config('app.url')
                 ]
             ]);
         });
         
         Route::get('health', function () {
-            return response()->json([
-                'status' => 'healthy',
-                'checks' => [
-                    'database' => 'OK',
-                    'cache' => 'OK',
-                    'storage' => 'OK'
-                ],
-                'timestamp' => now()
-            ]);
-        });
-    });
-
-    // ==========================================
-    // UTILITÁRIOS - Funcionalidades auxiliares
-    // ==========================================
-    Route::prefix('utils')->group(function () {
-        // Upload genérico de arquivos
-        Route::post('upload', function (Request $request) {
-            $request->validate([
-                'file' => 'required|file|max:10240', // 10MB
-                'type' => 'required|string|in:documento,imagem,pdf'
-            ]);
+            $checks = [];
             
+            // Check database
             try {
-                $file = $request->file('file');
-                $filename = time() . '_' . $file->getClientOriginalName();
-                $path = $file->storeAs('uploads/' . $request->type, $filename, 'public');
-                
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Arquivo enviado com sucesso',
-                    'data' => [
-                        'filename' => $filename,
-                        'path' => $path,
-                        'url' => asset('storage/' . $path),
-                        'size' => $file->getSize(),
-                        'mime_type' => $file->getMimeType()
-                    ]
-                ]);
+                \DB::connection()->getPdo();
+                $checks['database'] = ['status' => 'ok', 'message' => 'Connected'];
             } catch (\Exception $e) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Erro ao enviar arquivo: ' . $e->getMessage()
-                ], 500);
+                $checks['database'] = ['status' => 'error', 'message' => $e->getMessage()];
             }
-        });
-        
-        // Validação de CPF/CNPJ
-        Route::post('validate-document', function (Request $request) {
-            $request->validate([
-                'document' => 'required|string',
-                'type' => 'required|string|in:cpf,cnpj'
-            ]);
             
-            $document = preg_replace('/[^0-9]/', '', $request->document);
-            $isValid = false;
-            
-            if ($request->type === 'cpf') {
-                $isValid = strlen($document) === 11; // Validação básica
-            } else {
-                $isValid = strlen($document) === 14; // Validação básica
+            // Check storage
+            try {
+                \Storage::disk('local')->put('health-check.txt', 'test');
+                \Storage::disk('local')->delete('health-check.txt');
+                $checks['storage'] = ['status' => 'ok', 'message' => 'Writable'];
+            } catch (\Exception $e) {
+                $checks['storage'] = ['status' => 'error', 'message' => $e->getMessage()];
             }
+            
+            $overallStatus = collect($checks)->every(fn($check) => $check['status'] === 'ok') ? 'healthy' : 'unhealthy';
             
             return response()->json([
-                'success' => true,
-                'data' => [
-                    'valid' => $isValid,
-                    'formatted' => $request->type === 'cpf' 
-                        ? substr($document, 0, 3) . '.' . substr($document, 3, 3) . '.' . substr($document, 6, 3) . '-' . substr($document, 9, 2)
-                        : substr($document, 0, 2) . '.' . substr($document, 2, 3) . '.' . substr($document, 5, 3) . '/' . substr($document, 8, 4) . '-' . substr($document, 12, 2)
-                ]
-            ]);
+                'status' => $overallStatus,
+                'timestamp' => now()->toISOString(),
+                'checks' => $checks
+            ], $overallStatus === 'healthy' ? 200 : 503);
         });
     });
 });
@@ -439,6 +400,11 @@ Route::fallback(function () {
                 'POST /api/propostas',
                 'GET /api/propostas/{id}'
             ],
+            'controle' => [
+                'GET /api/controle',
+                'POST /api/controle',
+                'GET /api/controle/{id}'
+            ],
             'unidades-consumidoras' => [
                 'GET /api/unidades-consumidoras',
                 'POST /api/unidades-consumidoras'
@@ -447,10 +413,6 @@ Route::fallback(function () {
                 'GET /api/ugs',
                 'POST /api/ugs',
                 'GET /api/ugs/{id}'
-            ],
-            'controle' => [
-                'GET /api/controle',
-                'POST /api/controle'
             ],
             'configuracoes' => [
                 'GET /api/configuracoes',
