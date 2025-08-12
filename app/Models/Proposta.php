@@ -28,16 +28,10 @@ class Proposta extends Model
         'status',
         'observacoes',
         'beneficios',
-        // ✅ ADICIONAR ESTAS LINHAS
         'telefone',
         'email',
         'endereco',
-        'unidades_consumidoras',
-        'numero_uc',
-        'apelido',
-        'media_consumo',
-        'ligacao',
-        'distribuidora',
+        'unidades_consumidoras', // ✅ SÓ ESSE CAMPO PARA UCs
     ];
 
     protected $casts = [
@@ -45,8 +39,7 @@ class Proposta extends Model
         'economia' => 'decimal:2',
         'bandeira' => 'decimal:2',
         'beneficios' => 'array',
-        'unidades_consumidoras' => 'array', // ✅ ADICIONAR
-        'media_consumo' => 'decimal:2',     // ✅ ADICIONAR
+        'unidades_consumidoras' => 'array', // ✅ SÓ ESSE
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
