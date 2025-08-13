@@ -78,8 +78,7 @@ class PropostaController extends Controller
                     
                     // Arrays completos
                     'beneficios' => $beneficios,
-                    'unidadesConsumidoras' => $unidadesConsumidoras,
-                    
+                    'unidades_consumidoras' => $unidadesConsumidoras,
                     // Timestamps
                     'created_at' => $proposta->created_at,
                     'updated_at' => $proposta->updated_at
@@ -312,27 +311,42 @@ class PropostaController extends Controller
             $primeiraUC = !empty($unidadesConsumidoras) ? $unidadesConsumidoras[0] : null;
 
             $propostaMapeada = [
+                // Campos principais - NOMES CORRETOS PARA STORAGESERVICE
                 'id' => $proposta->id,
-                'numeroProposta' => $proposta->numero_proposta,
-                'nomeCliente' => $proposta->nome_cliente,
+                'numero_proposta' => $proposta->numero_proposta,
+                'nome_cliente' => $proposta->nome_cliente,
                 'consultor' => $proposta->consultor,
-                'data' => $proposta->data_proposta,
+                'data_proposta' => $proposta->data_proposta,
                 'status' => $proposta->status,
-                'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
-                'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
+                'economia' => $this->extrairValorDesconto($proposta->desconto_tarifa),
+                'bandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 'recorrencia' => $proposta->recorrencia,
                 'observacoes' => $proposta->observacoes,
+                
+                // Dados da UC (para compatibilidade com frontend)
                 'apelido' => $primeiraUC['apelido'] ?? '',
                 'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
                 'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '',
                 'ligacao' => $primeiraUC['ligacao'] ?? $primeiraUC['tipo_ligacao'] ?? '',
                 'media' => $primeiraUC['consumo_medio'] ?? $primeiraUC['media'] ?? 0,
                 'distribuidora' => $primeiraUC['distribuidora'] ?? '',
+                
+                // ✅ ARRAYS COMPLETOS - NOMES CORRETOS
                 'beneficios' => $beneficios,
-                'unidadesConsumidoras' => $unidadesConsumidoras,
+                'unidades_consumidoras' => $unidadesConsumidoras,
+                
+                // Timestamps
                 'created_at' => $proposta->created_at,
                 'updated_at' => $proposta->updated_at
             ];
+
+            // ✅ DEBUG: Log da proposta mapeada
+            Log::info('Proposta mapeada para frontend', [
+                'id' => $proposta->id,
+                'numero_proposta' => $proposta->numero_proposta,
+                'ucs_count' => count($unidadesConsumidoras),
+                'ucs_sample' => array_slice($unidadesConsumidoras, 0, 1) // Primeira UC para debug
+            ]);
 
             return response()->json([
                 'success' => true,
