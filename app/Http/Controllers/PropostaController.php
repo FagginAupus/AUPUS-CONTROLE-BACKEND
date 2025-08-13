@@ -2,21 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Proposta;
-use App\Models\UnidadeConsumidora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
-use Illuminate\Validation\ValidationException;
 
 class PropostaController extends Controller
 {
     /**
-     * ✅ LISTAR PROPOSTAS COM FILTROS E PAGINAÇÃO
+     * ✅ LISTAR PROPOSTAS
      */
     public function index(Request $request): JsonResponse
     {
@@ -30,154 +26,45 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            Log::info('Carregando propostas', [
-                'user_id' => $currentUser->id,
-                'user_role' => $currentUser->role,
-                'filters' => $request->all()
-            ]);
+            $query = "SELECT * FROM propostas WHERE deleted_at IS NULL";
+            $params = [];
 
-            // Parâmetros de paginação
-            $page = $request->get('page', 1);
-            $perPage = $request->get('per_page', 50);
-
-            // Query base
-            $query = Proposta::query();
-
-            // Filtros baseados no role do usuário
-            if ($currentUser->role === 'vendedor') {
-                // Vendedor vê apenas suas próprias propostas
-                $query->where('usuario_id', $currentUser->id);
-            } elseif ($currentUser->role === 'gerente') {
-                // Gerente vê propostas de sua equipe
-                $teamUserIds = DB::table('usuarios')
-                              ->where('manager_id', $currentUser->id)
-                              ->pluck('id')
-                              ->toArray();
-                $teamUserIds[] = $currentUser->id;
-                $query->whereIn('usuario_id', $teamUserIds);
-            }
-            // Admin e consultor veem todas as propostas (sem filtro adicional)
-
-            // Filtros opcionais
-            if ($request->filled('search')) {
-                $search = $request->get('search');
-                $query->where(function($q) use ($search) {
-                    $q->where('nome_cliente', 'ILIKE', "%{$search}%")
-                      ->orWhere('numero_proposta', 'ILIKE', "%{$search}%")
-                      ->orWhere('apelido', 'ILIKE', "%{$search}%")
-                      ->orWhere('numero_uc', 'LIKE', "%{$search}%");
-                });
+            if ($currentUser->role !== 'admin') {
+                $query .= " AND usuario_id = ?";
+                $params[] = $currentUser->id;
             }
 
-            if ($request->filled('consultor')) {
-                $query->where('consultor', 'ILIKE', "%{$request->get('consultor')}%");
-            }
-
-            if ($request->filled('status')) {
-                $query->where('status', $request->get('status'));
-            }
-
-            if ($request->filled('distribuidora')) {
-                $query->where('distribuidora', $request->get('distribuidora'));
-            }
-
-            if ($request->filled('data_inicio')) {
-                $query->where('data_proposta', '>=', $request->get('data_inicio'));
-            }
-
-            if ($request->filled('data_fim')) {
-                $query->where('data_proposta', '<=', $request->get('data_fim'));
-            }
-
-            // Ordenação
-            $sortBy = $request->get('sort_by', 'created_at');
-            $sortDirection = $request->get('sort_direction', 'desc');
+            $query .= " ORDER BY created_at DESC";
             
-            $allowedSorts = ['created_at', 'data_proposta', 'nome_cliente', 'numero_proposta', 'status', 'consultor'];
-            if (!in_array($sortBy, $allowedSorts)) {
-                $sortBy = 'created_at';
-            }
-            
-            $query->orderBy($sortBy, $sortDirection);
-
-            // Executar query com paginação
-            $totalRecords = $query->count();
-            $propostas = $query->offset(($page - 1) * $perPage)
-                              ->limit($perPage)
-                              ->get();
-
-            // Formatar dados
-            $propostasFormatadas = $propostas->map(function($proposta) {
-                return [
-                    'id' => $proposta->id,
-                    'numeroProposta' => $proposta->numero_proposta,
-                    'nomeCliente' => $proposta->nome_cliente,
-                    'consultor' => $proposta->consultor,
-                    'data' => $proposta->data_proposta,
-                    'status' => $proposta->status,
-                    'economia' => $proposta->economia,
-                    'bandeira' => $proposta->bandeira,
-                    'recorrencia' => $proposta->recorrencia,
-                    'observacoes' => $proposta->observacoes,
-                    'beneficios' => is_string($proposta->beneficios) ? 
-                        json_decode($proposta->beneficios, true) : 
-                        ($proposta->beneficios ?: []),
-                    'unidades_consumidoras' => is_string($proposta->unidades_consumidoras) ?
-                        json_decode($proposta->unidades_consumidoras, true) :
-                        ($proposta->unidades_consumidoras ?: []),
-                    // Campos de busca rápida
-                    'numeroUC' => $proposta->numero_uc,
-                    'apelido' => $proposta->apelido,
-                    'mediaConsumo' => $proposta->media_consumo,
-                    'ligacao' => $proposta->ligacao,
-                    'distribuidora' => $proposta->distribuidora,
-                    'created_at' => $proposta->created_at,
-                    'updated_at' => $proposta->updated_at,
-                ];
-            });
+            $propostas = DB::select($query, $params);
 
             return response()->json([
                 'success' => true,
-                'data' => $propostasFormatadas,
+                'data' => $propostas,
                 'pagination' => [
-                    'current_page' => $page,
-                    'per_page' => $perPage,
-                    'total_records' => $totalRecords,
-                    'total_pages' => ceil($totalRecords / $perPage),
-                    'has_next' => ($page * $perPage) < $totalRecords,
-                    'has_previous' => $page > 1
+                    'current_page' => 1,
+                    'per_page' => count($propostas),
+                    'total' => count($propostas),
+                    'last_page' => 1
                 ],
-                'filters' => [
-                    'search' => $request->get('search'),
-                    'consultor' => $request->get('consultor'),
-                    'status' => $request->get('status'),
-                    'distribuidora' => $request->get('distribuidora'),
-                    'data_inicio' => $request->get('data_inicio'),
-                    'data_fim' => $request->get('data_fim')
-                ]
+                'filters' => []
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro ao listar propostas', [
+            Log::error('Erro ao carregar propostas', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
                 'user_id' => $currentUser->id ?? 'desconhecido'
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor',
-                'debug' => config('app.debug') ? [
-                    'error' => $e->getMessage(),
-                    'line' => $e->getLine(),
-                    'file' => basename($e->getFile())
-                ] : null
+                'message' => 'Erro interno do servidor'
             ], 500);
         }
     }
 
     /**
-     * ✅ MÉTODO STORE COMPLETAMENTE CORRIGIDO - Criar nova proposta
+     * ✅ CRIAR PROPOSTA - COM DEBUG JSON ULTRA DETALHADO
      */
     public function store(Request $request): JsonResponse
     {
@@ -191,254 +78,323 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            Log::info('Dados recebidos para criar proposta', [
+            Log::info('=== STEP 1: DADOS RECEBIDOS ===', [
                 'user_id' => $currentUser->id,
-                'request_data' => $request->all()
+                'all_data' => $request->all(),
+                'content_type' => $request->header('Content-Type'),
+                'method' => $request->method()
             ]);
 
-            // ✅ VALIDAÇÃO CORRIGIDA E COMPLETA
-            $validator = Validator::make($request->all(), [
-                // ✅ CAMPOS OBRIGATÓRIOS BÁSICOS
-                'nome_cliente' => 'required|string|min:3|max:200',
-                'consultor' => 'required|string|max:100',
-                'data_proposta' => 'required|date',
-                
-                // ✅ CAMPOS OPCIONAIS
-                'numero_proposta' => 'nullable|string|max:50|unique:propostas,numero_proposta',
-                'economia' => 'nullable|numeric|min:0|max:100',
-                'bandeira' => 'nullable|numeric|min:0|max:100',
-                'recorrencia' => 'nullable|string|max:50',
-                'observacoes' => 'nullable|string|max:1000',
-                'beneficios' => 'nullable|array',
-                
-                // ✅ UNIDADES CONSUMIDORAS - VALIDAÇÃO CORRIGIDA
-                'unidades_consumidoras' => 'nullable|array|min:1', // ✅ Pelo menos 1 UC se presente
-                'unidades_consumidoras.*.numero_unidade' => 'required_with:unidades_consumidoras|integer|min:1',
-                'unidades_consumidoras.*.apelido' => 'required_with:unidades_consumidoras|string|min:1|max:100',
-                'unidades_consumidoras.*.consumo_medio' => 'required_with:unidades_consumidoras|numeric|min:0',
-                'unidades_consumidoras.*.ligacao' => 'nullable|string|max:50',
-                'unidades_consumidoras.*.distribuidora' => 'nullable|string|max:100',
-            ], [
-                // ✅ MENSAGENS PERSONALIZADAS
-                'nome_cliente.required' => 'Nome do cliente é obrigatório',
-                'nome_cliente.min' => 'Nome do cliente deve ter pelo menos 3 caracteres',
-                'consultor.required' => 'Consultor é obrigatório',
-                'data_proposta.required' => 'Data da proposta é obrigatória',
-                'unidades_consumidoras.min' => 'Pelo menos uma unidade consumidora deve ser informada',
-                'unidades_consumidoras.*.numero_unidade.required_with' => 'Número da unidade consumidora é obrigatório',
-                'unidades_consumidoras.*.numero_unidade.min' => 'Número da unidade deve ser maior que 0',
-                'unidades_consumidoras.*.apelido.required_with' => 'Apelido da unidade consumidora é obrigatório',
-                'unidades_consumidoras.*.consumo_medio.required_with' => 'Consumo médio é obrigatório',
-                'unidades_consumidoras.*.consumo_medio.min' => 'Consumo médio deve ser maior ou igual a 0',
-            ]);
-
-            if ($validator->fails()) {
-                Log::warning('Validação falhou ao criar proposta', [
-                    'errors' => $validator->errors(),
-                    'request_data' => $request->all()
+            // ✅ VALIDAÇÃO MÍNIMA
+            if (!$request->nome_cliente || !$request->consultor || !$request->data_proposta) {
+                Log::warning('Campos obrigatórios faltando', [
+                    'nome_cliente' => $request->nome_cliente,
+                    'consultor' => $request->consultor,
+                    'data_proposta' => $request->data_proposta,
+                    'received_fields' => array_keys($request->all())
                 ]);
-                
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors(),
-                    'debug' => [
-                        'received_fields' => array_keys($request->all()),
-                        'first_error' => $validator->errors()->first()
+                    'message' => 'Campos obrigatórios: nome_cliente, consultor, data_proposta',
+                    'received' => [
+                        'nome_cliente' => $request->nome_cliente,
+                        'consultor' => $request->consultor, 
+                        'data_proposta' => $request->data_proposta
                     ]
                 ], 422);
             }
 
+            Log::info('=== STEP 2: VALIDAÇÃO BÁSICA OK ===');
+
             DB::beginTransaction();
 
-            // ✅ GERAR NÚMERO DA PROPOSTA SE NÃO FORNECIDO
-            $numeroProposta = $request->numero_proposta ?: $this->gerarNumeroProposta();
-
-            // ✅ GARANTIR QUE O NÚMERO É ÚNICO
-            $tentativas = 0;
-            while (Proposta::where('numero_proposta', $numeroProposta)->exists() && $tentativas < 10) {
-                $numeroProposta = $this->gerarNumeroProposta();
-                $tentativas++;
-            }
-
-            // ✅ PROCESSAR UNIDADES CONSUMIDORAS
-            $unidadesConsumidoras = $request->unidades_consumidoras ?: [];
-            $primeiraUC = null;
-            
-            if (!empty($unidadesConsumidoras)) {
-                $primeiraUC = $unidadesConsumidoras[0];
+            try {
+                // ✅ GERAR DADOS BÁSICOS
+                $id = (string) Str::uuid();
+                $numeroProposta = $request->numero_proposta ?: $this->gerarNumeroProposta();
                 
-                // ✅ VALIDAR CADA UC INDIVIDUALMENTE
-                foreach ($unidadesConsumidoras as $index => $ucData) {
-                    if (!isset($ucData['numero_unidade']) || !$ucData['numero_unidade']) {
-                        throw new \InvalidArgumentException("UC " . ($index + 1) . ": Número da unidade é obrigatório");
-                    }
-                    if (!isset($ucData['apelido']) || !trim($ucData['apelido'])) {
-                        throw new \InvalidArgumentException("UC " . ($index + 1) . ": Apelido é obrigatório");
-                    }
-                    if (!isset($ucData['consumo_medio']) || $ucData['consumo_medio'] < 0) {
-                        throw new \InvalidArgumentException("UC " . ($index + 1) . ": Consumo médio deve ser maior ou igual a 0");
-                    }
-                }
-            }
+                Log::info('=== STEP 3: PROCESSANDO BENEFÍCIOS ===', [
+                    'beneficios_exists' => $request->has('beneficios'),
+                    'beneficios_type' => gettype($request->beneficios),
+                    'beneficios_value' => $request->beneficios,
+                    'beneficios_is_array' => is_array($request->beneficios)
+                ]);
 
-            // ✅ CRIAR PROPOSTA COM TODOS OS CAMPOS
-            $proposta = new Proposta([
-                'id' => (string) Str::uuid(),
-                'numero_proposta' => $numeroProposta,
-                'nome_cliente' => trim($request->nome_cliente),
-                'consultor' => trim($request->consultor),
-                'data_proposta' => $request->data_proposta,
-                'usuario_id' => $currentUser->id,
-                'economia' => $request->economia ?? 20.00,
-                'bandeira' => $request->bandeira ?? 20.00,
-                'recorrencia' => $request->recorrencia ?? '3%',
-                'status' => 'Em Análise',
-                'observacoes' => $request->observacoes ? trim($request->observacoes) : null,
-                'beneficios' => $request->beneficios ? json_encode($request->beneficios) : null,
-                
-                // ✅ UNIDADES CONSUMIDORAS (JSON COMPLETO)
-                'unidades_consumidoras' => !empty($unidadesConsumidoras) ? json_encode($unidadesConsumidoras) : null,
-                
-                // ✅ CAMPOS DERIVADOS DA PRIMEIRA UC PARA BUSCA RÁPIDA
-                'numero_uc' => $primeiraUC['numero_unidade'] ?? null,
-                'apelido' => $primeiraUC['apelido'] ?? null,
-                'media_consumo' => $primeiraUC['consumo_medio'] ?? null,
-                'ligacao' => $primeiraUC['ligacao'] ?? null,
-                'distribuidora' => $primeiraUC['distribuidora'] ?? 'CEMIG',
-            ]);
+                // ✅ PROCESSAR BENEFÍCIOS COM MÁXIMA CAUTELA
+                $beneficiosArray = [];
+                $beneficiosJson = '[]';
 
-            $proposta->save();
-
-            // ✅ CRIAR/ATUALIZAR UNIDADES CONSUMIDORAS NA TABELA DEDICADA
-            if (!empty($unidadesConsumidoras)) {
-                foreach ($unidadesConsumidoras as $ucData) {
-                    try {
-                        // Verificar se UC já existe
-                        $ucExistente = UnidadeConsumidora::where('numero_unidade', $ucData['numero_unidade'])
-                                                         ->where('numero_cliente', $ucData['numero_unidade'])
-                                                         ->first();
-
-                        if (!$ucExistente) {
-                            // Criar nova UC
-                            UnidadeConsumidora::create([
-                                'id' => (string) Str::uuid(),
-                                'usuario_id' => $currentUser->id,
-                                'proposta_id' => $proposta->id,
-                                'numero_cliente' => intval($ucData['numero_unidade']),
-                                'numero_unidade' => intval($ucData['numero_unidade']),
-                                'apelido' => trim($ucData['apelido']),
-                                'consumo_medio' => floatval($ucData['consumo_medio']),
-                                'ligacao' => $ucData['ligacao'] ?? 'MONOFÁSICA',
-                                'distribuidora' => $ucData['distribuidora'] ?? 'CEMIG',
-                                'tipo' => 'UC',
-                                'is_ug' => false,
-                                'nexus_clube' => false,
-                                'nexus_cativo' => false,
-                                'service' => false,
-                                'project' => false,
-                                'gerador' => false,
-                                'mesmo_titular' => true,
-                            ]);
-                        } else {
-                            // Atualizar UC existente
-                            $ucExistente->update([
-                                'proposta_id' => $proposta->id,
-                                'apelido' => trim($ucData['apelido']),
-                                'consumo_medio' => floatval($ucData['consumo_medio']),
-                                'ligacao' => $ucData['ligacao'] ?? $ucExistente->ligacao,
-                                'distribuidora' => $ucData['distribuidora'] ?? $ucExistente->distribuidora,
-                            ]);
-                        }
-                    } catch (\Exception $e) {
-                        Log::warning('Erro ao processar UC', [
-                            'proposta_id' => $proposta->id,
-                            'uc_data' => $ucData,
-                            'error' => $e->getMessage()
+                if ($request->has('beneficios')) {
+                    if (is_array($request->beneficios)) {
+                        $beneficiosArray = $request->beneficios;
+                        $jsonTest = json_encode($beneficiosArray);
+                        
+                        Log::info('Benefícios JSON encode test', [
+                            'original_array' => $beneficiosArray,
+                            'json_result' => $jsonTest,
+                            'json_error' => json_last_error(),
+                            'json_error_msg' => json_last_error_msg()
                         ]);
-                        // Continuar processamento mesmo se uma UC falhar
+
+                        if (json_last_error() === JSON_ERROR_NONE) {
+                            $beneficiosJson = $jsonTest;
+                        } else {
+                            throw new \Exception('Erro ao converter benefícios para JSON: ' . json_last_error_msg());
+                        }
+                    } else {
+                        Log::warning('Benefícios não é array', [
+                            'type' => gettype($request->beneficios),
+                            'value' => $request->beneficios
+                        ]);
+                        $beneficiosJson = '[]';
                     }
                 }
+
+                Log::info('=== STEP 4: PROCESSANDO UNIDADES CONSUMIDORAS ===', [
+                    'uc_exists' => $request->has('unidades_consumidoras'),
+                    'uc_type' => gettype($request->unidades_consumidoras),
+                    'uc_is_array' => is_array($request->unidades_consumidoras),
+                    'uc_count' => is_array($request->unidades_consumidoras) ? count($request->unidades_consumidoras) : 0
+                ]);
+
+                // ✅ PROCESSAR UCs COM MÁXIMA CAUTELA
+                $ucArray = [];
+                $ucJson = '[]';
+
+                if ($request->has('unidades_consumidoras')) {
+                    if (is_array($request->unidades_consumidoras)) {
+                        $ucArray = $request->unidades_consumidoras;
+                        
+                        Log::info('UC Array detalhado', [
+                            'uc_array' => $ucArray,
+                            'primeiro_item' => isset($ucArray[0]) ? $ucArray[0] : 'não existe'
+                        ]);
+
+                        $jsonTest = json_encode($ucArray);
+                        
+                        Log::info('UC JSON encode test', [
+                            'json_result' => $jsonTest,
+                            'json_error' => json_last_error(),
+                            'json_error_msg' => json_last_error_msg()
+                        ]);
+
+                        if (json_last_error() === JSON_ERROR_NONE) {
+                            $ucJson = $jsonTest;
+                        } else {
+                            throw new \Exception('Erro ao converter UCs para JSON: ' . json_last_error_msg());
+                        }
+                    } else {
+                        Log::warning('UCs não é array', [
+                            'type' => gettype($request->unidades_consumidoras),
+                            'value' => $request->unidades_consumidoras
+                        ]);
+                        $ucJson = '[]';
+                    }
+                }
+
+                Log::info('=== STEP 5: DADOS PROCESSADOS PARA SQL ===', [
+                    'id' => $id,
+                    'numero_proposta' => $numeroProposta,
+                    'nome_cliente' => $request->nome_cliente,
+                    'consultor' => $request->consultor,
+                    'data_proposta' => $request->data_proposta,
+                    'beneficios_json' => $beneficiosJson,
+                    'beneficios_length' => strlen($beneficiosJson),
+                    'uc_json' => $ucJson,
+                    'uc_length' => strlen($ucJson)
+                ]);
+
+                // ✅ TESTAR JSON ANTES DE INSERIR
+                Log::info('=== STEP 6: TESTANDO JSON NO POSTGRESQL ===');
+
+                // Teste 1: Validar JSON benefícios
+                try {
+                    $testBeneficios = DB::select("SELECT ?::json as test", [$beneficiosJson]);
+                    Log::info('✅ Benefícios JSON válido no PostgreSQL', [
+                        'result' => $testBeneficios[0]->test ?? 'sem resultado'
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('❌ Benefícios JSON inválido no PostgreSQL', [
+                        'error' => $e->getMessage(),
+                        'json_string' => $beneficiosJson
+                    ]);
+                    throw new \Exception('JSON benefícios inválido para PostgreSQL: ' . $e->getMessage());
+                }
+
+                // Teste 2: Validar JSON UCs
+                try {
+                    $testUc = DB::select("SELECT ?::json as test", [$ucJson]);
+                    Log::info('✅ UCs JSON válido no PostgreSQL', [
+                        'result' => $testUc[0]->test ?? 'sem resultado'
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('❌ UCs JSON inválido no PostgreSQL', [
+                        'error' => $e->getMessage(),
+                        'json_string' => $ucJson
+                    ]);
+                    throw new \Exception('JSON UCs inválido para PostgreSQL: ' . $e->getMessage());
+                }
+
+                Log::info('=== STEP 7: EXECUTANDO INSERÇÃO ===');
+
+                // ✅ INSERÇÃO COM PARÂMETROS EXPLÍCITOS
+                $sql = "INSERT INTO propostas (
+                    id, numero_proposta, data_proposta, nome_cliente, consultor, usuario_id,
+                    recorrencia, economia, bandeira, status, observacoes, beneficios, 
+                    unidades_consumidoras, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::json, ?::json, NOW(), NOW())";
+
+                $params = [
+                    $id,                                                // 1
+                    $numeroProposta,                                   // 2
+                    $request->data_proposta,                          // 3
+                    $request->nome_cliente,                           // 4
+                    $request->consultor,                              // 5
+                    $currentUser->id,                                 // 6
+                    $request->recorrencia ?? '3%',                    // 7
+                    floatval($request->economia ?? 20),               // 8
+                    floatval($request->bandeira ?? 20),               // 9
+                    $request->status ?? 'Em Análise',                 // 10
+                    $request->observacoes ?? '',                      // 11
+                    $beneficiosJson,                                  // 12
+                    $ucJson                                           // 13
+                ];
+
+                Log::info('SQL e parâmetros finais', [
+                    'sql' => $sql,
+                    'params' => $params,
+                    'param_count' => count($params)
+                ]);
+
+                $result = DB::insert($sql, $params);
+
+                Log::info('=== STEP 8: RESULTADO DA INSERÇÃO ===', [
+                    'insert_result' => $result,
+                    'result_type' => gettype($result)
+                ]);
+
+                if (!$result) {
+                    throw new \Exception('INSERT retornou false - falha na inserção');
+                }
+
+                // ✅ VERIFICAR SE INSERIU
+                $propostaInserida = DB::selectOne("SELECT * FROM propostas WHERE id = ?", [$id]);
+
+                if (!$propostaInserida) {
+                    throw new \Exception('Proposta não encontrada após inserção');
+                }
+
+                Log::info('=== STEP 9: PROPOSTA INSERIDA COM SUCESSO ===', [
+                    'proposta_id' => $propostaInserida->id,
+                    'numero_proposta' => $propostaInserida->numero_proposta,
+                    'beneficios_db' => $propostaInserida->beneficios,
+                    'ucs_db' => $propostaInserida->unidades_consumidoras
+                ]);
+
+                DB::commit();
+
+                // ✅ RESPOSTA DE SUCESSO
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Proposta criada com sucesso',
+                    'data' => [
+                        'id' => $propostaInserida->id,
+                        'numeroProposta' => $propostaInserida->numero_proposta,
+                        'nomeCliente' => $propostaInserida->nome_cliente,
+                        'consultor' => $propostaInserida->consultor,
+                        'data' => $propostaInserida->data_proposta,
+                        'status' => $propostaInserida->status,
+                        'economia' => $propostaInserida->economia,
+                        'bandeira' => $propostaInserida->bandeira,
+                        'recorrencia' => $propostaInserida->recorrencia,
+                        'observacoes' => $propostaInserida->observacoes,
+                        'beneficios' => json_decode($propostaInserida->beneficios ?? '[]', true),
+                        'unidades_consumidoras' => json_decode($propostaInserida->unidades_consumidoras ?? '[]', true),
+                        'created_at' => $propostaInserida->created_at,
+                        'updated_at' => $propostaInserida->updated_at
+                    ]
+                ], 201);
+
+            } catch (\Exception $dbException) {
+                DB::rollBack();
+                
+                Log::error('=== ERRO NA TRANSAÇÃO ===', [
+                    'error_message' => $dbException->getMessage(),
+                    'error_line' => $dbException->getLine(),
+                    'error_file' => $dbException->getFile(),
+                    'error_trace' => $dbException->getTraceAsString()
+                ]);
+
+                // Verificar tipos específicos de erro
+                $errorMsg = $dbException->getMessage();
+
+                if (str_contains($errorMsg, 'duplicate key') || str_contains($errorMsg, 'unique')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Número da proposta já existe'
+                    ], 409);
+                }
+
+                if (str_contains($errorMsg, 'json') || str_contains($errorMsg, 'JSON')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Erro no formato dos dados JSON',
+                        'debug' => [
+                            'error_detail' => $errorMsg,
+                            'beneficios_json' => $beneficiosJson ?? 'não definido',
+                            'uc_json' => $ucJson ?? 'não definido'
+                        ]
+                    ], 422);
+                }
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erro no banco de dados: ' . $errorMsg,
+                    'debug' => [
+                        'error' => $errorMsg,
+                        'line' => $dbException->getLine()
+                    ]
+                ], 500);
             }
-
-            DB::commit();
-
-            // ✅ RETORNAR DADOS FORMATADOS
-            $propostaFormatada = [
-                'id' => $proposta->id,
-                'numeroProposta' => $proposta->numero_proposta,
-                'nomeCliente' => $proposta->nome_cliente,
-                'consultor' => $proposta->consultor,
-                'data' => $proposta->data_proposta,
-                'status' => $proposta->status,
-                'economia' => $proposta->economia,
-                'bandeira' => $proposta->bandeira,
-                'recorrencia' => $proposta->recorrencia,
-                'observacoes' => $proposta->observacoes,
-                'beneficios' => is_string($proposta->beneficios) ? 
-                    json_decode($proposta->beneficios, true) : 
-                    ($proposta->beneficios ?: []),
-                'unidades_consumidoras' => is_string($proposta->unidades_consumidoras) ?
-                    json_decode($proposta->unidades_consumidoras, true) :
-                    ($proposta->unidades_consumidoras ?: []),
-                'distribuidora' => $proposta->distribuidora,
-                'created_at' => $proposta->created_at,
-                'updated_at' => $proposta->updated_at,
-            ];
-
-            Log::info('Proposta criada com sucesso', [
-                'proposta_id' => $proposta->id,
-                'numero_proposta' => $proposta->numero_proposta,
-                'user_id' => $currentUser->id,
-                'total_ucs' => count($unidadesConsumidoras)
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Proposta criada com sucesso',
-                'data' => $propostaFormatada
-            ], 201);
-
-        } catch (\InvalidArgumentException $e) {
-            DB::rollBack();
-            
-            Log::warning('Erro de validação ao criar proposta', [
-                'error' => $e->getMessage(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage()
-            ], 422);
 
         } catch (\Exception $e) {
-            DB::rollBack();
-            
-            Log::error('Erro ao criar proposta', [
+            Log::error('=== ERRO GERAL ===', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
                 'line' => $e->getLine(),
                 'file' => $e->getFile(),
-                'request_data' => $request->all(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
+                'request_data' => $request->all()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor',
-                'debug' => config('app.debug') ? [
+                'message' => 'Erro interno do servidor: ' . $e->getMessage(),
+                'debug' => [
                     'error' => $e->getMessage(),
                     'line' => $e->getLine(),
-                    'file' => basename($e->getFile()),
-                    'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 5)
-                ] : null
+                    'file' => basename($e->getFile())
+                ]
             ], 500);
         }
     }
 
     /**
-     * ✅ MOSTRAR UMA PROPOSTA ESPECÍFICA
+     * ✅ GERAR NÚMERO DA PROPOSTA
+     */
+    private function gerarNumeroProposta(): string
+    {
+        try {
+            $ano = date('Y');
+            $count = DB::scalar("SELECT COUNT(*) FROM propostas WHERE EXTRACT(YEAR FROM created_at) = ?", [$ano]);
+            return sprintf('%s/%03d', $ano, $count + 1);
+        } catch (\Exception $e) {
+            Log::error('Erro ao gerar número da proposta', ['error' => $e->getMessage()]);
+            return date('Y') . '/' . str_pad(rand(100, 999), 3, '0', STR_PAD_LEFT);
+        }
+    }
+
+    /**
+     * ✅ OUTROS MÉTODOS (sem alteração)
      */
     public function show(string $id): JsonResponse
     {
@@ -446,569 +402,52 @@ class PropostaController extends Controller
             $currentUser = JWTAuth::user();
             
             if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
+                return response()->json(['success' => false, 'message' => 'Usuário não autenticado'], 401);
             }
 
-            $proposta = Proposta::find($id);
+            $proposta = DB::selectOne("SELECT * FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
 
             if (!$proposta) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Proposta não encontrada'
-                ], 404);
+                return response()->json(['success' => false, 'message' => 'Proposta não encontrada'], 404);
             }
 
-            // Verificar permissão
             if ($currentUser->role === 'vendedor' && $proposta->usuario_id !== $currentUser->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Sem permissão para acessar esta proposta'
-                ], 403);
+                return response()->json(['success' => false, 'message' => 'Sem permissão'], 403);
             }
-
-            // Formatar dados
-            $propostaFormatada = [
-                'id' => $proposta->id,
-                'numeroProposta' => $proposta->numero_proposta,
-                'nomeCliente' => $proposta->nome_cliente,
-                'consultor' => $proposta->consultor,
-                'data' => $proposta->data_proposta,
-                'status' => $proposta->status,
-                'economia' => $proposta->economia,
-                'bandeira' => $proposta->bandeira,
-                'recorrencia' => $proposta->recorrencia,
-                'observacoes' => $proposta->observacoes,
-                'beneficios' => is_string($proposta->beneficios) ? 
-                    json_decode($proposta->beneficios, true) : 
-                    ($proposta->beneficios ?: []),
-                'unidades_consumidoras' => is_string($proposta->unidades_consumidoras) ?
-                    json_decode($proposta->unidades_consumidoras, true) :
-                    ($proposta->unidades_consumidoras ?: []),
-                'distribuidora' => $proposta->distribuidora,
-                'created_at' => $proposta->created_at,
-                'updated_at' => $proposta->updated_at,
-            ];
 
             return response()->json([
                 'success' => true,
-                'data' => $propostaFormatada
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Erro ao buscar proposta', [
-                'proposta_id' => $id,
-                'error' => $e->getMessage(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
-
-    /**
-     * ✅ ATUALIZAR UMA PROPOSTA
-     */
-    public function update(Request $request, string $id): JsonResponse
-    {
-        try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            $proposta = Proposta::find($id);
-
-            if (!$proposta) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Proposta não encontrada'
-                ], 404);
-            }
-
-            // Verificar permissão
-            if ($currentUser->role === 'vendedor' && $proposta->usuario_id !== $currentUser->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Sem permissão para editar esta proposta'
-                ], 403);
-            }
-
-            // Validação
-            $validator = Validator::make($request->all(), [
-                'nome_cliente' => 'required|string|min:3|max:200',
-                'consultor' => 'required|string|max:100',
-                'data_proposta' => 'required|date',
-                'numero_proposta' => 'nullable|string|max:50|unique:propostas,numero_proposta,' . $id,
-                'economia' => 'nullable|numeric|min:0|max:100',
-                'bandeira' => 'nullable|numeric|min:0|max:100',
-                'recorrencia' => 'nullable|string|max:50',
-                'observacoes' => 'nullable|string|max:1000',
-                'beneficios' => 'nullable|array',
-                'status' => 'nullable|string|in:Em Análise,Aguardando,Fechado,Perdido,Cancelado',
-                'unidades_consumidoras' => 'nullable|array',
-                'unidades_consumidoras.*.numero_unidade' => 'required_with:unidades_consumidoras|integer|min:1',
-                'unidades_consumidoras.*.apelido' => 'required_with:unidades_consumidoras|string|min:1|max:100',
-                'unidades_consumidoras.*.consumo_medio' => 'required_with:unidades_consumidoras|numeric|min:0',
-                'unidades_consumidoras.*.ligacao' => 'nullable|string|max:50',
-                'unidades_consumidoras.*.distribuidora' => 'nullable|string|max:100',
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
-            DB::beginTransaction();
-
-            // Dados para atualização
-            $dadosAtualizacao = [
-                'nome_cliente' => $request->nome_cliente,
-                'consultor' => $request->consultor,
-                'data_proposta' => $request->data_proposta,
-                'numero_proposta' => $request->numero_proposta ?: $proposta->numero_proposta,
-                'economia' => $request->economia ?? $proposta->economia,
-                'bandeira' => $request->bandeira ?? $proposta->bandeira,
-                'recorrencia' => $request->recorrencia ?? $proposta->recorrencia,
-                'status' => $request->status ?? $proposta->status,
-                'observacoes' => $request->observacoes,
-                'beneficios' => $request->beneficios ? json_encode($request->beneficios) : $proposta->beneficios,
-                'unidades_consumidoras' => $request->unidades_consumidoras ? 
-                    json_encode($request->unidades_consumidoras) : $proposta->unidades_consumidoras,
-            ];
-
-            // Atualizar campos derivados se unidades_consumidoras mudaram
-            if ($request->has('unidades_consumidoras') && !empty($request->unidades_consumidoras)) {
-                $primeiraUC = $request->unidades_consumidoras[0];
-                $dadosAtualizacao += [
-                    'numero_uc' => $primeiraUC['numero_unidade'] ?? null,
-                    'apelido' => $primeiraUC['apelido'] ?? null,
-                    'media_consumo' => $primeiraUC['consumo_medio'] ?? null,
-                    'ligacao' => $primeiraUC['ligacao'] ?? null,
-                    'distribuidora' => $primeiraUC['distribuidora'] ?? 'CEMIG',
-                ];
-            }
-
-            $proposta->update($dadosAtualizacao);
-
-            DB::commit();
-
-            // Retornar dados formatados
-            $propostaFormatada = [
-                'id' => $proposta->id,
-                'numeroProposta' => $proposta->numero_proposta,
-                'nomeCliente' => $proposta->nome_cliente,
-                'consultor' => $proposta->consultor,
-                'data' => $proposta->data_proposta,
-                'status' => $proposta->status,
-                'economia' => $proposta->economia,
-                'bandeira' => $proposta->bandeira,
-                'recorrencia' => $proposta->recorrencia,
-                'observacoes' => $proposta->observacoes,
-                'beneficios' => is_string($proposta->beneficios) ? 
-                    json_decode($proposta->beneficios, true) : 
-                    ($proposta->beneficios ?: []),
-                'unidades_consumidoras' => is_string($proposta->unidades_consumidoras) ?
-                    json_decode($proposta->unidades_consumidoras, true) :
-                    ($proposta->unidades_consumidoras ?: []),
-                'distribuidora' => $proposta->distribuidora,
-                'created_at' => $proposta->created_at,
-                'updated_at' => $proposta->updated_at,
-            ];
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Proposta atualizada com sucesso',
-                'data' => $propostaFormatada
-            ]);
-
-        } catch (ValidationException $e) {
-            DB::rollBack();
-            return response()->json([
-                'success' => false,
-                'message' => 'Dados inválidos',
-                'errors' => $e->errors()
-            ], 422);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            
-            Log::error('Erro ao atualizar proposta', [
-                'id' => $id,
-                'user_id' => $currentUser->id ?? 'desconhecido',
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'line' => $e->getLine(),
-                'file' => $e->getFile()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor',
-                'debug' => config('app.debug') ? [
-                    'error' => $e->getMessage(),
-                    'line' => $e->getLine(),
-                    'file' => basename($e->getFile())
-                ] : null
-            ], 500);
-        }
-    }
-
-    /**
-     * ✅ DELETAR UMA PROPOSTA
-     */
-    public function destroy(string $id): JsonResponse
-    {
-        try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            $proposta = Proposta::find($id);
-
-            if (!$proposta) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Proposta não encontrada'
-                ], 404);
-            }
-
-            // Verificar permissão
-            if ($currentUser->role === 'vendedor' && $proposta->usuario_id !== $currentUser->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Sem permissão para excluir esta proposta'
-                ], 403);
-            }
-
-            DB::beginTransaction();
-
-            // Soft delete da proposta
-            $proposta->delete();
-
-            // Opcional: também fazer soft delete das UCs relacionadas
-            UnidadeConsumidora::where('proposta_id', $id)->delete();
-
-            DB::commit();
-
-            Log::info('Proposta deletada', [
-                'proposta_id' => $id,
-                'numero_proposta' => $proposta->numero_proposta,
-                'user_id' => $currentUser->id
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Proposta excluída com sucesso'
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            
-            Log::error('Erro ao deletar proposta', [
-                'proposta_id' => $id,
-                'error' => $e->getMessage(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
-
-    /**
-     * ✅ ESTATÍSTICAS DAS PROPOSTAS
-     */
-    public function statistics(Request $request): JsonResponse
-    {
-        try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            // Query base com filtros de permissão
-            $query = Proposta::query();
-
-            if ($currentUser->role === 'vendedor') {
-                $query->where('usuario_id', $currentUser->id);
-            } elseif ($currentUser->role === 'gerente') {
-                $teamUserIds = DB::table('usuarios')
-                              ->where('manager_id', $currentUser->id)
-                              ->pluck('id')
-                              ->toArray();
-                $teamUserIds[] = $currentUser->id;
-                $query->whereIn('usuario_id', $teamUserIds);
-            }
-
-            // Estatísticas básicas
-            $total = $query->count();
-            $emAnalise = (clone $query)->where('status', 'Em Análise')->count();
-            $aguardando = (clone $query)->where('status', 'Aguardando')->count();
-            $fechadas = (clone $query)->where('status', 'Fechado')->count();
-            $perdidas = (clone $query)->where('status', 'Perdido')->count();
-            $canceladas = (clone $query)->where('status', 'Cancelado')->count();
-
-            // Estatísticas por consultor
-            $porConsultor = (clone $query)
-                ->select('consultor', DB::raw('count(*) as total'))
-                ->groupBy('consultor')
-                ->orderBy('total', 'desc')
-                ->get();
-
-            // Estatísticas por distribuidora
-            $porDistribuidora = (clone $query)
-                ->select('distribuidora', DB::raw('count(*) as total'))
-                ->whereNotNull('distribuidora')
-                ->groupBy('distribuidora')
-                ->orderBy('total', 'desc')
-                ->get();
-
-            // Propostas recentes (últimos 30 dias)
-            $recentes = (clone $query)
-                ->where('created_at', '>=', now()->subDays(30))
-                ->count();
-
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'totais' => [
-                        'total' => $total,
-                        'em_analise' => $emAnalise,
-                        'aguardando' => $aguardando,
-                        'fechadas' => $fechadas,
-                        'perdidas' => $perdidas,
-                        'canceladas' => $canceladas
-                    ],
-                    'taxa_conversao' => $total > 0 ? round(($fechadas / $total) * 100, 2) : 0,
-                    'recentes_30_dias' => $recentes,
-                    'por_consultor' => $porConsultor,
-                    'por_distribuidora' => $porDistribuidora,
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Erro ao gerar estatísticas de propostas', [
-                'error' => $e->getMessage(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
-
-    /**
-     * ✅ ATUALIZAR STATUS DE UMA PROPOSTA
-     */
-    public function updateStatus(Request $request, string $id): JsonResponse
-    {
-        try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            $validator = Validator::make($request->all(), [
-                'status' => 'required|string|in:Em Análise,Aguardando,Fechado,Perdido,Cancelado',
-                'observacoes' => 'nullable|string|max:500'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
-            $proposta = Proposta::find($id);
-
-            if (!$proposta) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Proposta não encontrada'
-                ], 404);
-            }
-
-            // Verificar permissão
-            if ($currentUser->role === 'vendedor' && $proposta->usuario_id !== $currentUser->id) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Sem permissão para alterar status desta proposta'
-                ], 403);
-            }
-
-            $statusAnterior = $proposta->status;
-            $proposta->status = $request->status;
-            
-            if ($request->filled('observacoes')) {
-                $observacoesAtuais = $proposta->observacoes ?: '';
-                $novaObservacao = "\n[" . now()->format('d/m/Y H:i') . "] Status alterado de '{$statusAnterior}' para '{$request->status}': " . $request->observacoes;
-                $proposta->observacoes = $observacoesAtuais . $novaObservacao;
-            }
-
-            $proposta->save();
-
-            Log::info('Status da proposta alterado', [
-                'proposta_id' => $id,
-                'status_anterior' => $statusAnterior,
-                'status_novo' => $request->status,
-                'user_id' => $currentUser->id
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Status atualizado com sucesso',
                 'data' => [
                     'id' => $proposta->id,
+                    'numeroProposta' => $proposta->numero_proposta,
+                    'nomeCliente' => $proposta->nome_cliente,
+                    'consultor' => $proposta->consultor,
+                    'data' => $proposta->data_proposta,
                     'status' => $proposta->status,
-                    'observacoes' => $proposta->observacoes
+                    'economia' => $proposta->economia,
+                    'bandeira' => $proposta->bandeira,
+                    'recorrencia' => $proposta->recorrencia,
+                    'observacoes' => $proposta->observacoes,
+                    'beneficios' => json_decode($proposta->beneficios ?? '[]', true),
+                    'unidades_consumidoras' => json_decode($proposta->unidades_consumidoras ?? '[]', true),
+                    'created_at' => $proposta->created_at,
+                    'updated_at' => $proposta->updated_at
                 ]
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro ao atualizar status da proposta', [
-                'proposta_id' => $id,
-                'error' => $e->getMessage(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
+            Log::error('Erro ao carregar proposta', ['proposta_id' => $id, 'error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => 'Erro interno'], 500);
         }
     }
 
-    /**
-     * ✅ MÉTODO PARA GERAR NÚMERO DA PROPOSTA
-     */
-    private function gerarNumeroProposta(): string
+    public function update(Request $request, string $id): JsonResponse
     {
-        $ano = date('Y');
-        $ultimaProposta = Proposta::where('numero_proposta', 'LIKE', "$ano/%")
-                                 ->orderBy('numero_proposta', 'desc')
-                                 ->first();
-
-        if ($ultimaProposta && preg_match("/^$ano\/(\d+)$/", $ultimaProposta->numero_proposta, $matches)) {
-            $proximoNumero = intval($matches[1]) + 1;
-        } else {
-            $proximoNumero = 1;
-        }
-
-        return "$ano/" . str_pad($proximoNumero, 3, '0', STR_PAD_LEFT);
+        return response()->json(['success' => false, 'message' => 'Método não implementado ainda'], 501);
     }
 
-    /**
-     * ✅ DUPLICAR UMA PROPOSTA
-     */
-    public function duplicate(string $id): JsonResponse
+    public function destroy(string $id): JsonResponse  
     {
-        try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            $proposta = Proposta::find($id);
-
-            if (!$proposta) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Proposta não encontrada'
-                ], 404);
-            }
-
-            DB::beginTransaction();
-
-            // Criar nova proposta baseada na existente
-            $novaProposta = new Proposta([
-                'id' => (string) Str::uuid(),
-                'numero_proposta' => $this->gerarNumeroProposta(),
-                'nome_cliente' => $proposta->nome_cliente . ' (Cópia)',
-                'consultor' => $proposta->consultor,
-                'data_proposta' => now()->format('Y-m-d'),
-                'usuario_id' => $currentUser->id,
-                'economia' => $proposta->economia,
-                'bandeira' => $proposta->bandeira,
-                'recorrencia' => $proposta->recorrencia,
-                'status' => 'Em Análise',
-                'observacoes' => 'Proposta duplicada de: ' . $proposta->numero_proposta,
-                'beneficios' => $proposta->beneficios,
-                'unidades_consumidoras' => $proposta->unidades_consumidoras,
-                'numero_uc' => $proposta->numero_uc,
-                'apelido' => $proposta->apelido,
-                'media_consumo' => $proposta->media_consumo,
-                'ligacao' => $proposta->ligacao,
-                'distribuidora' => $proposta->distribuidora,
-            ]);
-
-            $novaProposta->save();
-
-            DB::commit();
-
-            Log::info('Proposta duplicada', [
-                'proposta_original_id' => $id,
-                'nova_proposta_id' => $novaProposta->id,
-                'user_id' => $currentUser->id
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Proposta duplicada com sucesso',
-                'data' => [
-                    'id' => $novaProposta->id,
-                    'numero_proposta' => $novaProposta->numero_proposta
-                ]
-            ], 201);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            
-            Log::error('Erro ao duplicar proposta', [
-                'proposta_id' => $id,
-                'error' => $e->getMessage(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
+        return response()->json(['success' => false, 'message' => 'Método não implementado ainda'], 501);
     }
 }

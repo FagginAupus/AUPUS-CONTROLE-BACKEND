@@ -2,282 +2,213 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Configuracao;
-use App\Models\Usuario;
-use App\Models\Notificacao;
+use App\Models\ControleClube;
+use App\Models\Proposta;
+use App\Models\UnidadeConsumidora;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Cache;
-use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Routing\Controllers\HasMiddleware;
-use Illuminate\Routing\Controllers\Middleware;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Tymon\JWTAuth\Facades\JWTAuth;
 
-class ConfiguracaoController extends Controller implements HasMiddleware
+class ControleController extends Controller
 {
     /**
-     * Get the middleware that should be assigned to the controller.
-     */
-    public static function middleware(): array
-    {
-        return [
-            new Middleware('auth:api'),
-        ];
-    }
-
-    /**
-     * Listar todas as configurações
+     * ✅ LISTAR CONTROLES COM FILTROS E PAGINAÇÃO
      */
     public function index(Request $request): JsonResponse
     {
-        $currentUser = JWTAuth::user();
-
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
-        // Apenas admins podem visualizar configurações
-        if ($currentUser->role !== 'admin') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Apenas administradores podem acessar configurações'
-            ], 403);
-        }
-
         try {
-            $query = Configuracao::query()->with('updatedBy');
-
-            // Filtro por grupo
-            if ($request->filled('grupo')) {
-                $query->porGrupo($request->grupo);
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
             }
 
-            // Filtro por tipo
-            if ($request->filled('tipo')) {
-                $query->porTipo($request->tipo);
-            }
-
-            // Busca por chave ou descrição
-            if ($request->filled('search')) {
-                $search = $request->search;
-                $query->where(function ($q) use ($search) {
-                    $q->where('chave', 'ILIKE', "%{$search}%")
-                      ->orWhere('descricao', 'ILIKE', "%{$search}%");
-                });
-            }
-
-            // Ordenação
-            $orderBy = $request->get('order_by', 'grupo');
-            $orderDirection = $request->get('order_direction', 'asc');
-            $query->orderBy($orderBy, $orderDirection)->orderBy('chave', 'asc');
-
-            $configuracoes = $query->get();
-
-            return response()->json([
-                'success' => true,
-                'data' => $configuracoes->map(function ($config) {
-                    return $this->transformConfiguracaoForAPI($config);
-                })
-            ]);
-
-        } catch (\Exception $e) {
-            \Log::error('Erro ao listar configurações', [
+            Log::info('Carregando controle clube', [
                 'user_id' => $currentUser->id,
-                'error' => $e->getMessage(),
+                'user_role' => $currentUser->role,
                 'filters' => $request->all()
             ]);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
+            // Parâmetros de paginação
+            $page = max(1, (int)$request->get('page', 1));
+            $perPage = min(100, max(1, (int)$request->get('per_page', 50)));
 
-    /**
-     * Buscar configuração por chave
-     */
-    public function show(string $chave): JsonResponse
-    {
-        $currentUser = JWTAuth::user();
+            // Query base
+            $query = ControleClube::with(['proposta', 'unidadeConsumidora', 'unidadeGeradora']);
 
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
-        // Algumas configurações são públicas para consultores
-        $configuracoesPúblicas = [
-            'economia_padrao', 'bandeira_padrao', 'recorrencia_padrao', 
-            'beneficios_padrao', 'empresa_nome', 'sistema_versao'
-        ];
-
-        if (!$currentUser->isAdmin() && !in_array($chave, $configuracoesPúblicas)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Acesso negado'
-            ], 403);
-        }
-
-        try {
-            $configuracao = Configuracao::with('updatedBy')->porChave($chave)->first();
-
-            if (!$configuracao) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Configuração não encontrada'
-                ], 404);
+            // Filtros baseados no role do usuário
+            if ($currentUser->role === 'vendedor') {
+                $query->whereHas('proposta', function ($q) use ($currentUser) {
+                    $q->where('usuario_id', $currentUser->id);
+                });
+            } elseif ($currentUser->role === 'gerente') {
+                $teamIds = collect([$currentUser->id]);
+                if (method_exists($currentUser, 'team')) {
+                    $teamIds = $teamIds->merge($currentUser->team()->pluck('id'));
+                }
+                $query->whereHas('proposta', function ($q) use ($teamIds) {
+                    $q->whereIn('usuario_id', $teamIds);
+                });
             }
 
-            return response()->json([
-                'success' => true,
-                'data' => $this->transformConfiguracaoForAPI($configuracao)
-            ]);
+            // Filtros opcionais
+            if ($request->filled('proposta_id')) {
+                $query->where('proposta_id', $request->proposta_id);
+            }
 
-        } catch (\Exception $e) {
-            \Log::error('Erro ao buscar configuração', [
-                'user_id' => $currentUser->id,
-                'chave' => $chave,
-                'error' => $e->getMessage()
-            ]);
+            if ($request->filled('uc_id')) {
+                $query->where('uc_id', $request->uc_id);
+            }
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
+            if ($request->filled('ug_id')) {
+                $query->where('ug_id', $request->ug_id);
+            }
 
-    /**
-     * Criar nova configuração
-     */
-    public function store(Request $request): JsonResponse
-    {
-        $currentUser = JWTAuth::user();
+            // Ordenação
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortDir = $request->get('sort_dir', 'desc');
+            
+            $allowedSorts = ['created_at', 'data_entrada_controle', 'calibragem', 'valor_calibrado'];
+            if (in_array($sortBy, $allowedSorts)) {
+                $query->orderBy($sortBy, $sortDir === 'asc' ? 'asc' : 'desc');
+            } else {
+                $query->orderBy('created_at', 'desc');
+            }
 
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
+            // Paginação
+            $total = $query->count();
+            $controles = $query->offset(($page - 1) * $perPage)
+                              ->limit($perPage)
+                              ->get();
 
-        // Apenas admins podem criar configurações
-        if (!$currentUser->isAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Apenas administradores podem criar configurações'
-            ], 403);
-        }
+            // Formatar dados
+            $controlesFormatados = $controles->map(function ($controle) {
+                return [
+                    'id' => $controle->id,
+                    'proposta_id' => $controle->proposta_id,
+                    'uc_id' => $controle->uc_id,
+                    'ug_id' => $controle->ug_id,
+                    'calibragem' => $controle->calibragem,
+                    'valor_calibrado' => $controle->valor_calibrado,
+                    'observacoes' => $controle->observacoes,
+                    'data_entrada_controle' => $controle->data_entrada_controle,
+                    'created_at' => $controle->created_at,
+                    'updated_at' => $controle->updated_at,
+                    
+                    // Relacionamentos
+                    'proposta' => $controle->proposta ? [
+                        'id' => $controle->proposta->id,
+                        'numero_proposta' => $controle->proposta->numero_proposta,
+                        'nome_cliente' => $controle->proposta->nome_cliente,
+                        'consultor' => $controle->proposta->consultor,
+                        'status' => $controle->proposta->status
+                    ] : null,
+                    
+                    'unidade_consumidora' => $controle->unidadeConsumidora ? [
+                        'id' => $controle->unidadeConsumidora->id,
+                        'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
+                        'apelido' => $controle->unidadeConsumidora->apelido,
+                        'consumo_medio' => $controle->unidadeConsumidora->consumo_medio
+                    ] : null,
+                    
+                    'unidade_geradora' => $controle->unidadeGeradora ? [
+                        'id' => $controle->unidadeGeradora->id,
+                        'nome_usina' => $controle->unidadeGeradora->nome_usina,
+                        'potencia_cc' => $controle->unidadeGeradora->potencia_cc
+                    ] : null
+                ];
+            });
 
-        $validator = Validator::make($request->all(), [
-            'chave' => 'required|string|max:100|unique:configuracoes,chave',
-            'valor' => 'required',
-            'tipo' => 'required|in:string,integer,float,boolean,json',
-            'descricao' => 'required|string|max:500',
-            'grupo' => 'nullable|string|max:50'
-        ], [
-            'chave.required' => 'Chave é obrigatória',
-            'chave.unique' => 'Esta chave já existe',
-            'valor.required' => 'Valor é obrigatório',
-            'tipo.required' => 'Tipo é obrigatório',
-            'tipo.in' => 'Tipo deve ser: string, integer, float, boolean ou json',
-            'descricao.required' => 'Descrição é obrigatória'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dados inválidos',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        try {
-            // Validar e converter valor conforme tipo
-            $valor = $this->processValueByType($request->valor, $request->tipo);
-
-            $configuracao = Configuracao::create([
-                'chave' => $request->chave,
-                'valor' => $valor,
-                'tipo' => $request->tipo,
-                'descricao' => $request->descricao,
-                'grupo' => $request->grupo ?? 'geral',
-                'updated_by' => $currentUser->id
-            ]);
-
-            \Log::info('Configuração criada', [
-                'configuracao_id' => $configuracao->id,
-                'chave' => $configuracao->chave,
-                'tipo' => $configuracao->tipo,
+            Log::info('Controle clube carregado com sucesso', [
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage,
                 'user_id' => $currentUser->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Configuração criada com sucesso!',
-                'data' => $this->transformConfiguracaoForAPI($configuracao->load('updatedBy'))
-            ], 201);
+                'data' => $controlesFormatados,
+                'pagination' => [
+                    'current_page' => $page,
+                    'per_page' => $perPage,
+                    'total' => $total,
+                    'last_page' => ceil($total / $perPage),
+                    'from' => ($page - 1) * $perPage + 1,
+                    'to' => min($page * $perPage, $total)
+                ],
+                'filters' => [
+                    'proposta_id' => $request->proposta_id,
+                    'uc_id' => $request->uc_id,
+                    'ug_id' => $request->ug_id
+                ]
+            ]);
 
         } catch (\Exception $e) {
-            \Log::error('Erro ao criar configuração', [
-                'user_id' => $currentUser->id,
-                'request_data' => $request->except(['password', 'token']),
-                'error' => $e->getMessage()
+            Log::error('Erro ao carregar controle clube', [
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile()),
+                'user_id' => $currentUser->id ?? 'desconhecido'
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor ao criar configuração'
+                'message' => 'Erro interno do servidor',
+                'debug' => config('app.debug') ? [
+                    'error' => $e->getMessage(),
+                    'line' => $e->getLine(),
+                    'file' => basename($e->getFile())
+                ] : null
             ], 500);
         }
     }
 
     /**
-     * Atualizar configuração
+     * ✅ CRIAR NOVO CONTROLE
      */
-    public function update(Request $request, string $id): JsonResponse
+    public function store(Request $request): JsonResponse
     {
-        $currentUser = JWTAuth::user();
-
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
-        // Apenas admins podem atualizar configurações
-        if (!$currentUser->isAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Apenas administradores podem atualizar configurações'
-            ], 403);
-        }
-
         try {
-            $configuracao = Configuracao::findOrFail($id);
-
-            if (!$configuracao) {
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Configuração não encontrada'
-                ], 404);
+                    'message' => 'Usuário não autenticado'
+                ], 401);
             }
 
+            Log::info('Dados recebidos para criar controle', [
+                'user_id' => $currentUser->id,
+                'request_data' => $request->all()
+            ]);
+
+            // Validação
             $validator = Validator::make($request->all(), [
-                'valor' => 'required',
-                'descricao' => 'sometimes|required|string|max:500',
-                'grupo' => 'sometimes|nullable|string|max:50'
+                'proposta_id' => 'required|string|exists:propostas,id',
+                'uc_id' => 'required|string|exists:unidades_consumidoras,id',
+                'ug_id' => 'nullable|string|exists:unidades_consumidoras,id',
+                'calibragem' => 'nullable|numeric|min:-100|max:100',
+                'valor_calibrado' => 'nullable|numeric|min:0',
+                'observacoes' => 'nullable|string|max:1000',
+                'data_entrada_controle' => 'nullable|date'
             ], [
-                'valor.required' => 'Valor é obrigatório',
-                'descricao.required' => 'Descrição é obrigatória'
+                'proposta_id.required' => 'ID da proposta é obrigatório',
+                'proposta_id.exists' => 'Proposta não encontrada',
+                'uc_id.required' => 'ID da unidade consumidora é obrigatório',
+                'uc_id.exists' => 'Unidade consumidora não encontrada',
+                'ug_id.exists' => 'Unidade geradora não encontrada',
+                'calibragem.numeric' => 'Calibragem deve ser um número',
+                'calibragem.min' => 'Calibragem deve ser maior que -100%',
+                'calibragem.max' => 'Calibragem deve ser menor que 100%'
             ]);
 
             if ($validator->fails()) {
@@ -288,95 +219,177 @@ class ConfiguracaoController extends Controller implements HasMiddleware
                 ], 422);
             }
 
-            // Processar valor conforme tipo
-            $valor = $this->processValueByType($request->valor, $configuracao->tipo);
+            DB::beginTransaction();
 
-            $dadosAtualizacao = [
-                'valor' => $valor,
-                'updated_by' => $currentUser->id
+            // Verificar se já existe controle para essa UC na proposta
+            $controleExistente = ControleClube::where('proposta_id', $request->proposta_id)
+                                            ->where('uc_id', $request->uc_id)
+                                            ->first();
+
+            if ($controleExistente) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Já existe um controle para esta UC nesta proposta'
+                ], 409);
+            }
+
+            // Criar controle
+            $controle = new ControleClube();
+            $controle->id = (string) Str::uuid();
+            $controle->proposta_id = $request->proposta_id;
+            $controle->uc_id = $request->uc_id;
+            $controle->ug_id = $request->ug_id;
+            $controle->calibragem = $request->calibragem ?? 0.00;
+            $controle->valor_calibrado = $request->valor_calibrado;
+            $controle->observacoes = $request->observacoes;
+            $controle->data_entrada_controle = $request->data_entrada_controle ?? now();
+
+            $controle->save();
+
+            // Carregar relacionamentos para resposta
+            $controle->load(['proposta', 'unidadeConsumidora', 'unidadeGeradora']);
+
+            DB::commit();
+
+            $controleFormatado = [
+                'id' => $controle->id,
+                'proposta_id' => $controle->proposta_id,
+                'uc_id' => $controle->uc_id,
+                'ug_id' => $controle->ug_id,
+                'calibragem' => $controle->calibragem,
+                'valor_calibrado' => $controle->valor_calibrado,
+                'observacoes' => $controle->observacoes,
+                'data_entrada_controle' => $controle->data_entrada_controle,
+                'created_at' => $controle->created_at,
+                'updated_at' => $controle->updated_at,
+                
+                'proposta' => $controle->proposta ? [
+                    'id' => $controle->proposta->id,
+                    'numero_proposta' => $controle->proposta->numero_proposta,
+                    'nome_cliente' => $controle->proposta->nome_cliente
+                ] : null,
+                
+                'unidade_consumidora' => $controle->unidadeConsumidora ? [
+                    'id' => $controle->unidadeConsumidora->id,
+                    'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
+                    'apelido' => $controle->unidadeConsumidora->apelido
+                ] : null
             ];
 
-            if ($request->has('descricao')) {
-                $dadosAtualizacao['descricao'] = $request->descricao;
-            }
-
-            if ($request->has('grupo')) {
-                $dadosAtualizacao['grupo'] = $request->grupo ?? 'geral';
-            }
-
-            $configuracao->update($dadosAtualizacao);
-
-            // Limpar cache se existir
-            Cache::forget("config.{$chave}");
-
-            \Log::info('Configuração atualizada', [
-                'configuracao_id' => $configuracao->id,
-                'chave' => $configuracao->chave,
-                'valor_antigo' => $configuracao->getOriginal('valor'),
-                'valor_novo' => $valor,
+            Log::info('Controle criado com sucesso', [
+                'controle_id' => $controle->id,
+                'proposta_id' => $controle->proposta_id,
                 'user_id' => $currentUser->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Configuração atualizada com sucesso!',
-                'data' => $this->transformConfiguracaoForAPI($configuracao->fresh(['updatedBy']))
-            ]);
+                'message' => 'Controle criado com sucesso',
+                'data' => $controleFormatado
+            ], 201);
 
         } catch (\Exception $e) {
-            \Log::error('Erro ao atualizar configuração', [
-                'chave' => $chave,
-                'user_id' => $currentUser->id,
-                'error' => $e->getMessage()
+            DB::rollBack();
+            
+            Log::error('Erro ao criar controle', [
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile()),
+                'request_data' => $request->all(),
+                'user_id' => $currentUser->id ?? 'desconhecido'
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor'
+                'message' => 'Erro interno do servidor',
+                'debug' => config('app.debug') ? [
+                    'error' => $e->getMessage(),
+                    'line' => $e->getLine(),
+                    'file' => basename($e->getFile())
+                ] : null
             ], 500);
         }
     }
 
     /**
-     * Buscar configurações por grupo
+     * ✅ EXIBIR UM CONTROLE ESPECÍFICO
      */
-    public function getByGroup(string $grupo): JsonResponse
+    public function show(string $id): JsonResponse
     {
-        $currentUser = JWTAuth::user();
-
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
-        if (!$currentUser->isAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Apenas administradores podem acessar configurações'
-            ], 403);
-        }
-
         try {
-            $configuracoes = Configuracao::query()
-                                        ->with('updatedBy')
-                                        ->porGrupo($grupo)
-                                        ->orderBy('chave')
-                                        ->get();
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            $controle = ControleClube::with(['proposta', 'unidadeConsumidora', 'unidadeGeradora'])
+                                   ->find($id);
+
+            if (!$controle) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Controle não encontrado'
+                ], 404);
+            }
+
+            // Verificar permissão
+            if ($currentUser->role === 'vendedor' && 
+                $controle->proposta && 
+                $controle->proposta->usuario_id !== $currentUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sem permissão para ver este controle'
+                ], 403);
+            }
+
+            $controleFormatado = [
+                'id' => $controle->id,
+                'proposta_id' => $controle->proposta_id,
+                'uc_id' => $controle->uc_id,
+                'ug_id' => $controle->ug_id,
+                'calibragem' => $controle->calibragem,
+                'valor_calibrado' => $controle->valor_calibrado,
+                'observacoes' => $controle->observacoes,
+                'data_entrada_controle' => $controle->data_entrada_controle,
+                'created_at' => $controle->created_at,
+                'updated_at' => $controle->updated_at,
+                
+                'proposta' => $controle->proposta ? [
+                    'id' => $controle->proposta->id,
+                    'numero_proposta' => $controle->proposta->numero_proposta,
+                    'nome_cliente' => $controle->proposta->nome_cliente,
+                    'consultor' => $controle->proposta->consultor,
+                    'status' => $controle->proposta->status
+                ] : null,
+                
+                'unidade_consumidora' => $controle->unidadeConsumidora ? [
+                    'id' => $controle->unidadeConsumidora->id,
+                    'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
+                    'apelido' => $controle->unidadeConsumidora->apelido,
+                    'consumo_medio' => $controle->unidadeConsumidora->consumo_medio
+                ] : null,
+                
+                'unidade_geradora' => $controle->unidadeGeradora ? [
+                    'id' => $controle->unidadeGeradora->id,
+                    'nome_usina' => $controle->unidadeGeradora->nome_usina,
+                    'potencia_cc' => $controle->unidadeGeradora->potencia_cc
+                ] : null
+            ];
 
             return response()->json([
                 'success' => true,
-                'data' => $configuracoes->map(function ($config) {
-                    return $this->transformConfiguracaoForAPI($config);
-                })
+                'data' => $controleFormatado
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('Erro ao buscar configurações por grupo', [
-                'grupo' => $grupo,
-                'user_id' => $currentUser->id,
-                'error' => $e->getMessage()
+            Log::error('Erro ao carregar controle', [
+                'controle_id' => $id,
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id ?? 'desconhecido'
             ]);
 
             return response()->json([
@@ -387,92 +400,104 @@ class ConfiguracaoController extends Controller implements HasMiddleware
     }
 
     /**
-     * Atualizar múltiplas configurações
+     * ✅ ATUALIZAR CONTROLE
      */
-    public function updateBulk(Request $request): JsonResponse
+    public function update(Request $request, string $id): JsonResponse
     {
-        $currentUser = JWTAuth::user();
-
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
-        if (!$currentUser->isAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Apenas administradores podem atualizar configurações'
-            ], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'configuracoes' => 'required|array|min:1',
-            'configuracoes.*.chave' => 'required|string',
-            'configuracoes.*.valor' => 'required'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Dados inválidos',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $atualizadas = 0;
-        $erros = [];
-
-        DB::beginTransaction();
-
         try {
-            foreach ($request->configuracoes as $configData) {
-                try {
-                    $configuracao = Configuracao::porChave($configData['chave'])->first();
-                    
-                    if ($configuracao) {
-                        $valor = $this->processValueByType($configData['valor'], $configuracao->tipo);
-                        
-                        $configuracao->update([
-                            'valor' => $valor,
-                            'updated_by' => $currentUser->id
-                        ]);
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
 
-                        Cache::forget("config.{$configData['chave']}");
-                        $atualizadas++;
-                    } else {
-                        $erros[] = "Configuração '{$configData['chave']}' não encontrada";
-                    }
-                } catch (\Exception $e) {
-                    $erros[] = "Erro na configuração '{$configData['chave']}': " . $e->getMessage();
+            $controle = ControleClube::find($id);
+
+            if (!$controle) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Controle não encontrado'
+                ], 404);
+            }
+
+            // Verificar permissão
+            if ($currentUser->role === 'vendedor') {
+                $proposta = Proposta::find($controle->proposta_id);
+                if (!$proposta || $proposta->usuario_id !== $currentUser->id) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Sem permissão para editar este controle'
+                    ], 403);
                 }
             }
 
+            // Validação
+            $validator = Validator::make($request->all(), [
+                'ug_id' => 'sometimes|nullable|string|exists:unidades_consumidoras,id',
+                'calibragem' => 'sometimes|nullable|numeric|min:-100|max:100',
+                'valor_calibrado' => 'sometimes|nullable|numeric|min:0',
+                'observacoes' => 'sometimes|nullable|string|max:1000',
+                'data_entrada_controle' => 'sometimes|nullable|date'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados inválidos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            // Atualizar campos
+            if ($request->has('ug_id')) $controle->ug_id = $request->ug_id;
+            if ($request->has('calibragem')) $controle->calibragem = $request->calibragem ?? 0.00;
+            if ($request->has('valor_calibrado')) $controle->valor_calibrado = $request->valor_calibrado;
+            if ($request->has('observacoes')) $controle->observacoes = $request->observacoes;
+            if ($request->has('data_entrada_controle')) $controle->data_entrada_controle = $request->data_entrada_controle;
+
+            $controle->save();
+
+            // Carregar relacionamentos
+            $controle->load(['proposta', 'unidadeConsumidora', 'unidadeGeradora']);
+
             DB::commit();
 
-            \Log::info('Atualização em lote de configurações', [
-                'user_id' => $currentUser->id,
-                'total_processadas' => count($request->configuracoes),
-                'atualizadas' => $atualizadas,
-                'erros' => count($erros)
+            $controleFormatado = [
+                'id' => $controle->id,
+                'proposta_id' => $controle->proposta_id,
+                'uc_id' => $controle->uc_id,
+                'ug_id' => $controle->ug_id,
+                'calibragem' => $controle->calibragem,
+                'valor_calibrado' => $controle->valor_calibrado,
+                'observacoes' => $controle->observacoes,
+                'data_entrada_controle' => $controle->data_entrada_controle,
+                'created_at' => $controle->created_at,
+                'updated_at' => $controle->updated_at
+            ];
+
+            Log::info('Controle atualizado com sucesso', [
+                'controle_id' => $controle->id,
+                'user_id' => $currentUser->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => "Atualização concluída! {$atualizadas} configurações atualizadas.",
-                'data' => [
-                    'atualizadas' => $atualizadas,
-                    'erros' => $erros
-                ]
+                'message' => 'Controle atualizado com sucesso',
+                'data' => $controleFormatado
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             
-            \Log::error('Erro na atualização em lote de configurações', [
-                'user_id' => $currentUser->id,
-                'error' => $e->getMessage()
+            Log::error('Erro ao atualizar controle', [
+                'controle_id' => $id,
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id ?? 'desconhecido'
             ]);
 
             return response()->json([
@@ -483,157 +508,125 @@ class ConfiguracaoController extends Controller implements HasMiddleware
     }
 
     /**
-     * Limpar cache de configurações
+     * ✅ EXCLUIR CONTROLE
      */
-    public function clearCache(): JsonResponse
+    public function destroy(string $id): JsonResponse
     {
-        $currentUser = JWTAuth::user();
-
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
-        if (!$currentUser->isAdmin()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Apenas administradores podem limpar cache'
-            ], 403);
-        }
-
         try {
-            // Buscar todas as chaves de configuração
-            $chaves = Configuracao::pluck('chave');
+            $currentUser = JWTAuth::user();
             
-            $cacheLimpo = 0;
-            foreach ($chaves as $chave) {
-                if (Cache::forget("config.{$chave}")) {
-                    $cacheLimpo++;
-                }
-            }
-
-            \Log::info('Cache de configurações limpo', [
-                'user_id' => $currentUser->id,
-                'total_chaves' => $chaves->count(),
-                'cache_limpo' => $cacheLimpo
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => "Cache limpo! {$cacheLimpo} configurações removidas do cache."
-            ]);
-
-        } catch (\Exception $e) {
-            \Log::error('Erro ao limpar cache de configurações', [
-                'user_id' => $currentUser->id,
-                'error' => $e->getMessage()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
-
-    /**
-     * Processar valor conforme tipo
-     */
-    private function processValueByType($valor, string $tipo)
-    {
-        switch ($tipo) {
-            case 'integer':
-                return (int) $valor;
-            case 'float':
-                return (float) $valor;
-            case 'boolean':
-                return filter_var($valor, FILTER_VALIDATE_BOOLEAN);
-            case 'json':
-                if (is_string($valor)) {
-                    $decoded = json_decode($valor, true);
-                    if (json_last_error() !== JSON_ERROR_NONE) {
-                        throw new \InvalidArgumentException('JSON inválido: ' . json_last_error_msg());
-                    }
-                    return $decoded;
-                }
-                return $valor;
-            case 'string':
-            default:
-                return (string) $valor;
-        }
-    }
-
-    /**
-     * Transformar configuração para resposta da API
-     */
-    private function transformConfiguracaoForAPI(Configuracao $configuracao): array
-    {
-        return [
-            'id' => $configuracao->id,
-            'chave' => $configuracao->chave,
-            'valor' => $configuracao->valor,
-            'tipo' => $configuracao->tipo,
-            'descricao' => $configuracao->descricao,
-            'grupo' => $configuracao->grupo,
-            'updated_by' => $configuracao->updatedBy ? [
-                'id' => $configuracao->updatedBy->id,
-                'nome' => $configuracao->updatedBy->nome
-            ] : null,
-            'created_at' => $configuracao->created_at?->format('Y-m-d H:i:s'),
-            'updated_at' => $configuracao->updated_at?->format('Y-m-d H:i:s'),
-        ];
-    }
-    /**
-     * Excluir configuração
-     */
-    public function destroy(string $chave): JsonResponse
-    {
-        $currentUser = JWTAuth::user();
-
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
-        if ($currentUser->role !== 'admin') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Apenas administradores podem excluir configurações'
-            ], 403);
-        }
-
-        try {
-            $configuracao = Configuracao::porChave($chave)->first();
-
-            if (!$configuracao) {
+            if (!$currentUser) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Configuração não encontrada'
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            $controle = ControleClube::find($id);
+
+            if (!$controle) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Controle não encontrado'
                 ], 404);
             }
 
-            $configuracao->delete();
-            Cache::forget("config.{$chave}");
+            // Verificar permissão (apenas admin ou dono da proposta)
+            if ($currentUser->role !== 'admin') {
+                $proposta = Proposta::find($controle->proposta_id);
+                if (!$proposta || $proposta->usuario_id !== $currentUser->id) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Sem permissão para excluir este controle'
+                    ], 403);
+                }
+            }
 
-            \Log::info('Configuração excluída', [
-                'chave' => $chave,
+            // Soft delete
+            $controle->deleted_at = now();
+            $controle->save();
+
+            Log::info('Controle excluído', [
+                'controle_id' => $controle->id,
                 'user_id' => $currentUser->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Configuração excluída com sucesso!'
+                'message' => 'Controle excluído com sucesso'
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('Erro ao excluir configuração', [
-                'chave' => $chave,
-                'user_id' => $currentUser->id,
-                'error' => $e->getMessage()
+            Log::error('Erro ao excluir controle', [
+                'controle_id' => $id,
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id ?? 'desconhecido'
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ ESTATÍSTICAS DO CONTROLE
+     */
+    public function statistics(Request $request): JsonResponse
+    {
+        try {
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            $query = ControleClube::query();
+
+            // Filtro por role
+            if ($currentUser->role === 'vendedor') {
+                $query->whereHas('proposta', function ($q) use ($currentUser) {
+                    $q->where('usuario_id', $currentUser->id);
+                });
+            } elseif ($currentUser->role === 'gerente') {
+                $teamIds = collect([$currentUser->id]);
+                if (method_exists($currentUser, 'team')) {
+                    $teamIds = $teamIds->merge($currentUser->team()->pluck('id'));
+                }
+                $query->whereHas('proposta', function ($q) use ($teamIds) {
+                    $q->whereIn('usuario_id', $teamIds);
+                });
+            }
+
+            $totalControles = $query->count();
+            $controlesComCalibragem = $query->where('calibragem', '!=', 0)->count();
+            $controlesComUG = $query->whereNotNull('ug_id')->count();
+            $mediaCalibragem = $query->avg('calibragem') ?? 0;
+
+            $estatisticas = [
+                'total_controles' => $totalControles,
+                'controles_com_calibragem' => $controlesComCalibragem,
+                'controles_com_ug' => $controlesComUG,
+                'media_calibragem' => round($mediaCalibragem, 2),
+                'percentual_com_calibragem' => $totalControles > 0 ? 
+                    round(($controlesComCalibragem / $totalControles) * 100, 2) : 0,
+                'percentual_com_ug' => $totalControles > 0 ? 
+                    round(($controlesComUG / $totalControles) * 100, 2) : 0
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => $estatisticas
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao gerar estatísticas do controle', [
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id ?? 'desconhecido'
             ]);
 
             return response()->json([

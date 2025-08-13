@@ -15,7 +15,13 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => [
+        'api/*', 
+        'sanctum/csrf-cookie',
+        'auth/*',
+        'health',
+        'health-check'
+    ],
 
     'allowed_methods' => ['*'],
 
@@ -23,9 +29,14 @@ return [
         'http://localhost:3000',
         'http://127.0.0.1:3000',
         'https://localhost:3000',
+        'http://localhost:3001',
+        'http://127.0.0.1:3001',
     ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '*localhost*',
+        '*127.0.0.1*'
+    ],
 
     'allowed_headers' => [
         'Accept',
@@ -34,10 +45,14 @@ return [
         'X-Requested-With',
         'X-CSRF-Token',
         'Origin',
+        'Cache-Control',
+        'Pragma',
     ],
 
     'exposed_headers' => [
         'Authorization',
+        'X-Total-Count',
+        'X-Page-Count',
     ],
 
     'max_age' => 86400,
