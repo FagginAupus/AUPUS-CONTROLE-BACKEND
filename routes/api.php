@@ -103,6 +103,7 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('propostas')->group(function () {
         Route::get('/', [PropostaController::class, 'index']);
         Route::post('/', [PropostaController::class, 'store']);
+        Route::get('verificar-numero/{numero}', [PropostaController::class, 'verificarNumero']); // ✅ DEVE VIR ANTES DO {id}
         Route::get('statistics', [PropostaController::class, 'statistics']);
         Route::get('export', [PropostaController::class, 'export']);
         Route::get('{id}', [PropostaController::class, 'show']);

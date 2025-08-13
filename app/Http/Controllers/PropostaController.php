@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
+
 class PropostaController extends Controller
 {
     /**
@@ -154,13 +155,29 @@ class PropostaController extends Controller
             }
 
             // ✅ PROCESSAR UNIDADES CONSUMIDORAS
+            $ucArray = [];
             $ucJson = '[]';
-            if ($request->has('unidadesConsumidoras') && is_array($request->unidadesConsumidoras)) {
-                $ucJson = json_encode($request->unidadesConsumidoras);
+
+            // Verificar ambos os formatos de nome do campo
+            if ($request->has('unidades_consumidoras') && is_array($request->unidades_consumidoras)) {
+                $ucArray = $request->unidades_consumidoras;
+            } elseif ($request->has('unidadesConsumidoras') && is_array($request->unidadesConsumidoras)) {
+                $ucArray = $request->unidadesConsumidoras;
+            }
+
+            if (!empty($ucArray)) {
+                $ucJson = json_encode($ucArray);
                 if (json_last_error() !== JSON_ERROR_NONE) {
                     throw new \Exception('Erro ao converter UCs para JSON: ' . json_last_error_msg());
                 }
             }
+
+            Log::info('=== DEBUG UNIDADES CONSUMIDORAS ===', [
+                'request_unidades_consumidoras' => $request->unidades_consumidoras ?? 'não encontrado',
+                'request_unidadesConsumidoras' => $request->unidadesConsumidoras ?? 'não encontrado',
+                'ucArray_count' => count($ucArray),
+                'ucJson' => $ucJson
+            ]);
 
             // ✅ INSERIR PROPOSTA NO BANCO
             $sql = "INSERT INTO propostas (
@@ -577,6 +594,58 @@ class PropostaController extends Controller
         }
     }
 
+    /**
+     * ✅ VERIFICAR SE NÚMERO DA PROPOSTA ESTÁ DISPONÍVEL
+     */
+
+    public function verificarNumero(string $numero): JsonResponse
+    {
+        try {
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            // Verificar se número já existe
+            $existe = DB::selectOne(
+                "SELECT COUNT(*) as total FROM propostas WHERE numero_proposta = ? AND deleted_at IS NULL",
+                [$numero]
+            );
+
+            $disponivel = ($existe->total ?? 0) === 0;
+
+            Log::info('Verificação de número de proposta', [
+                'numero' => $numero,
+                'existe' => !$disponivel,
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'numero_proposta' => $numero,
+                'disponivel' => $disponivel,
+                'message' => $disponivel 
+                    ? 'Número disponível' 
+                    : 'Número já existe'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao verificar número da proposta', [
+                'numero' => $numero,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
     /**
      * ✅ GERAR NÚMERO DA PROPOSTA
      */
