@@ -314,19 +314,28 @@ class PropostaController extends Controller
                 // Campos principais - NOMES CORRETOS PARA STORAGESERVICE
                 'id' => $proposta->id,
                 'numero_proposta' => $proposta->numero_proposta,
+                'numeroProposta' => $proposta->numero_proposta, // Compatibilidade frontend
                 'nome_cliente' => $proposta->nome_cliente,
+                'nomeCliente' => $proposta->nome_cliente, // Compatibilidade frontend
                 'consultor' => $proposta->consultor,
                 'data_proposta' => $proposta->data_proposta,
+                'data' => $proposta->data_proposta, // Compatibilidade frontend
                 'status' => $proposta->status,
+                'observacoes' => $proposta->observacoes,
+                'recorrencia' => $proposta->recorrencia,
+                
+                // ✅ DESCONTOS MAPEADOS CORRETAMENTE - PRIORIDADE PRINCIPAL
+                'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
+                'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
+                
+                // Compatibilidade com nomes antigos (para evitar quebra)
                 'economia' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'bandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
-                'recorrencia' => $proposta->recorrencia,
-                'observacoes' => $proposta->observacoes,
                 
                 // Dados da UC (para compatibilidade com frontend)
                 'apelido' => $primeiraUC['apelido'] ?? '',
                 'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
-                'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '',
+                'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '', // ← ADICIONEI ESTA LINHA
                 'ligacao' => $primeiraUC['ligacao'] ?? $primeiraUC['tipo_ligacao'] ?? '',
                 'media' => $primeiraUC['consumo_medio'] ?? $primeiraUC['media'] ?? 0,
                 'distribuidora' => $primeiraUC['distribuidora'] ?? '',
@@ -334,6 +343,7 @@ class PropostaController extends Controller
                 // ✅ ARRAYS COMPLETOS - NOMES CORRETOS
                 'beneficios' => $beneficios,
                 'unidades_consumidoras' => $unidadesConsumidoras,
+                'unidadesConsumidoras' => $unidadesConsumidoras, // ← ADICIONEI ESTA LINHA (compatibilidade)
                 
                 // Timestamps
                 'created_at' => $proposta->created_at,
