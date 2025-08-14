@@ -35,7 +35,6 @@ class Proposta extends Model
         'recorrencia',
         'economia',
         'bandeira',
-        'status',
         'observacoes',
         'beneficios',
         'unidades_consumidoras',
@@ -73,18 +72,8 @@ class Proposta extends Model
         'recorrencia' => '3%',
         'economia' => 20.00,
         'bandeira' => 20.00,
-        'status' => 'Em Análise'
     ];
 
-    /**
-     * Status válidos para validação
-     */
-    public const STATUS_OPCOES = [
-        'Em Análise',
-        'Aguardando',
-        'Fechado',
-        'Perdido'
-    ];
 
     /**
      * ===================================
@@ -119,7 +108,7 @@ class Proposta extends Model
      */
     public function scopeComStatus($query, $status)
     {
-        return $query->where('status', $status);
+        return $query->where('unidades_consumidoras', 'like', '%"status":"' . $status . '"%');
     }
 
     /**
@@ -220,36 +209,44 @@ class Proposta extends Model
      * ===================================
      */
 
-    /**
-     * Verificar se a proposta está fechada
-     */
     public function esteFechada(): bool
     {
-        return $this->status === 'Fechado';
+        foreach ($this->unidades_consumidoras as $uc) {
+            if (($uc['status'] ?? 'Aguardando') !== 'Fechada') {
+                return false;
+            }
+        }
+        return !empty($this->unidades_consumidoras);
     }
 
-    /**
-     * Verificar se a proposta está perdida
-     */
-    public function estePerdida(): bool
+    public function esteRecusada(): bool
     {
-        return $this->status === 'Perdido';
+        foreach ($this->unidades_consumidoras as $uc) {
+            if (($uc['status'] ?? 'Aguardando') !== 'Recusada') {
+                return false;
+            }
+        }
+        return !empty($this->unidades_consumidoras);
     }
 
-    /**
-     * Verificar se a proposta está em análise
-     */
-    public function esteEmAnalise(): bool
+    public function esteCancelada(): bool
     {
-        return $this->status === 'Em Análise';
+        foreach ($this->unidades_consumidoras as $uc) {
+            if (($uc['status'] ?? 'Aguardando') !== 'Cancelada') {
+                return false;
+            }
+        }
+        return !empty($this->unidades_consumidoras);
     }
 
-    /**
-     * Verificar se a proposta está aguardando
-     */
     public function esteAguardando(): bool
     {
-        return $this->status === 'Aguardando';
+        foreach ($this->unidades_consumidoras as $uc) {
+            if (($uc['status'] ?? 'Aguardando') !== 'Aguardando') {
+                return false;
+            }
+        }
+        return !empty($this->unidades_consumidoras);
     }
 
     /**
@@ -277,13 +274,11 @@ class Proposta extends Model
      */
     public function getCorStatusAttribute(): string
     {
-        return match($this->status) {
-            'Em Análise' => 'orange',
-            'Aguardando' => 'blue',
-            'Fechado' => 'green',
-            'Perdido' => 'red',
-            default => 'gray'
-        };
+        if ($this->esteFechada()) return 'green';
+        if ($this->esteRecusada()) return 'red';  
+        if ($this->esteCancelada()) return 'gray';
+        if ($this->esteAguardando()) return 'blue';
+        return 'orange'; // Status misto
     }
 
     /**
@@ -291,7 +286,7 @@ class Proposta extends Model
      */
     public function podeSerEditada(): bool
     {
-        return in_array($this->status, ['Em Análise', 'Aguardando']);
+        return !$this->esteFechada();
     }
 
     /**
@@ -314,22 +309,6 @@ class Proposta extends Model
     public static function ativas()
     {
         return static::whereNull('deleted_at');
-    }
-
-    /**
-     * Obter propostas fechadas
-     */
-    public static function fechadas()
-    {
-        return static::where('status', 'Fechado');
-    }
-
-    /**
-     * Obter propostas em análise
-     */
-    public static function emAnalise()
-    {
-        return static::where('status', 'Em Análise');
     }
 
     /**
@@ -379,12 +358,10 @@ class Proposta extends Model
         // Antes de atualizar
         static::updating(function ($proposta) {
             // Log das mudanças importantes
-            if ($proposta->isDirty('status')) {
-                \Log::info('Status da proposta alterado', [
+            if ($proposta->isDirty('unidades_consumidoras')) {
+                \Log::info('UCs da proposta alteradas', [
                     'proposta_id' => $proposta->id,
                     'numero_proposta' => $proposta->numero_proposta,
-                    'status_anterior' => $proposta->getOriginal('status'),
-                    'status_novo' => $proposta->status,
                     'usuario_id' => auth()->user()->id ?? 'sistema'
                 ]);
             }

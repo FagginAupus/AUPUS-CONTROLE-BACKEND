@@ -32,7 +32,7 @@ class PropostaController extends Controller
                 'user_role' => $currentUser->role
             ]);
 
-            $query = "SELECT * FROM propostas WHERE deleted_at IS NULL AND status != 'Cancelada'";
+            $query = "SELECT * FROM propostas WHERE deleted_at IS NULL";
             $params = [];
 
             // Se não for admin, filtrar apenas as propostas do usuário
@@ -62,7 +62,7 @@ class PropostaController extends Controller
                     'nomeCliente' => $proposta->nome_cliente,
                     'consultor' => $proposta->consultor,
                     'data' => $proposta->data_proposta,
-                    'status' => $proposta->status,
+                    'status' => $this->obterStatusProposta($unidadesConsumidoras),
                     'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                     'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                     'recorrencia' => $proposta->recorrencia,
@@ -142,7 +142,7 @@ class PropostaController extends Controller
 
             // ✅ GERAR ID E NÚMERO DA PROPOSTA
             $id = Str::uuid()->toString();
-            $numeroProposta = $request->numero_proposta ?? $this->gerarNumeroProposta();
+            $numeroProposta = $this->gerarNumeroProposta();
                 
             // ✅ PROCESSAR BENEFÍCIOS
             $beneficiosJson = '[]';
@@ -165,6 +165,11 @@ class PropostaController extends Controller
             }
 
             if (!empty($ucArray)) {
+                $ucArray = array_map(function($uc) {
+                    $uc['status'] = $uc['status'] ?? 'Aguardando';
+                    return $uc;
+                }, $ucArray);
+                
                 $ucJson = json_encode($ucArray, JSON_UNESCAPED_UNICODE);
                 if (json_last_error() !== JSON_ERROR_NONE) {
                     throw new \Exception('Erro ao converter UCs para JSON: ' . json_last_error_msg());
@@ -181,10 +186,10 @@ class PropostaController extends Controller
             // ✅ INSERIR PROPOSTA NO BANCO
             $sql = "INSERT INTO propostas (
                 id, numero_proposta, data_proposta, nome_cliente, consultor, 
-                usuario_id, recorrencia, desconto_tarifa, desconto_bandeira, status,
+                usuario_id, recorrencia, desconto_tarifa, desconto_bandeira,
                 observacoes, beneficios, unidades_consumidoras,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
             $params = [
                 $id,
@@ -196,7 +201,6 @@ class PropostaController extends Controller
                 $request->recorrencia ?? '3%',
                 $this->formatarDesconto($request->economia ?? 20),   
                 $this->formatarDesconto($request->bandeira ?? 20),  
-                $request->status ?? 'Aguardando',
                 $request->observacoes ?? '',
                 $beneficiosJson,
                 $ucJson
@@ -234,7 +238,7 @@ class PropostaController extends Controller
                 'nomeCliente' => $propostaInserida->nome_cliente,
                 'consultor' => $propostaInserida->consultor,
                 'data' => $propostaInserida->data_proposta,
-                'status' => $propostaInserida->status,
+                'status' => $this->obterStatusProposta($unidadesConsumidoras),
                 'descontoTarifa' => $propostaInserida->desconto_tarifa,
                 'descontoBandeira' => $propostaInserida->desconto_bandeira,
                 'recorrencia' => $propostaInserida->recorrencia,
@@ -320,7 +324,7 @@ class PropostaController extends Controller
                 'consultor' => $proposta->consultor,
                 'data_proposta' => $proposta->data_proposta,
                 'data' => $proposta->data_proposta, // Compatibilidade frontend
-                'status' => $proposta->status,
+                'status' => $this->obterStatusProposta($unidadesConsumidoras),
                 'observacoes' => $proposta->observacoes,
                 'recorrencia' => $proposta->recorrencia,
                 
@@ -437,11 +441,6 @@ class PropostaController extends Controller
                 $updateParams[] = $request->data_proposta;
             }
 
-            if ($request->has('status')) {
-                $updateFields[] = 'status = ?';
-                $updateParams[] = $request->status;
-            }
-
             if ($request->has('descontoTarifa')) {
                 $updateFields[] = 'desconto_tarifa = ?';
                 $updateParams[] = $this->formatarDesconto($request->descontoTarifa);
@@ -472,6 +471,25 @@ class PropostaController extends Controller
 
             if ($request->has('unidadesConsumidoras') && is_array($request->unidadesConsumidoras)) {
                 $ucJson = json_encode($request->unidadesConsumidoras, JSON_UNESCAPED_UNICODE);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $updateFields[] = 'unidades_consumidoras = ?';
+                    $updateParams[] = $ucJson;
+                }
+            }
+            
+            if ($request->has('cancelar_uc') && $request->has('numero_uc')) {
+                // Buscar UCs atuais
+                $unidadesAtuais = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                
+                // Atualizar status da UC específica
+                foreach ($unidadesAtuais as &$uc) {
+                    if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $request->numero_uc) {
+                        $uc['status'] = 'Cancelada';
+                        break;
+                    }
+                }
+                
+                $ucJson = json_encode($unidadesAtuais, JSON_UNESCAPED_UNICODE);
                 if (json_last_error() === JSON_ERROR_NONE) {
                     $updateFields[] = 'unidades_consumidoras = ?';
                     $updateParams[] = $ucJson;
@@ -518,7 +536,7 @@ class PropostaController extends Controller
                 'nomeCliente' => $propostaAtualizada->nome_cliente,
                 'consultor' => $propostaAtualizada->consultor,
                 'data' => $propostaAtualizada->data_proposta,
-                'status' => $propostaAtualizada->status,
+                'status' => $this->obterStatusProposta($unidadesConsumidoras),
                 'economia' => $this->extrairValorDesconto($propostaAtualizada->desconto_tarifa),
                 'bandeira' => $this->extrairValorDesconto($propostaAtualizada->desconto_bandeira),
                 'recorrencia' => $propostaAtualizada->recorrencia,
@@ -677,28 +695,19 @@ class PropostaController extends Controller
     {
         $ano = date('Y');
         
-        // ✅ SOLUÇÃO ROBUSTA: Loop até encontrar número disponível
-        $tentativa = 1;
-        $maxTentativas = 1000; // Evitar loop infinito
+        // Buscar o próximo número disponível em uma única query
+        $resultado = DB::selectOne("
+            SELECT COALESCE(MAX(
+                CAST(SUBSTRING(numero_proposta FROM POSITION('/' IN numero_proposta) + 1) AS INTEGER)
+            ), 0) + 1 as proximo_numero
+            FROM propostas 
+            WHERE EXTRACT(YEAR FROM data_proposta) = ? 
+            AND deleted_at IS NULL
+        ", [$ano]);
         
-        while ($tentativa <= $maxTentativas) {
-            $numeroTentativa = $ano . '/' . str_pad($tentativa, 3, '0', STR_PAD_LEFT);
-            
-            // Verificar se já existe
-            $existe = DB::table('propostas')
-                ->where('numero_proposta', $numeroTentativa)
-                ->count();
-
-            // Se não existe, usar este número
-            if ($existe == 0) {
-                return $numeroTentativa;
-            }
-            
-            $tentativa++;
-        }
+        $proximoNumero = $resultado->proximo_numero ?? 1;
         
-        // Se chegou até aqui, algo está muito errado
-        throw new \Exception("Não foi possível gerar número de proposta único após {$maxTentativas} tentativas");
+        return $ano . '/' . str_pad($proximoNumero, 3, '0', STR_PAD_LEFT);
     }
 
     /**
@@ -716,9 +725,6 @@ class PropostaController extends Controller
         return $numero . '%';
     }
 
-    /**
-     * ✅ Extrair valor numérico do desconto para cálculos
-     */
     private function extrairValorDesconto($desconto): float
     {
         if (is_string($desconto) && str_ends_with($desconto, '%')) {
@@ -737,4 +743,37 @@ class PropostaController extends Controller
         ]);
         return $valor;
     }
-}
+
+    /**
+     * ✅ Extrair valor numérico do desconto para cálculos
+     */
+    private function obterStatusProposta(array $unidadesConsumidoras): string
+    {
+        if (empty($unidadesConsumidoras)) {
+            return 'Aguardando';
+        }
+        
+        $statusUCs = array_column($unidadesConsumidoras, 'status');
+        $statusUCs = array_map(fn($s) => $s ?? 'Aguardando', $statusUCs);
+        
+        // Se todas são iguais, retorna o status comum
+        if (count(array_unique($statusUCs)) === 1) {
+            return $statusUCs[0];
+        }
+        
+        // Se tem status mistos, priorizar:
+        if (in_array('Fechada', $statusUCs)) {
+            return count(array_filter($statusUCs, fn($s) => $s === 'Fechada')) === count($statusUCs) ? 'Fechada' : 'Em Andamento';
+        }
+        
+        if (in_array('Recusada', $statusUCs)) {
+            return 'Recusada';
+        }
+        
+        if (in_array('Cancelada', $statusUCs)) {
+            return 'Cancelada';
+        }
+        
+        return 'Aguardando';
+    }
+} 
