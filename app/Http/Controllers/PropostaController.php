@@ -32,7 +32,7 @@ class PropostaController extends Controller
                 'user_role' => $currentUser->role
             ]);
 
-            $query = "SELECT * FROM propostas WHERE deleted_at IS NULL";
+            $query = "SELECT * FROM propostas WHERE deleted_at IS NULL AND status != 'Cancelada'";
             $params = [];
 
             // Se não for admin, filtrar apenas as propostas do usuário
@@ -147,7 +147,7 @@ class PropostaController extends Controller
             // ✅ PROCESSAR BENEFÍCIOS
             $beneficiosJson = '[]';
             if ($request->has('beneficios') && is_array($request->beneficios)) {
-                $beneficiosJson = json_encode($request->beneficios);
+                $beneficiosJson = json_encode($request->beneficios, JSON_UNESCAPED_UNICODE);
                 if (json_last_error() !== JSON_ERROR_NONE) {
                     throw new \Exception('Erro ao converter benefícios para JSON: ' . json_last_error_msg());
                 }
@@ -165,7 +165,7 @@ class PropostaController extends Controller
             }
 
             if (!empty($ucArray)) {
-                $ucJson = json_encode($ucArray);
+                $ucJson = json_encode($ucArray, JSON_UNESCAPED_UNICODE);
                 if (json_last_error() !== JSON_ERROR_NONE) {
                     throw new \Exception('Erro ao converter UCs para JSON: ' . json_last_error_msg());
                 }
@@ -194,8 +194,8 @@ class PropostaController extends Controller
                 $request->consultor,
                 $currentUser->id,
                 $request->recorrencia ?? '3%',
-                $this->formatarDesconto($request->descontoTarifa ?? 20),   
-                $this->formatarDesconto($request->descontoBandeira ?? 20),  
+                $this->formatarDesconto($request->economia ?? 20),   
+                $this->formatarDesconto($request->bandeira ?? 20),  
                 $request->status ?? 'Aguardando',
                 $request->observacoes ?? '',
                 $beneficiosJson,
@@ -463,7 +463,7 @@ class PropostaController extends Controller
             }
 
             if ($request->has('beneficios') && is_array($request->beneficios)) {
-                $beneficiosJson = json_encode($request->beneficios);
+                $beneficiosJson = json_encode($request->beneficios, JSON_UNESCAPED_UNICODE);
                 if (json_last_error() === JSON_ERROR_NONE) {
                     $updateFields[] = 'beneficios = ?';
                     $updateParams[] = $beneficiosJson;
@@ -471,7 +471,7 @@ class PropostaController extends Controller
             }
 
             if ($request->has('unidadesConsumidoras') && is_array($request->unidadesConsumidoras)) {
-                $ucJson = json_encode($request->unidadesConsumidoras);
+                $ucJson = json_encode($request->unidadesConsumidoras, JSON_UNESCAPED_UNICODE);
                 if (json_last_error() === JSON_ERROR_NONE) {
                     $updateFields[] = 'unidades_consumidoras = ?';
                     $updateParams[] = $ucJson;
@@ -519,8 +519,8 @@ class PropostaController extends Controller
                 'consultor' => $propostaAtualizada->consultor,
                 'data' => $propostaAtualizada->data_proposta,
                 'status' => $propostaAtualizada->status,
-                'economia' => $propostaAtualizada->economia,
-                'bandeira' => $propostaAtualizada->bandeira,
+                'economia' => $this->extrairValorDesconto($propostaAtualizada->desconto_tarifa),
+                'bandeira' => $this->extrairValorDesconto($propostaAtualizada->desconto_bandeira),
                 'recorrencia' => $propostaAtualizada->recorrencia,
                 'observacoes' => $propostaAtualizada->observacoes,
                 'apelido' => $primeiraUC['apelido'] ?? '',
@@ -677,24 +677,28 @@ class PropostaController extends Controller
     {
         $ano = date('Y');
         
-        // Buscar último número do ano
-        $ultimoNumero = DB::selectOne(
-            "SELECT numero_proposta FROM propostas 
-             WHERE numero_proposta LIKE ? 
-             ORDER BY numero_proposta DESC LIMIT 1",
-            [$ano . '/%']
-        );
+        // ✅ SOLUÇÃO ROBUSTA: Loop até encontrar número disponível
+        $tentativa = 1;
+        $maxTentativas = 1000; // Evitar loop infinito
+        
+        while ($tentativa <= $maxTentativas) {
+            $numeroTentativa = $ano . '/' . str_pad($tentativa, 3, '0', STR_PAD_LEFT);
+            
+            // Verificar se já existe
+            $existe = DB::table('propostas')
+                ->where('numero_proposta', $numeroTentativa)
+                ->count();
 
-        if ($ultimoNumero) {
-            // Extrair número sequencial
-            $partes = explode('/', $ultimoNumero->numero_proposta);
-            $sequencial = isset($partes[1]) ? intval($partes[1]) : 0;
-            $proximoSequencial = $sequencial + 1;
-        } else {
-            $proximoSequencial = 1;
+            // Se não existe, usar este número
+            if ($existe == 0) {
+                return $numeroTentativa;
+            }
+            
+            $tentativa++;
         }
-
-        return $ano . '/' . str_pad($proximoSequencial, 3, '0', STR_PAD_LEFT);
+        
+        // Se chegou até aqui, algo está muito errado
+        throw new \Exception("Não foi possível gerar número de proposta único após {$maxTentativas} tentativas");
     }
 
     /**
