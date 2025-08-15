@@ -43,7 +43,6 @@ class ControleController extends Controller
             // Query base
             $query = ControleClube::with([
                 'proposta' => function($q) {
-                    $q->where('status', 'Fechada');
                 },
                 'unidadeConsumidora',
                 'unidadeGeradora' => function($q) {
@@ -116,9 +115,9 @@ class ControleController extends Controller
                         'numero_proposta' => $controle->proposta->numero_proposta,
                         'nome_cliente' => $controle->proposta->nome_cliente,
                         'consultor' => $controle->proposta->consultor,
-                        'status' => $controle->proposta->status
+                        'status' => $this->obterStatusProposta($controle->proposta->unidades_consumidoras ?? '[]') // ✅ CORRIGIDO
                     ] : null,
-                    
+                                        
                     'unidade_consumidora' => $controle->unidadeConsumidora ? [
                         'id' => $controle->unidadeConsumidora->id,
                         'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
@@ -371,9 +370,9 @@ class ControleController extends Controller
                     'numero_proposta' => $controle->proposta->numero_proposta,
                     'nome_cliente' => $controle->proposta->nome_cliente,
                     'consultor' => $controle->proposta->consultor,
-                    'status' => $controle->proposta->status
+                    'status' => $this->obterStatusProposta($controle->proposta->unidades_consumidoras ?? '[]') // ✅ CORRIGIDO
                 ] : null,
-                
+                                
                 'unidade_consumidora' => $controle->unidadeConsumidora ? [
                     'id' => $controle->unidadeConsumidora->id,
                     'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
@@ -641,6 +640,48 @@ class ControleController extends Controller
                 'success' => false,
                 'message' => 'Erro interno do servidor'
             ], 500);
+        }
+    }
+
+    /**
+     * ✅ OBTER STATUS DA PROPOSTA BASEADO NAS UCs
+     */
+    private function obterStatusProposta($unidadesJson): string
+    {
+        try {
+            $unidades = is_string($unidadesJson) ? json_decode($unidadesJson, true) : $unidadesJson;
+            
+            if (empty($unidades)) {
+                return 'Aguardando';
+            }
+            
+            $statusArray = array_column($unidades, 'status');
+            
+            // Se todas são fechadas
+            if (count(array_unique($statusArray)) === 1 && $statusArray[0] === 'Fechada') {
+                return 'Fechada';
+            }
+            
+            // Se tem pelo menos uma fechada
+            if (in_array('Fechada', $statusArray)) {
+                return 'Parcial';
+            }
+            
+            // Se todas são recusadas
+            if (count(array_unique($statusArray)) === 1 && $statusArray[0] === 'Recusada') {
+                return 'Recusada';
+            }
+            
+            // Se todas são canceladas
+            if (count(array_unique($statusArray)) === 1 && $statusArray[0] === 'Cancelada') {
+                return 'Cancelada';
+            }
+            
+            return 'Aguardando';
+            
+        } catch (\Exception $e) {
+            \Log::warning('Erro ao obter status da proposta', ['error' => $e->getMessage()]);
+            return 'Aguardando';
         }
     }
 }

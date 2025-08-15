@@ -662,9 +662,10 @@ class PropostaController extends Controller
                     DB::insert("
                         INSERT INTO unidades_consumidoras (
                             id, usuario_id, concessionaria_id, endereco_id, numero_unidade, 
-                            apelido, consumo_medio, tipo_ligacao, distribuidora, proposta_id,
-                            localizacao, is_ug, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                            apelido, consumo_medio, ligacao, distribuidora, proposta_id,
+                            localizacao, is_ug, grupo, desconto_fatura, desconto_bandeira,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                     ", [
                         $ucId,                                          // id (ULID)
                         $currentUser->id,                               // usuario_id (usuário logado)
@@ -673,11 +674,14 @@ class PropostaController extends Controller
                         $numeroUC,                                      // numero_unidade
                         $uc['apelido'] ?? 'UC ' . $numeroUC,          // apelido
                         $uc['consumo_medio'] ?? $uc['media'] ?? 0,     // consumo_medio
-                        $uc['ligacao'] ?? 'Monofásica',               // tipo_ligacao
+                        $uc['ligacao'] ?? 'Monofásica',               // ligacao (CORRIGIDO)
                         $uc['distribuidora'] ?? 'EQUATORIAL GO',       // distribuidora
                         $proposta_id,                                   // proposta_id
-                        $uc['endereco_uc'] ?? $uc['localizacao'] ?? null, // localizacao (endereço da UC)
-                        false                                           // is_ug (false = é UC, não UG)
+                        $uc['endereco_uc'] ?? $uc['localizacao'] ?? null, // localizacao
+                        false,                                          // is_ug (sempre false para UCs normais)
+                        'B',                                           // grupo (ADICIONADO)
+                        $this->extrairValorDesconto($proposta->desconto_tarifa), // desconto_fatura (ADICIONADO)
+                        $this->extrairValorDesconto($proposta->desconto_bandeira), // desconto_bandeira (ADICIONADO)
                     ]);
 
                     Log::info('UC criada na tabela unidades_consumidoras', [
