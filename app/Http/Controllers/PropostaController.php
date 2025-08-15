@@ -6,8 +6,10 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Validator;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use Tymon\JWTAuth\Exceptions\JWTException;
+
 
 
 class PropostaController extends Controller
@@ -312,10 +314,11 @@ class PropostaController extends Controller
             // ✅ MAPEAR DADOS PARA O FRONTEND
             $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
             $beneficios = json_decode($proposta->beneficios ?? '[]', true);
+            $documentacao = json_decode($proposta->documentacao ?? '{}', true);
             $primeiraUC = !empty($unidadesConsumidoras) ? $unidadesConsumidoras[0] : null;
 
             $propostaMapeada = [
-                // Campos principais - NOMES CORRETOS PARA STORAGESERVICE
+
                 'id' => $proposta->id,
                 'numero_proposta' => $proposta->numero_proposta,
                 'numeroProposta' => $proposta->numero_proposta, // Compatibilidade frontend
@@ -327,12 +330,10 @@ class PropostaController extends Controller
                 'status' => $this->obterStatusProposta($unidadesConsumidoras),
                 'observacoes' => $proposta->observacoes,
                 'recorrencia' => $proposta->recorrencia,
-                
-                // ✅ DESCONTOS MAPEADOS CORRETAMENTE - PRIORIDADE PRINCIPAL
+                'documentacao' => $documentacao,
                 'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
-                
-                // Compatibilidade com nomes antigos (para evitar quebra)
+                'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
                 'economia' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'bandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 
@@ -459,7 +460,10 @@ class PropostaController extends Controller
             // 3️⃣ DOCUMENTAÇÃO DA UC (específica para a UC sendo editada)
             if ($numeroUC && $request->has('documentacao')) {
                 $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
-                $documentacaoAtual[$numeroUC] = $request->get('documentacao');
+                $novaDocumentacao = $request->get('documentacao');
+                
+                // Se houver campos de arquivo, eles já devem ter os nomes dos arquivos salvos
+                $documentacaoAtual[$numeroUC] = $novaDocumentacao;
                 
                 $updateFields[] = 'documentacao = ?';
                 $updateParams[] = json_encode($documentacaoAtual, JSON_UNESCAPED_UNICODE);
@@ -572,6 +576,77 @@ class PropostaController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro interno do servidor: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ UPLOAD DE DOCUMENTO ESPECÍFICO
+     */
+    public function uploadDocumento(Request $request, string $id): JsonResponse
+    {
+        try {
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
+            }
+
+            $validator = Validator::make($request->all(), [
+                'arquivo' => 'required|file|max:10240|mimes:pdf,jpg,jpeg,png,doc,docx',
+                'numeroUC' => 'required|string',
+                'tipoDocumento' => 'required|string'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Arquivo inválido',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Buscar proposta
+            $proposta = DB::selectOne("SELECT * FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
+            if (!$proposta) {
+                return response()->json(['success' => false, 'message' => 'Proposta não encontrada'], 404);
+            }
+
+            $arquivo = $request->file('arquivo');
+            $numeroUC = $request->numeroUC;
+            $tipoDocumento = $request->tipoDocumento;
+            
+            // Gerar nome único
+            $ano = date('Y');
+            $mes = date('m');
+            $timestamp = time();
+            $extensao = $arquivo->getClientOriginalExtension();
+            $numeroProposta = str_replace('/', '', $proposta->numero_proposta);
+            
+            $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_{$tipoDocumento}_{$timestamp}.{$extensao}";
+            
+            // Salvar arquivo
+            $caminhoArquivo = $arquivo->storeAs('public/propostas/documentos', $nomeArquivo);
+
+            if (!$caminhoArquivo) {
+                throw new \Exception('Erro ao salvar arquivo');
+            }
+
+            return response()->json([
+                'success' => true,
+                'nomeArquivo' => $nomeArquivo,
+                'message' => 'Documento enviado com sucesso'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro no upload de documento', [
+                'error' => $e->getMessage(),
+                'proposta_id' => $id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao fazer upload: ' . $e->getMessage()
             ], 500);
         }
     }

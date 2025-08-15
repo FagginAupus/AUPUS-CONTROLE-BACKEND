@@ -106,19 +106,19 @@ Route::middleware('auth:api')->group(function () {
         Route::get('verificar-numero/{numero}', [PropostaController::class, 'verificarNumero']); // ✅ DEVE VIR ANTES DO {id}
         Route::get('statistics', [PropostaController::class, 'statistics']);
         Route::get('export', [PropostaController::class, 'export']);
+        
+        // ✅ ROTAS ESPECÍFICAS PRIMEIRO (antes das genéricas com {id})
+        Route::post('bulk-update-status', [PropostaController::class, 'bulkUpdateStatus']);
+        Route::post('{id}/upload-documento', [PropostaController::class, 'uploadDocumento']);
+        Route::delete('{id}/documento/{tipo}', [PropostaController::class, 'removeDocumento']);
+        Route::post('{id}/duplicate', [PropostaController::class, 'duplicate']);
+        Route::post('{id}/convert-to-controle', [PropostaController::class, 'convertToControle']);
+        
+        // ✅ ROTAS GENÉRICAS POR ÚLTIMO
         Route::get('{id}', [PropostaController::class, 'show']);
         Route::put('{id}', [PropostaController::class, 'update']);
         Route::patch('{id}/status', [PropostaController::class, 'updateStatus']);
         Route::delete('{id}', [PropostaController::class, 'destroy']);
-        
-        // Upload de arquivos
-        Route::post('{id}/upload-documento', [PropostaController::class, 'uploadDocumento']);
-        Route::delete('{id}/documento/{tipo}', [PropostaController::class, 'removeDocumento']);
-        
-        // Operações especiais
-        Route::post('{id}/duplicate', [PropostaController::class, 'duplicate']);
-        Route::post('{id}/convert-to-controle', [PropostaController::class, 'convertToControle']);
-        Route::post('bulk-update-status', [PropostaController::class, 'bulkUpdateStatus']);
     });
 
     // ==========================================
