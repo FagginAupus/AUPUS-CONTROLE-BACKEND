@@ -422,69 +422,103 @@ class PropostaController extends Controller
                 ], 404);
             }
 
-            // ✅ PROCESSAR DADOS DE ATUALIZAÇÃO
             $updateFields = [];
             $updateParams = [];
 
-            if ($request->has('nome_cliente')) {
-                $updateFields[] = 'nome_cliente = ?';
-                $updateParams[] = $request->nome_cliente;
+            // Identificar qual UC está sendo editada
+            $numeroUC = $request->get('numeroUC') ?? $request->get('numero_uc');
+
+            // 1️⃣ CAMPOS GERAIS (aplicam para toda a proposta)
+            $camposGerais = ['nome_cliente', 'consultor', 'data_proposta', 'observacoes', 'recorrencia'];
+            foreach ($camposGerais as $campo) {
+                if ($request->has($campo)) {
+                    $updateFields[] = "{$campo} = ?";
+                    $updateParams[] = $request->get($campo);
+                }
             }
 
-            if ($request->has('consultor')) {
-                $updateFields[] = 'consultor = ?';
-                $updateParams[] = $request->consultor;
-            }
-
-            if ($request->has('data_proposta')) {
-                $updateFields[] = 'data_proposta = ?';
-                $updateParams[] = $request->data_proposta;
-            }
-
-            if ($request->has('descontoTarifa')) {
+            // Descontos especiais
+            if ($request->has('descontoTarifa') || $request->has('economia')) {
+                $valor = $request->has('descontoTarifa') ? $request->descontoTarifa : $request->economia;
                 $updateFields[] = 'desconto_tarifa = ?';
-                $updateParams[] = $this->formatarDesconto($request->descontoTarifa);
+                $updateParams[] = $this->formatarDesconto($valor);
             }
 
-            if ($request->has('descontoBandeira')) {
+            if ($request->has('descontoBandeira') || $request->has('bandeira')) {
+                $valor = $request->has('descontoBandeira') ? $request->descontoBandeira : $request->bandeira;
                 $updateFields[] = 'desconto_bandeira = ?';
-                $updateParams[] = $this->formatarDesconto($request->descontoBandeira);
+                $updateParams[] = $this->formatarDesconto($valor);
             }
 
-            if ($request->has('recorrencia')) {
-                $updateFields[] = 'recorrencia = ?';
-                $updateParams[] = $request->recorrencia;
-            }
-
-            if ($request->has('observacoes')) {
-                $updateFields[] = 'observacoes = ?';
-                $updateParams[] = $request->observacoes;
-            }
-
+            // Benefícios (geral)
             if ($request->has('beneficios') && is_array($request->beneficios)) {
-                $beneficiosJson = json_encode($request->beneficios, JSON_UNESCAPED_UNICODE);
-                if (json_last_error() === JSON_ERROR_NONE) {
-                    $updateFields[] = 'beneficios = ?';
-                    $updateParams[] = $beneficiosJson;
+                $updateFields[] = 'beneficios = ?';
+                $updateParams[] = json_encode($request->beneficios, JSON_UNESCAPED_UNICODE);
+            }
+
+            // 2️⃣ CAMPOS ESPECÍFICOS DA UC (atualizar apenas a UC sendo editada)
+            if ($numeroUC) {
+                $unidadesAtuais = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                $ucAtualizada = false;
+                
+                $camposUC = ['apelido', 'status', 'consumo_medio', 'ligacao', 'distribuidora', 'numero_cliente'];
+                
+                foreach ($unidadesAtuais as &$uc) {
+                    if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
+                        // Atualizar apenas os campos enviados para esta UC específica
+                        foreach ($camposUC as $campo) {
+                            if ($request->has($campo)) {
+                                $uc[$campo] = $request->get($campo);
+                                $ucAtualizada = true;
+                            }
+                        }
+                        break;
+                    }
+                }
+                
+                if ($ucAtualizada) {
+                    $updateFields[] = 'unidades_consumidoras = ?';
+                    $updateParams[] = json_encode($unidadesAtuais, JSON_UNESCAPED_UNICODE);
                 }
             }
 
-            if ($request->has('unidadesConsumidoras') && is_array($request->unidadesConsumidoras)) {
-                $ucJson = json_encode($request->unidadesConsumidoras, JSON_UNESCAPED_UNICODE);
-                if (json_last_error() === JSON_ERROR_NONE) {
-                    $updateFields[] = 'unidades_consumidoras = ?';
-                    $updateParams[] = $ucJson;
-                }
+            // 3️⃣ DOCUMENTAÇÃO DA UC (específica para a UC sendo editada)
+            if ($numeroUC && $request->has('documentacao')) {
+                $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
+                $documentacaoAtual[$numeroUC] = $request->get('documentacao');
+                
+                $updateFields[] = 'documentacao = ?';
+                $updateParams[] = json_encode($documentacaoAtual, JSON_UNESCAPED_UNICODE);
             }
-            
+
+            // 4️⃣ CANCELAMENTO DE UC (lógica especial)
             if ($request->has('cancelar_uc') && $request->has('numero_uc')) {
-                // Buscar UCs atuais
                 $unidadesAtuais = json_decode($proposta->unidades_consumidoras ?? '[]', true);
                 
-                // Atualizar status da UC específica
                 foreach ($unidadesAtuais as &$uc) {
                     if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $request->numero_uc) {
                         $uc['status'] = 'Cancelada';
+                        break;
+                    }
+                }
+                
+                $updateFields[] = 'unidades_consumidoras = ?';
+                $updateParams[] = json_encode($unidadesAtuais, JSON_UNESCAPED_UNICODE);
+            }
+
+            // 🆕 ADICIONAR ESTA LÓGICA AQUI - LOGO APÓS O BLOCO ACIMA
+            if ($request->has('numeroUC') && ($request->has('apelido') || $request->has('ligacao') || $request->has('media'))) {
+                // Buscar UCs atuais
+                $unidadesAtuais = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                
+                // Atualizar dados da UC específica
+                foreach ($unidadesAtuais as &$uc) {
+                    if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $request->numeroUC) {
+                        if ($request->has('apelido')) $uc['apelido'] = $request->apelido;
+                        if ($request->has('ligacao')) $uc['ligacao'] = $request->ligacao;
+                        if ($request->has('media')) $uc['consumo_medio'] = $request->media;
+                        if ($request->has('distribuidora')) $uc['distribuidora'] = $request->distribuidora;
+                        if ($request->has('status')) $uc['status'] = $request->status;
                         break;
                     }
                 }
@@ -496,6 +530,7 @@ class PropostaController extends Controller
                 }
             }
 
+            // E o código continua normal...
             if (empty($updateFields)) {
                 return response()->json([
                     'success' => false,
