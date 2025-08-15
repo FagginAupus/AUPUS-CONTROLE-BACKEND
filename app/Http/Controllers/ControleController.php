@@ -41,7 +41,15 @@ class ControleController extends Controller
             $perPage = min(100, max(1, (int)$request->get('per_page', 50)));
 
             // Query base
-            $query = ControleClube::with(['proposta', 'unidadeConsumidora', 'unidadeGeradora']);
+            $query = ControleClube::with([
+                'proposta' => function($q) {
+                    $q->where('status', 'Fechada');
+                },
+                'unidadeConsumidora',
+                'unidadeGeradora' => function($q) {
+                    $q->where('is_ug', true);
+                }
+            ]);
 
             // Filtros baseados no role do usuário
             if ($currentUser->role === 'vendedor') {

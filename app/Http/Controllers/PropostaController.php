@@ -7,8 +7,10 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
+
 
 
 
@@ -69,7 +71,7 @@ class PropostaController extends Controller
                     'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                     'recorrencia' => $proposta->recorrencia,
                     'observacoes' => $proposta->observacoes,
-                    
+                    'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
                     // Dados da UC (para compatibilidade com frontend)
                     'apelido' => $primeiraUC['apelido'] ?? '',
                     'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
@@ -229,6 +231,12 @@ class PropostaController extends Controller
                 'user_id' => $currentUser->id
             ]);
 
+            // ✅ SE STATUS MUDOU PARA FECHADA, POPULAR CONTROLE AUTOMATICAMENTE
+            if (isset($updateParams['status']) && $updateParams['status'] === 'Fechada' && 
+                isset($propostaOriginal) && $propostaOriginal->status !== 'Fechada') {
+                $this->popularControleAutomatico($id);
+            }
+
             // ✅ MAPEAR RESPOSTA PARA O FRONTEND
             $unidadesConsumidoras = json_decode($propostaInserida->unidades_consumidoras ?? '[]', true);
             $beneficios = json_decode($propostaInserida->beneficios ?? '[]', true);
@@ -330,7 +338,6 @@ class PropostaController extends Controller
                 'status' => $this->obterStatusProposta($unidadesConsumidoras),
                 'observacoes' => $proposta->observacoes,
                 'recorrencia' => $proposta->recorrencia,
-                'documentacao' => $documentacao,
                 'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
@@ -577,6 +584,56 @@ class PropostaController extends Controller
                 'success' => false,
                 'message' => 'Erro interno do servidor: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * ✅ POPULAR CONTROLE AUTOMATICAMENTE QUANDO STATUS = FECHADA
+     */
+    public function popularControleAutomatico($proposta_id)
+    {
+        try {
+            DB::beginTransaction();
+
+            $proposta = Proposta::with('unidadesConsumidoras')
+                            ->where('id', $proposta_id)
+                            ->where('status', 'Fechada')
+                            ->first();
+
+            if (!$proposta) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Proposta não encontrada ou não está fechada'
+                ], 404);
+            }
+
+            // Criar controles para todas as UCs da proposta
+            foreach ($proposta->unidadesConsumidoras as $uc) {
+                $controleExistente = ControleClube::where('proposta_id', $proposta->id)
+                                                ->where('uc_id', $uc->id)
+                                                ->first();
+
+                if (!$controleExistente) {
+                    ControleClube::create([
+                        'id' => (string) Str::uuid(),
+                        'proposta_id' => $proposta->id,
+                        'uc_id' => $uc->id,
+                        'calibragem' => 0.00,
+                        'data_entrada_controle' => now()
+                    ]);
+                }
+            }
+
+            DB::commit();
+            return true;
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Erro ao popular controle automático', [
+                'proposta_id' => $proposta_id,
+                'error' => $e->getMessage()
+            ]);
+            return false;
         }
     }
 
