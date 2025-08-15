@@ -222,6 +222,11 @@ class PropostaController extends Controller
             if (!$propostaInserida) {
                 throw new \Exception('Proposta não encontrada após inserção');
             }
+            
+            if (isset($updateParams['status']) && $updateParams['status'] === 'Fechada' && 
+                isset($propostaOriginal) && $propostaOriginal->status !== 'Fechada') {
+                $this->popularControleAutomatico($id);
+            }
 
             DB::commit();
 
@@ -231,11 +236,7 @@ class PropostaController extends Controller
                 'user_id' => $currentUser->id
             ]);
 
-            // ✅ SE STATUS MUDOU PARA FECHADA, POPULAR CONTROLE AUTOMATICAMENTE
-            if (isset($updateParams['status']) && $updateParams['status'] === 'Fechada' && 
-                isset($propostaOriginal) && $propostaOriginal->status !== 'Fechada') {
-                $this->popularControleAutomatico($id);
-            }
+           
 
             // ✅ MAPEAR RESPOSTA PARA O FRONTEND
             $unidadesConsumidoras = json_decode($propostaInserida->unidades_consumidoras ?? '[]', true);
@@ -531,6 +532,16 @@ class PropostaController extends Controller
             // ✅ BUSCAR PROPOSTA ATUALIZADA
             $propostaAtualizada = DB::selectOne("SELECT * FROM propostas WHERE id = ?", [$id]);
 
+            if ($request->has('status') && $request->status === 'Fechada') {
+                Log::info('Status alterado para Fechada - populando controle', [
+                    'proposta_id' => $id,
+                    'status_anterior' => $proposta->status ?? 'desconhecido',
+                    'status_novo' => $request->status
+                ]);
+                
+                $this->popularControleAutomatico($id);
+            }
+
             DB::commit();
 
             Log::info('Proposta atualizada com sucesso', [
@@ -593,45 +604,149 @@ class PropostaController extends Controller
     public function popularControleAutomatico($proposta_id)
     {
         try {
-            DB::beginTransaction();
-
-            $proposta = Proposta::with('unidadesConsumidoras')
-                            ->where('id', $proposta_id)
-                            ->where('status', 'Fechada')
-                            ->first();
-
+            // ✅ PEGAR USUÁRIO ATUAL LOGADO
+            $currentUser = JWTAuth::user();
+            
+            Log::info('Iniciando population do controle', [
+                'proposta_id' => $proposta_id,
+                'user_id' => $currentUser->id
+            ]);
+            
+            // ✅ BUSCAR PROPOSTA
+            $proposta = DB::selectOne("SELECT * FROM propostas WHERE id = ?", [$proposta_id]);
+            
             if (!$proposta) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Proposta não encontrada ou não está fechada'
-                ], 404);
+                Log::warning('Proposta não encontrada', ['proposta_id' => $proposta_id]);
+                return false;
             }
 
-            // Criar controles para todas as UCs da proposta
-            foreach ($proposta->unidadesConsumidoras as $uc) {
-                $controleExistente = ControleClube::where('proposta_id', $proposta->id)
-                                                ->where('uc_id', $uc->id)
-                                                ->first();
+            // ✅ BUSCAR UCs DA PROPOSTA
+            $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+            
+            if (empty($unidadesConsumidoras)) {
+                Log::warning('Nenhuma UC encontrada na proposta', ['proposta_id' => $proposta_id]);
+                return false;
+            }
+
+            Log::info('UCs encontradas para processar', [
+                'proposta_id' => $proposta_id,
+                'total_ucs' => count($unidadesConsumidoras),
+                'ucs_data' => $unidadesConsumidoras
+            ]);
+
+            // ✅ PROCESSAR CADA UC
+            foreach ($unidadesConsumidoras as $uc) {
+                $numeroUC = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
+                
+                if (!$numeroUC) {
+                    Log::warning('UC sem número válido', ['uc' => $uc]);
+                    continue;
+                }
+
+                Log::info('Processando UC', [
+                    'numero_uc' => $numeroUC,
+                    'uc_data' => $uc
+                ]);
+
+                // ✅ VERIFICAR SE UC JÁ EXISTE NA TABELA unidades_consumidoras
+                $ucExistente = DB::selectOne(
+                    "SELECT id FROM unidades_consumidoras WHERE numero_unidade = ?", 
+                    [$numeroUC]
+                );
+
+                if (!$ucExistente) {
+                    // ✅ GERAR ULID PARA A UC
+                    $ucId = \Illuminate\Support\Str::ulid()->toString();
+                    
+                    // ✅ INSERIR UC NA TABELA unidades_consumidoras
+                    DB::insert("
+                        INSERT INTO unidades_consumidoras (
+                            id, usuario_id, concessionaria_id, endereco_id, numero_unidade, 
+                            apelido, consumo_medio, tipo_ligacao, distribuidora, proposta_id,
+                            localizacao, is_ug, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                    ", [
+                        $ucId,                                          // id (ULID)
+                        $currentUser->id,                               // usuario_id (usuário logado)
+                        '01JB849ZDG0RPC5EB8ZFTB4GJN',                  // concessionaria_id (EQUATORIAL)
+                        null,                                           // endereco_id (deixar em branco por enquanto)
+                        $numeroUC,                                      // numero_unidade
+                        $uc['apelido'] ?? 'UC ' . $numeroUC,          // apelido
+                        $uc['consumo_medio'] ?? $uc['media'] ?? 0,     // consumo_medio
+                        $uc['ligacao'] ?? 'Monofásica',               // tipo_ligacao
+                        $uc['distribuidora'] ?? 'EQUATORIAL GO',       // distribuidora
+                        $proposta_id,                                   // proposta_id
+                        $uc['endereco_uc'] ?? $uc['localizacao'] ?? null, // localizacao (endereço da UC)
+                        false                                           // is_ug (false = é UC, não UG)
+                    ]);
+
+                    Log::info('UC criada na tabela unidades_consumidoras', [
+                        'uc_id' => $ucId,
+                        'numero_unidade' => $numeroUC,
+                        'proposta_id' => $proposta_id,
+                        'usuario_id' => $currentUser->id
+                    ]);
+
+                    $ucIdFinal = $ucId;
+                } else {
+                    $ucIdFinal = $ucExistente->id;
+                    Log::info('UC já existia na tabela', [
+                        'uc_id' => $ucIdFinal,
+                        'numero_unidade' => $numeroUC
+                    ]);
+                }
+
+                // ✅ VERIFICAR SE JÁ EXISTE CONTROLE
+                $controleExistente = DB::selectOne(
+                    "SELECT id FROM controle_clube WHERE proposta_id = ? AND uc_id = ?", 
+                    [$proposta_id, $ucIdFinal]
+                );
 
                 if (!$controleExistente) {
-                    ControleClube::create([
-                        'id' => (string) Str::uuid(),
-                        'proposta_id' => $proposta->id,
-                        'uc_id' => $uc->id,
-                        'calibragem' => 0.00,
-                        'data_entrada_controle' => now()
+                    // ✅ GERAR ULID PARA O CONTROLE
+                    $controleId = \Illuminate\Support\Str::ulid()->toString();
+                    
+                    // ✅ CRIAR CONTROLE
+                    DB::insert("
+                        INSERT INTO controle_clube (
+                            id, proposta_id, uc_id, calibragem, 
+                            data_entrada_controle, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, NOW(), NOW(), NOW())
+                    ", [
+                        $controleId,
+                        $proposta_id,
+                        $ucIdFinal,  // ✅ ID da UC (ULID)
+                        0.00
+                    ]);
+
+                    Log::info('Controle criado com sucesso', [
+                        'controle_id' => $controleId,
+                        'proposta_id' => $proposta_id,
+                        'uc_id' => $ucIdFinal,
+                        'numero_uc' => $numeroUC
+                    ]);
+                } else {
+                    Log::info('Controle já existia', [
+                        'controle_existente_id' => $controleExistente->id,
+                        'proposta_id' => $proposta_id,
+                        'uc_id' => $ucIdFinal
                     ]);
                 }
             }
 
-            DB::commit();
+            Log::info('Population do controle concluída com sucesso', [
+                'proposta_id' => $proposta_id,
+                'total_ucs_processadas' => count($unidadesConsumidoras)
+            ]);
+            
             return true;
 
         } catch (\Exception $e) {
-            DB::rollBack();
             Log::error('Erro ao popular controle automático', [
                 'proposta_id' => $proposta_id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile())
             ]);
             return false;
         }
