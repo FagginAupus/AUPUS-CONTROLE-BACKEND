@@ -27,8 +27,9 @@ class UGController extends Controller
         }
 
         try {
-            // Buscar apenas UGs (is_ug = true)
-            $query = UnidadeConsumidora::where('is_ug', true)
+            // Buscar apenas UGs que são gerador E fazem parte do nexus clube
+            $query = UnidadeConsumidora::where('gerador', true)
+                ->where('nexus_clube', true)
                 ->whereNull('deleted_at');
 
             // Filtros opcionais
@@ -100,11 +101,13 @@ class UGController extends Controller
 
         try {
             $request->validate([
-                'nomeUsina' => 'required|string|max:255',
-                'potenciaCC' => 'required|numeric|min:0',
-                'fatorCapacidade' => 'required|numeric|min:0|max:100',
+                'nomeUsina' => 'required|string|max:255',     // Frontend envia nomeUsina
+                'potenciaCC' => 'required|numeric|min:0',     // Frontend envia potenciaCC  
+                'fatorCapacidade' => 'required|numeric|min:0|max:100', // Frontend envia fatorCapacidade
                 'localizacao' => 'nullable|string|max:500',
                 'observacoes' => 'nullable|string|max:1000',
+                'apelido' => 'required|string|max:100',       // ADICIONAR campo obrigatório
+                'numero_unidade' => 'required|string|max:50', // ADICIONAR campo obrigatório
             ], [
                 'nomeUsina.required' => 'Nome da usina é obrigatório',
                 'potenciaCC.required' => 'Potência CC é obrigatória',
@@ -112,6 +115,8 @@ class UGController extends Controller
                 'fatorCapacidade.required' => 'Fator de capacidade é obrigatório',
                 'fatorCapacidade.numeric' => 'Fator de capacidade deve ser um número',
                 'fatorCapacidade.max' => 'Fator de capacidade não pode ser maior que 100%',
+                'apelido.required' => 'Apelido é obrigatório',
+                'numero_unidade.required' => 'Número da unidade é obrigatório',
             ]);
 
             // Calcular capacidade (720 horas * potência * fator / 100)
@@ -119,24 +124,24 @@ class UGController extends Controller
 
             $ug = UnidadeConsumidora::create([
                 'usuario_id' => $currentUser->id,
-                'nome_usina' => $request->nomeUsina,
-                'potencia_cc' => $request->potenciaCC,
-                'fator_capacidade' => $request->fatorCapacidade,
+                'nome_usina' => $request->nomeUsina,        // Mapear corretamente
+                'potencia_cc' => $request->potenciaCC,      // Mapear corretamente  
+                'fator_capacidade' => $request->fatorCapacidade, // Mapear corretamente
                 'capacidade_calculada' => $capacidade,
                 'localizacao' => $request->localizacao,
                 'observacoes_ug' => $request->observacoes,
-                'is_ug' => true,
+                'apelido' => $request->apelido,             // ADICIONAR
+                'numero_unidade' => $request->numero_unidade, // ADICIONAR
+                'consumo_medio' => 0,                       // ADICIONAR padrão
+                'gerador' => true,                          // CORRIGIDO: usar 'gerador'
+                'nexus_clube' => true,                      // ADICIONADO: sempre true para UGs
                 'ucs_atribuidas' => 0,
                 'media_consumo_atribuido' => 0,
-                // Campos obrigatórios da tabela
                 'mesmo_titular' => false,
                 'numero_cliente' => 0,
-                'numero_unidade' => 0,
                 'tipo' => 'UG',
-                'gerador' => true,
                 'service' => false,
                 'project' => false,
-                'nexus_clube' => false,
                 'nexus_cativo' => false,
                 'proprietario' => false,
                 'tensao_nominal' => 0,
@@ -211,7 +216,8 @@ class UGController extends Controller
 
         try {
             $ug = UnidadeConsumidora::where('id', $id)
-                ->where('is_ug', true)
+                ->where('gerador', true) // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
+                ->where('nexus_clube', true) // ADICIONADO: verificar nexus_clube
                 ->whereNull('deleted_at')
                 ->firstOrFail();
 
@@ -278,7 +284,8 @@ class UGController extends Controller
 
         try {
             $ug = UnidadeConsumidora::where('id', $id)
-                ->where('is_ug', true)
+                ->where('gerador', true) // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
+                ->where('nexus_clube', true) // ADICIONADO: verificar nexus_clube
                 ->whereNull('deleted_at')
                 ->firstOrFail();
 
@@ -393,7 +400,8 @@ class UGController extends Controller
 
         try {
             $ug = UnidadeConsumidora::where('id', $id)
-                ->where('is_ug', true)
+                ->where('gerador', true) // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
+                ->where('nexus_clube', true) // ADICIONADO: verificar nexus_clube
                 ->whereNull('deleted_at')
                 ->firstOrFail();
 
@@ -451,7 +459,8 @@ class UGController extends Controller
         }
 
         try {
-            $query = UnidadeConsumidora::where('is_ug', true)
+            $query = UnidadeConsumidora::where('gerador', true) // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
+                ->where('nexus_clube', true) // ADICIONADO: verificar nexus_clube
                 ->whereNull('deleted_at');
 
             $stats = [

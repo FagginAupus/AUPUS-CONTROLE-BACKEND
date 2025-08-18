@@ -31,15 +31,15 @@ class UnidadeConsumidora extends Model
         'tipo',
         
         // Geração e consumo
-        'gerador',
+        'gerador', // MANTIDO: campo correto
         'geracao_prevista',
         'consumo_medio',
         
         // Modalidades
         'service',
         'project',
-        'nexus_clube',
-        'nexus_cativo',
+        'nexus_clube', // ADICIONADO: campo necessário
+        'nexus_cativo', // ADICIONADO: campo necessário
         'proprietario',
         
         // Dados técnicos
@@ -65,7 +65,7 @@ class UnidadeConsumidora extends Model
         'distribuidora',
         'tipo_ligacao',
         'valor_fatura',
-        'is_ug',
+        // REMOVIDO: 'is_ug', // Campo removido (duplicado)
         'nome_usina',
         'potencia_cc',
         'fator_capacidade',
@@ -73,20 +73,21 @@ class UnidadeConsumidora extends Model
         'localizacao',
         'observacoes_ug',
         'ucs_atribuidas',
-        'media_consumo_atribuido'
+        'media_consumo_atribuido',
+        'deleted_by' // ADICIONADO: para soft delete
     ];
 
     protected $casts = [
-        // Booleans
+        // Booleans - CORRIGIDOS
         'mesmo_titular' => 'boolean',
-        'gerador' => 'boolean',
+        'gerador' => 'boolean', // MANTIDO: campo correto
         'service' => 'boolean',
         'project' => 'boolean',
-        'nexus_clube' => 'boolean',
-        'nexus_cativo' => 'boolean',
+        'nexus_clube' => 'boolean', // ADICIONADO
+        'nexus_cativo' => 'boolean', // ADICIONADO
         'proprietario' => 'boolean',
         'irrigante' => 'boolean',
-        'is_ug' => 'boolean',
+        // REMOVIDO: 'is_ug' => 'boolean', // Campo removido
         
         // Decimals
         'geracao_prevista' => 'decimal:2',
@@ -119,325 +120,276 @@ class UnidadeConsumidora extends Model
 
     protected $attributes = [
         'mesmo_titular' => true,
-        'gerador' => false,
+        'gerador' => false, // MANTIDO: valor padrão correto
         'service' => false,
         'project' => false,
-        'nexus_clube' => false,
-        'nexus_cativo' => false,
+        'nexus_clube' => false, // ADICIONADO
+        'nexus_cativo' => false, // ADICIONADO
         'proprietario' => true,
         'irrigante' => false,
-        'is_ug' => false,
+        // REMOVIDO: 'is_ug' => false, // Campo removido
         'tensao_nominal' => 220,
         'grupo' => 'B',
         'classe' => 'Residencial',
         'subclasse' => 'Residencial',
         'tipo_conexao' => 'Baixa Tensão',
         'estrutura_tarifaria' => 'Convencional',
-        'distribuidora' => 'CEMIG',
-        'tipo_ligacao' => 'Monofásica'
+        'ucs_atribuidas' => 0,
+        'media_consumo_atribuido' => 0,
     ];
 
-    // Relacionamentos
+    protected $hidden = [
+        'deleted_at',
+        'deleted_by',
+    ];
+
+    // ========================================
+    // RELACIONAMENTOS
+    // ========================================
+
+    /**
+     * Relacionamento com Usuario (dono da unidade)
+     */
     public function usuario(): BelongsTo
     {
-        return $this->belongsTo(Usuario::class, 'usuario_id');
+        return $this->belongsTo(Usuario::class, 'usuario_id', 'id');
     }
 
-    public function concessionaria(): BelongsTo
-    {
-        return $this->belongsTo(Concessionaria::class, 'concessionaria_id');
-    }
-
-    public function endereco(): BelongsTo
-    {
-        return $this->belongsTo(Endereco::class, 'endereco_id');
-    }
-
+    /**
+     * Relacionamento com Proposta
+     */
     public function proposta(): BelongsTo
     {
-        return $this->belongsTo(Proposta::class, 'proposta_id');
+        return $this->belongsTo(Proposta::class, 'proposta_id', 'id');
     }
 
-    public function controleClube(): HasMany
+    /**
+     * Relacionamento com ControleClube (quando é UC)
+     */
+    public function controles(): HasMany
     {
-        return $this->hasMany(ControleClube::class, 'uc_id');
+        return $this->hasMany(ControleClube::class, 'uc_id', 'id');
     }
 
-    // Para UGs - UCs atribuídas
-    public function ucsAtribuidas(): HasMany
+    /**
+     * Relacionamento com ControleClube (quando é UG)
+     */
+    public function controlesUG(): HasMany
     {
-        return $this->hasMany(UnidadeConsumidora::class, 'ug_principal_id');
+        return $this->hasMany(ControleClube::class, 'ug_id', 'id');
     }
 
-    public function ugPrincipal(): BelongsTo
-    {
-        return $this->belongsTo(UnidadeConsumidora::class, 'ug_principal_id');
-    }
+    // ========================================
+    // SCOPES
+    // ========================================
 
-    // Scopes
+    /**
+     * Scope para filtrar apenas UCs (Unidades Consumidoras)
+     */
     public function scopeUCs($query)
     {
-        return $query->where('is_ug', false);
+        return $query->where('gerador', false); // CORRIGIDO
     }
 
+    /**
+     * Scope para filtrar apenas UGs (Usinas Geradoras) do clube
+     */
     public function scopeUGs($query)
     {
-        return $query->where('is_ug', true);
+        return $query->where('gerador', true)
+                    ->where('nexus_clube', true); // CORRIGIDO: lógica completa
     }
 
-    public function scopeAtivas($query)
+    /**
+     * Scope para filtrar por modalidade
+     */
+    public function scopePorModalidade($query, $modalidade)
     {
-        return $query->whereNull('deleted_at');
+        return match($modalidade) {
+            'nexus_clube' => $query->where('nexus_clube', true),
+            'nexus_cativo' => $query->where('nexus_cativo', true),
+            'service' => $query->where('service', true),
+            'project' => $query->where('project', true),
+            'gerador' => $query->where('gerador', true),
+            default => $query
+        };
     }
 
-    public function scopePorUsuario($query, $usuarioId)
+    /**
+     * Scope para filtrar por distribuidora
+     */
+    public function scopePorDistribuidora($query, $distribuidora)
+    {
+        return $query->where('distribuidora', 'ILIKE', '%' . $distribuidora . '%');
+    }
+
+    /**
+     * Scope para unidades do usuário
+     */
+    public function scopeDoUsuario($query, $usuarioId)
     {
         return $query->where('usuario_id', $usuarioId);
     }
 
-    public function scopePorProposta($query, $propostaId)
+    /**
+     * Scope para unidades da concessionária
+     */
+    public function scopeDaConcessionaria($query, $concessionariaId)
     {
-        return $query->where('proposta_id', $propostaId);
+        return $query->where('concessionaria_id', $concessionariaId);
     }
 
-    public function scopeGeradoras($query)
+    // ========================================
+    // ACCESSORS & MUTATORS
+    // ========================================
+
+    /**
+     * Accessor: Verificar se é UG
+     */
+    public function getIsUgAttribute(): bool
     {
-        return $query->where('gerador', true);
+        return $this->gerador && $this->nexus_clube; // CORRIGIDO: lógica completa
     }
 
-    public function scopeConsumidoras($query)
+    /**
+     * Accessor: Obter modalidades ativas
+     */
+    public function getModalidadesAtivasAttribute(): array
     {
-        return $query->where('gerador', false);
+        $modalidades = [];
+        
+        if ($this->nexus_clube) $modalidades[] = 'Nexus Clube';
+        if ($this->nexus_cativo) $modalidades[] = 'Nexus Cativo';
+        if ($this->service) $modalidades[] = 'Service';
+        if ($this->project) $modalidades[] = 'Project';
+        if ($this->gerador) $modalidades[] = 'Gerador';
+        
+        return $modalidades;
     }
 
-    public function scopeNexusClube($query)
+    /**
+     * Accessor: Capacidade formatada
+     */
+    public function getCapacidadeFormatadaAttribute(): string
     {
-        return $query->where('nexus_clube', true);
-    }
-
-    public function scopeNexusCativo($query)
-    {
-        return $query->where('nexus_cativo', true);
-    }
-
-    public function scopePorDistribuidora($query, $distribuidora)
-    {
-        return $query->where('distribuidora', $distribuidora);
-    }
-
-    public function scopeComFiltroHierarquico($query, Usuario $usuario)
-    {
-        if ($usuario->isAdmin()) {
-            return $query; // Admin vê tudo
+        if (!$this->capacidade_calculada) {
+            return 'N/A';
         }
         
-        if ($usuario->isConsultor()) {
-            $subordinados = $usuario->getAllSubordinates();
-            $usuariosPermitidos = array_merge([$usuario->id], array_column($subordinados, 'id'));
-            return $query->whereIn('usuario_id', $usuariosPermitidos);
+        return number_format($this->capacidade_calculada, 0, ',', '.') . ' kWh/mês';
+    }
+
+    /**
+     * Accessor: Potência formatada
+     */
+    public function getPotenciaFormatadaAttribute(): string
+    {
+        if (!$this->potencia_cc) {
+            return 'N/A';
         }
         
-        // Gerente e Vendedor veem apenas suas próprias UCs
-        return $query->where('usuario_id', $usuario->id);
+        return number_format($this->potencia_cc, 2, ',', '.') . ' kWp';
     }
 
-    // Accessors
-    public function getTipoDisplayAttribute(): string
+    /**
+     * Accessor: Consumo médio formatado
+     */
+    public function getConsumoMedioFormatadoAttribute(): string
     {
-        if ($this->is_ug) {
-            return '🏭 Usina Geradora (UG)';
+        if (!$this->consumo_medio) {
+            return 'N/A';
         }
         
-        if ($this->gerador) {
-            return '⚡ Unidade Geradora';
-        }
-        
-        return '🏢 Unidade Consumidora';
+        return number_format($this->consumo_medio, 0, ',', '.') . ' kWh';
     }
 
-    public function getStatusDisplayAttribute(): string
+    // ========================================
+    // MÉTODOS DE NEGÓCIO
+    // ========================================
+
+    /**
+     * Verificar se pode ser UG (tem os campos necessários)
+     */
+    public function podeSerUG(): bool
     {
-        if ($this->nexus_clube && $this->nexus_cativo) {
-            return '🔄 Nexus Clube + Cativo';
-        }
-        
-        if ($this->nexus_clube) {
-            return '🌐 Nexus Clube';
-        }
-        
-        if ($this->nexus_cativo) {
-            return '🏭 Nexus Cativo';
-        }
-        
-        if ($this->service) {
-            return '🔧 Service';
-        }
-        
-        if ($this->project) {
-            return '📋 Project';
-        }
-        
-        return '📊 Padrão';
+        return !empty($this->nome_usina) && 
+               $this->potencia_cc > 0 && 
+               $this->fator_capacidade > 0;
     }
 
-    public function getConsumoFormatadoAttribute(): string
+    /**
+     * Calcular capacidade automaticamente
+     */
+    public function calcularCapacidade(): float
     {
-        return number_format($this->consumo_medio, 2, ',', '.') . ' kWh';
-    }
-
-    public function getGeracaoFormatadaAttribute(): string
-    {
-        return number_format($this->geracao_prevista ?? 0, 2, ',', '.') . ' kWh';
-    }
-
-    public function getValorFaturaFormatadoAttribute(): string
-    {
-        return 'R$ ' . number_format($this->valor_fatura ?? 0, 2, ',', '.');
-    }
-
-    public function getPotenciaCcFormatadaAttribute(): string
-    {
-        return number_format($this->potencia_cc ?? 0, 2, ',', '.') . ' kWp';
-    }
-
-    public function getCapacidadeCalculadaFormatadaAttribute(): string
-    {
-        return number_format($this->capacidade_calculada ?? 0, 2, ',', '.') . ' kWh';
-    }
-
-    public function getFatorCapacidadeFormatadoAttribute(): string
-    {
-        return number_format($this->fator_capacidade ?? 0, 2, ',', '.') . '%';
-    }
-
-    // Métodos de Negócio
-    public function calcularCapacidadeUG(): float
-    {
-        if (!$this->is_ug || !$this->potencia_cc || !$this->fator_capacidade) {
+        if (!$this->potencia_cc || !$this->fator_capacidade) {
             return 0;
         }
         
-        // Fórmula: 720h * Potência CC * (Fator Capacidade / 100)
         return 720 * $this->potencia_cc * ($this->fator_capacidade / 100);
     }
 
-    public function aplicarCalibragem(float $percentualCalibragem): void
+    /**
+     * Atualizar capacidade calculada
+     */
+    public function atualizarCapacidade(): bool
     {
-        if ($this->consumo_medio) {
-            $fatorCalibragem = 1 + ($percentualCalibragem / 100);
-            $this->consumo_medio = $this->consumo_medio * $fatorCalibragem;
-            $this->calibragem_percentual = $percentualCalibragem;
-        }
-    }
-
-    public function vincularProposta(Proposta $proposta): bool
-    {
-        $this->proposta_id = $proposta->id;
-        return $this->save();
-    }
-
-    public function desvincularProposta(): bool
-    {
-        $this->proposta_id = null;
-        return $this->save();
-    }
-
-    public function converterParaUG(array $dadosUG): bool
-    {
-        $this->is_ug = true;
-        $this->nome_usina = $dadosUG['nome_usina'] ?? null;
-        $this->potencia_cc = $dadosUG['potencia_cc'] ?? null;
-        $this->fator_capacidade = $dadosUG['fator_capacidade'] ?? null;
-        $this->localizacao = $dadosUG['localizacao'] ?? null;
-        $this->observacoes_ug = $dadosUG['observacoes_ug'] ?? null;
-        
-        // Calcular capacidade automaticamente
-        $this->capacidade_calculada = $this->calcularCapacidadeUG();
-        
-        return $this->save();
-    }
-
-    public function reverterParaUC(): bool
-    {
-        $this->is_ug = false;
-        $this->nome_usina = null;
-        $this->potencia_cc = null;
-        $this->fator_capacidade = null;
-        $this->capacidade_calculada = null;
-        $this->localizacao = null;
-        $this->observacoes_ug = null;
-        $this->ucs_atribuidas = 0;
-        $this->media_consumo_atribuido = null;
-        
-        return $this->save();
-    }
-
-    // Validações
-    public function isValidForUG(): array
-    {
-        $errors = [];
-        
-        if (!$this->is_ug) {
-            return $errors;
+        if ($this->gerador && $this->podeSerUG()) {
+            $this->capacidade_calculada = $this->calcularCapacidade();
+            return $this->save();
         }
         
-        if (empty($this->nome_usina)) {
-            $errors[] = 'Nome da usina é obrigatório para UGs';
-        }
-        
-        if (empty($this->potencia_cc) || $this->potencia_cc <= 0) {
-            $errors[] = 'Potência CC deve ser maior que zero';
-        }
-        
-        if (empty($this->fator_capacidade) || $this->fator_capacidade <= 0 || $this->fator_capacidade > 100) {
-            $errors[] = 'Fator de capacidade deve estar entre 0 e 100%';
-        }
-        
-        return $errors;
+        return false;
     }
 
-    // Estatísticas
-    public static function getEstatisticas($filtros = [])
+    /**
+     * Verificar se tem controle ativo
+     */
+    public function temControleAtivo(): bool
     {
-        $query = self::query();
-        
-        if (isset($filtros['usuario_id'])) {
-            $query->where('usuario_id', $filtros['usuario_id']);
-        }
-        
-        if (isset($filtros['usuario']) && $filtros['usuario'] instanceof Usuario) {
-            $query->comFiltroHierarquico($filtros['usuario']);
+        return $this->controles()->whereNull('deleted_at')->exists();
+    }
+
+    /**
+     * Obter estatísticas da UG (se for uma)
+     */
+    public function getEstatisticasUG(): array
+    {
+        if (!$this->gerador) {
+            return [];
         }
         
         return [
-            'total_ucs' => $query->clone()->UCs()->count(),
-            'total_ugs' => $query->clone()->UGs()->count(),
-            'total_geradoras' => $query->clone()->geradoras()->count(),
-            'total_nexus_clube' => $query->clone()->nexusClube()->count(),
-            'total_nexus_cativo' => $query->clone()->nexusCativo()->count(),
-            'consumo_total' => $query->clone()->UCs()->sum('consumo_medio'),
-            'geracao_total' => $query->clone()->geradoras()->sum('geracao_prevista'),
-            'capacidade_ugs_total' => $query->clone()->UGs()->sum('capacidade_calculada'),
-            'potencia_total_ugs' => $query->clone()->UGs()->sum('potencia_cc')
+            'nome_usina' => $this->nome_usina,
+            'potencia_cc' => $this->potencia_cc,
+            'fator_capacidade' => $this->fator_capacidade,
+            'capacidade_calculada' => $this->capacidade_calculada,
+            'ucs_atribuidas' => $this->ucs_atribuidas,
+            'media_consumo_atribuido' => $this->media_consumo_atribuido,
+            'capacidade_formatada' => $this->capacidade_formatada,
+            'potencia_formatada' => $this->potencia_formatada,
         ];
     }
 
-    // Boot method para eventos
-    protected static function boot()
-    {
-        parent::boot();
+    // ========================================
+    // EVENTOS DO MODEL
+    // ========================================
 
-        static::creating(function ($uc) {
-            // Auto-calcular capacidade para UGs
-            if ($uc->is_ug) {
-                $uc->capacidade_calculada = $uc->calcularCapacidadeUG();
+    protected static function booted()
+    {
+        // Ao criar uma nova unidade
+        static::creating(function ($unidade) {
+            // Se for UG, calcular capacidade automaticamente
+            if ($unidade->gerador && $unidade->podeSerUG()) {
+                $unidade->capacidade_calculada = $unidade->calcularCapacidade();
             }
         });
 
-        static::updating(function ($uc) {
-            // Recalcular capacidade para UGs quando necessário
-            if ($uc->is_ug && ($uc->isDirty('potencia_cc') || $uc->isDirty('fator_capacidade'))) {
-                $uc->capacidade_calculada = $uc->calcularCapacidadeUG();
+        // Ao atualizar uma unidade
+        static::updating(function ($unidade) {
+            // Se mudou dados de UG, recalcular capacidade
+            if ($unidade->gerador && $unidade->isDirty(['potencia_cc', 'fator_capacidade'])) {
+                $unidade->capacidade_calculada = $unidade->calcularCapacidade();
             }
         });
     }

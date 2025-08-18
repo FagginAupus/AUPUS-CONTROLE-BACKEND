@@ -29,7 +29,7 @@ class UnidadeConsumidoraController extends Controller
 
         try {
             $query = UnidadeConsumidora::with(['usuario', 'proposta'])
-                                    ->where('is_ug', false)
+                                    ->where('gerador', false) // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
                                     ->whereNull('deleted_at');
 
             // Filtros baseados no papel do usuário
@@ -55,24 +55,34 @@ class UnidadeConsumidoraController extends Controller
                 $query->where('distribuidora', 'ilike', '%' . $request->distribuidora . '%');
             }
 
-            if ($request->filled('nexus_clube')) {
-                $query->where('nexus_clube', $request->boolean('nexus_clube'));
+            if ($request->filled('modalidade')) {
+                $modalidade = $request->modalidade;
+                if ($modalidade === 'nexus_clube') {
+                    $query->where('nexus_clube', true);
+                } elseif ($modalidade === 'nexus_cativo') {
+                    $query->where('nexus_cativo', true);
+                } elseif ($modalidade === 'service') {
+                    $query->where('service', true);
+                } elseif ($modalidade === 'project') {
+                    $query->where('project', true);
+                }
             }
 
-            // Paginação
-            $perPage = min($request->get('per_page', 10), 50);
-            $unidades = $query->orderBy('created_at', 'desc')->paginate($perPage);
+            $unidades = $query->orderBy('created_at', 'desc')
+                             ->paginate(50);
+
+            $dadosTransformados = $unidades->getCollection()->map(function($unidade) use ($currentUser) {
+                return $this->transformUnidadeForAPI($unidade, $currentUser);
+            });
 
             return response()->json([
                 'success' => true,
-                'data' => $unidades->map(function($unidade) use ($currentUser) {
-                    return $this->transformUnidadeForAPI($unidade, $currentUser);
-                }),
+                'data' => $dadosTransformados,
                 'pagination' => [
                     'current_page' => $unidades->currentPage(),
                     'last_page' => $unidades->lastPage(),
                     'per_page' => $unidades->perPage(),
-                    'total' => $unidades->total()
+                    'total' => $unidades->total(),
                 ]
             ]);
 
@@ -105,7 +115,8 @@ class UnidadeConsumidoraController extends Controller
 
         try {
             $query = UnidadeConsumidora::with(['usuario'])
-                                    ->where('is_ug', true)
+                                    ->where('gerador', true)
+                                    ->where('nexus_clube', true) // ADICIONADO: só UGs do clube
                                     ->whereNull('deleted_at');
 
             // Filtros baseados no papel do usuário
@@ -117,35 +128,22 @@ class UnidadeConsumidoraController extends Controller
                 }
             }
 
-            // Filtros de pesquisa para UGs
+            // Filtros de pesquisa
             if ($request->filled('search')) {
                 $search = $request->search;
-                $query->where(function($q) use ($search) {
-                    $q->where('nome_usina', 'ilike', '%' . $search . '%')
-                      ->orWhere('localizacao', 'ilike', '%' . $search . '%')
-                      ->orWhere('apelido', 'ilike', '%' . $search . '%');
-                });
+                $query->where('nome_usina', 'ilike', '%' . $search . '%');
             }
 
-            if ($request->filled('localizacao')) {
-                $query->where('localizacao', 'ilike', '%' . $request->localizacao . '%');
-            }
+            $ugs = $query->orderBy('nome_usina', 'asc')->get();
 
-            // Paginação
-            $perPage = min($request->get('per_page', 10), 50);
-            $ugs = $query->orderBy('created_at', 'desc')->paginate($perPage);
+            $dadosTransformados = $ugs->map(function($ug) use ($currentUser) {
+                return $this->transformUGForAPI($ug, $currentUser);
+            });
 
             return response()->json([
                 'success' => true,
-                'data' => $ugs->map(function($ug) use ($currentUser) {
-                    return $this->transformUGForAPI($ug, $currentUser);
-                }),
-                'pagination' => [
-                    'current_page' => $ugs->currentPage(),
-                    'last_page' => $ugs->lastPage(),
-                    'per_page' => $ugs->perPage(),
-                    'total' => $ugs->total()
-                ]
+                'data' => $dadosTransformados,
+                'total' => $dadosTransformados->count()
             ]);
 
         } catch (\Exception $e) {
@@ -162,7 +160,7 @@ class UnidadeConsumidoraController extends Controller
     }
 
     /**
-     * Criar nova UC ou UG
+     * Criar nova UC/UG
      */
     public function store(Request $request): JsonResponse
     {
@@ -176,23 +174,19 @@ class UnidadeConsumidoraController extends Controller
         }
 
         try {
+            // Verificar se é UG
+            $isUG = $request->boolean('gerador') || $request->has('nome_usina');
+
             // Validação básica
-            $isUG = $request->boolean('is_ug');
-            
             $baseRules = [
                 'apelido' => 'required|string|max:100',
-                'numero_unidade' => 'required|integer|unique:unidades_consumidoras,numero_unidade',
+                'numero_unidade' => 'required|string|max:50',
                 'consumo_medio' => 'required|numeric|min:0',
                 'distribuidora' => 'nullable|string|max:100',
                 'ligacao' => 'nullable|string|max:50',
-                'nexus_clube' => 'boolean',
-                'nexus_cativo' => 'boolean',
-                'service' => 'boolean',
-                'project' => 'boolean',
-                'gerador' => 'boolean'
             ];
 
-            // Regras específicas para UGs
+            // Validações específicas para UGs
             if ($isUG) {
                 $baseRules += [
                     'nome_usina' => 'required|string|max:200',
@@ -226,14 +220,13 @@ class UnidadeConsumidoraController extends Controller
                 'distribuidora' => $request->distribuidora ? trim($request->distribuidora) : 'CEMIG',
                 'ligacao' => $request->ligacao ?: 'MONOFÁSICA',
                 'tipo' => $isUG ? 'UG' : 'UC',
-                'is_ug' => $isUG,
+                'gerador' => $isUG, // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
                 
                 // Modalidades
-                'nexus_clube' => $request->boolean('nexus_clube'),
+                'nexus_clube' => $isUG ? true : $request->boolean('nexus_clube'), // CORRIGIDO: Se for UG, sempre true
                 'nexus_cativo' => $request->boolean('nexus_cativo'),
                 'service' => $request->boolean('service'),
-                'project' => $request->boolean('project'),
-                'gerador' => $request->boolean('gerador')
+                'project' => $request->boolean('project')
             ];
 
             // Dados específicos para UGs
@@ -255,13 +248,13 @@ class UnidadeConsumidoraController extends Controller
             Log::info('Unidade consumidora criada', [
                 'unidade_id' => $unidade->id,
                 'numero_unidade' => $unidade->numero_unidade,
-                'is_ug' => $unidade->is_ug,
+                'gerador' => $unidade->gerador, // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
                 'user_id' => $currentUser->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => $unidade->is_ug ? 'UG criada com sucesso!' : 'UC criada com sucesso!',
+                'message' => $unidade->gerador ? 'UG criada com sucesso!' : 'UC criada com sucesso!', // CORRIGIDO
                 'data' => $isUG ? 
                     $this->transformUGForAPI($unidade->load(['usuario']), $currentUser) :
                     $this->transformUnidadeForAPI($unidade->load(['usuario', 'proposta']), $currentUser)
@@ -286,8 +279,8 @@ class UnidadeConsumidoraController extends Controller
      */
     public function storeUG(Request $request): JsonResponse
     {
-        // Adicionar is_ug = true automaticamente
-        $request->merge(['is_ug' => true]);
+        // Adicionar gerador = true e nexus_clube = true automaticamente
+        $request->merge(['gerador' => true, 'nexus_clube' => true]); // CORRIGIDO
         return $this->store($request);
     }
 
@@ -319,7 +312,7 @@ class UnidadeConsumidoraController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $unidade->is_ug ?
+                'data' => $unidade->gerador ? // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
                     $this->transformUGDetailForAPI($unidade, $currentUser) :
                     $this->transformUnidadeDetailForAPI($unidade, $currentUser)
             ]);
@@ -410,7 +403,7 @@ class UnidadeConsumidoraController extends Controller
             ]);
 
             // Recalcular capacidade se for UG e dados de potência mudaram
-            if ($unidade->is_ug && ($request->has('potencia_cc') || $request->has('fator_capacidade'))) {
+            if ($unidade->gerador && ($request->has('potencia_cc') || $request->has('fator_capacidade'))) { // CORRIGIDO
                 $potencia = $request->potencia_cc ?? $unidade->potencia_cc;
                 $fator = $request->fator_capacidade ?? $unidade->fator_capacidade;
                 $dadosAtualizacao['capacidade_calculada'] = 720 * $potencia * ($fator / 100);
@@ -427,8 +420,8 @@ class UnidadeConsumidoraController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => $unidade->is_ug ? 'UG atualizada com sucesso!' : 'UC atualizada com sucesso!',
-                'data' => $unidade->is_ug ?
+                'message' => $unidade->gerador ? 'UG atualizada com sucesso!' : 'UC atualizada com sucesso!', // CORRIGIDO
+                'data' => $unidade->gerador ? // CORRIGIDO
                     $this->transformUGForAPI($unidade->load(['usuario']), $currentUser) :
                     $this->transformUnidadeForAPI($unidade->load(['usuario', 'proposta']), $currentUser)
             ]);
@@ -500,7 +493,7 @@ class UnidadeConsumidoraController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => $unidade->is_ug ? 'UG excluída com sucesso!' : 'UC excluída com sucesso!'
+                'message' => $unidade->gerador ? 'UG excluída com sucesso!' : 'UC excluída com sucesso!' // CORRIGIDO
             ]);
 
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -546,7 +539,8 @@ class UnidadeConsumidoraController extends Controller
         }
 
         try {
-            $query = UnidadeConsumidora::where('is_ug', true)
+            $query = UnidadeConsumidora::where('gerador', true)
+                                    ->where('nexus_clube', true) // ADICIONADO
                                     ->whereNull('deleted_at');
 
             // Filtros baseados no papel do usuário
@@ -559,12 +553,11 @@ class UnidadeConsumidoraController extends Controller
             }
 
             $stats = [
-                'total_ugs' => $query->count(),
-                'potencia_total' => $query->sum('potencia_cc'),
-                'capacidade_total' => $query->sum('capacidade_calculada'),
-                'ucs_atribuidas_total' => $query->sum('ucs_atribuidas'),
-                'media_fator_capacidade' => round($query->avg('fator_capacidade'), 2),
-                'media_potencia' => round($query->avg('potencia_cc'), 2)
+                'total' => $query->count(),
+                'capacidadeTotal' => $query->sum('capacidade_calculada'),
+                'ucsAtribuidas' => $query->sum('ucs_atribuidas'),
+                'mediaConsumo' => $query->avg('media_consumo_atribuido'),
+                'potenciaTotal' => $query->sum('potencia_cc'),
             ];
 
             return response()->json([
@@ -573,7 +566,7 @@ class UnidadeConsumidoraController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro ao buscar estatísticas de UGs', [
+            Log::error('Erro ao obter estatísticas UGs', [
                 'user_id' => $currentUser->id,
                 'error' => $e->getMessage()
             ]);
@@ -585,111 +578,55 @@ class UnidadeConsumidoraController extends Controller
         }
     }
 
-    /**
-     * Estatísticas gerais das unidades
-     */
-    public function statistics(Request $request): JsonResponse
-    {
-        $currentUser = JWTAuth::user();
+    // ========================================
+    // MÉTODOS DE PERMISSÃO
+    // ========================================
 
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
-        try {
-            $query = UnidadeConsumidora::whereNull('deleted_at');
-
-            // Filtros baseados no papel do usuário
-            if (!$currentUser->isAdmin()) {
-                if ($currentUser->isGerente()) {
-                    $query->where('concessionaria_id', $currentUser->concessionaria_atual_id);
-                } else {
-                    $query->where('usuario_id', $currentUser->id);
-                }
-            }
-
-            $stats = [
-                'total_unidades' => $query->count(),
-                'total_ucs' => $query->where('is_ug', false)->count(),
-                'total_ugs' => $query->where('is_ug', true)->count(),
-                'modalidades' => [
-                    'nexus_clube' => $query->where('nexus_clube', true)->count(),
-                    'nexus_cativo' => $query->where('nexus_cativo', true)->count(),
-                    'service' => $query->where('service', true)->count(),
-                    'project' => $query->where('project', true)->count(),
-                ],
-                'consumo_total' => $query->sum('consumo_medio'),
-                'potencia_total_ugs' => $query->where('is_ug', true)->sum('potencia_cc')
-            ];
-
-            return response()->json([
-                'success' => true,
-                'data' => $stats
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Erro ao buscar estatísticas de unidades', [
-                'user_id' => $currentUser->id,
-                'error' => $e->getMessage()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
-
-    // ==========================================
-    // MÉTODOS AUXILIARES PRIVADOS
-    // ==========================================
-
-    /**
-     * Verificar se usuário pode visualizar unidade
-     */
     private function canViewUnidade(Usuario $user, UnidadeConsumidora $unidade): bool
     {
-        if ($user->isAdmin()) return true;
-        if ($user->isGerente()) return $unidade->concessionaria_id === $user->concessionaria_atual_id;
+        if ($user->isAdmin()) {
+            return true;
+        }
+
+        if ($user->isGerente()) {
+            return $unidade->concessionaria_id === $user->concessionaria_atual_id;
+        }
+
         return $unidade->usuario_id === $user->id;
     }
 
-    /**
-     * Verificar se usuário pode editar unidade
-     */
     private function canEditUnidade(Usuario $user, UnidadeConsumidora $unidade): bool
     {
-        if ($user->isAdmin()) return true;
-        if ($user->isGerente()) return $unidade->concessionaria_id === $user->concessionaria_atual_id;
+        if ($user->isAdmin()) {
+            return true;
+        }
+
         return $unidade->usuario_id === $user->id;
     }
 
-    /**
-     * Verificar se usuário pode excluir unidade
-     */
     private function canDeleteUnidade(Usuario $user, UnidadeConsumidora $unidade): bool
     {
-        if ($user->isAdmin()) return true;
-        if ($user->isGerente()) return $unidade->concessionaria_id === $user->concessionaria_atual_id;
-        return $unidade->usuario_id === $user->id;
+        return $user->isAdmin();
     }
 
+    // ========================================
+    // MÉTODOS DE TRANSFORMAÇÃO
+    // ========================================
+
     /**
-     * Transformar unidade consumidora para resposta da API
+     * Transformar unidade para resposta da API
      */
     private function transformUnidadeForAPI(UnidadeConsumidora $unidade, Usuario $currentUser): array
     {
         return [
             'id' => $unidade->id,
-            'numero_unidade' => $unidade->numero_unidade, // ✅ CORRIGIDO: Era numero_cliente
             'apelido' => $unidade->apelido,
-            'tipo' => $unidade->tipo,
+            'numero_unidade' => $unidade->numero_unidade,
+            'numero_cliente' => $unidade->numero_cliente,
             'consumo_medio' => $unidade->consumo_medio,
-            'distribuidora' => $unidade->distribuidora, // ✅ ADICIONADO
+            'distribuidora' => $unidade->distribuidora,
             'ligacao' => $unidade->ligacao,
+            'tipo' => $unidade->tipo,
             'nexus_clube' => $unidade->nexus_clube,
             'nexus_cativo' => $unidade->nexus_cativo,
             'service' => $unidade->service,
