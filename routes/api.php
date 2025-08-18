@@ -158,17 +158,14 @@ Route::middleware('auth:api')->group(function () {
     // ==========================================
     // UGS (USINAS GERADORAS)
     // ==========================================
-    // ==========================================
-    // UGS (USINAS GERADORAS) - CORRIGIDO
-    // ==========================================
+
     Route::prefix('ugs')->group(function () {
-        // TROCAR PARA UGController ao invés de UnidadeConsumidoraController
-        Route::get('/', [App\Http\Controllers\UGController::class, 'index']);
-        Route::post('/', [App\Http\Controllers\UGController::class, 'store']);
-        Route::get('statistics', [App\Http\Controllers\UGController::class, 'statistics']);
-        Route::get('{id}', [App\Http\Controllers\UGController::class, 'show']);
-        Route::put('{id}', [App\Http\Controllers\UGController::class, 'update']);
-        Route::delete('{id}', [App\Http\Controllers\UGController::class, 'destroy']);
+        Route::get('/', [\App\Http\Controllers\UGController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\UGController::class, 'store']);
+        Route::get('{id}', [\App\Http\Controllers\UGController::class, 'show']);
+        Route::put('{id}', [\App\Http\Controllers\UGController::class, 'update']);
+        Route::delete('{id}', [\App\Http\Controllers\UGController::class, 'destroy']);
+        Route::get('statistics', [\App\Http\Controllers\UGController::class, 'statistics']);
     });
 
     // CONFIGURAÇÕES - Configurações do sistema
