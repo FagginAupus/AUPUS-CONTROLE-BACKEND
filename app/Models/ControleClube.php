@@ -30,8 +30,6 @@ class ControleClube extends Model
         'proposta_id',
         'uc_id',
         'ug_id',
-        'calibragem',
-        'valor_calibrado',
         'observacoes',
         'data_entrada_controle',
         'created_at',
@@ -47,8 +45,6 @@ class ControleClube extends Model
         'proposta_id' => 'string',
         'uc_id' => 'string',
         'ug_id' => 'string',
-        'calibragem' => 'decimal:2',
-        'valor_calibrado' => 'decimal:2',
         'data_entrada_controle' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -62,12 +58,6 @@ class ControleClube extends Model
         'deleted_at'
     ];
 
-    /**
-     * Valores padrão para novos modelos
-     */
-    protected $attributes = [
-        'calibragem' => 0.00
-    ];
 
     /**
      * ===================================
@@ -154,89 +144,12 @@ class ControleClube extends Model
     }
 
     /**
-     * ===================================
-     * ACCESSORS & MUTATORS
-     * ===================================
-     */
-
-    /**
-     * Accessor para formatar calibragem com símbolo %
-     */
-    public function getCalibragemFormatadaAttribute()
-    {
-        return ($this->calibragem >= 0 ? '+' : '') . $this->calibragem . '%';
-    }
-
-    /**
-     * Accessor para formatar valor calibrado em BRL
-     */
-    public function getValorCalibradoFormatadoAttribute()
-    {
-        return $this->valor_calibrado ? 'R$ ' . number_format($this->valor_calibrado, 2, ',', '.') : null;
-    }
-
-    /**
-     * ===================================
-     * MÉTODOS AUXILIARES
-     * ===================================
-     */
-
-    /**
-     * Verificar se tem calibragem aplicada
-     */
-    public function temCalibragem(): bool
-    {
-        return $this->calibragem != 0;
-    }
-
-    /**
      * Verificar se tem UG vinculada
      */
     public function temUg(): bool
     {
         return !is_null($this->ug_id);
     }
-
-    /**
-     * Verificar se tem valor calibrado
-     */
-    public function temValorCalibrado(): bool
-    {
-        return !is_null($this->valor_calibrado) && $this->valor_calibrado > 0;
-    }
-
-    /**
-     * Obter tipo de calibragem (positiva/negativa/neutra)
-     */
-    public function getTipoCalibragemAttribute(): string
-    {
-        if ($this->calibragem > 0) {
-            return 'positiva';
-        } elseif ($this->calibragem < 0) {
-            return 'negativa';
-        } else {
-            return 'neutra';
-        }
-    }
-
-    /**
-     * Obter cor da calibragem para UI
-     */
-    public function getCorCalibragemAttribute(): string
-    {
-        return match($this->tipo_calibragem) {
-            'positiva' => 'green',
-            'negativa' => 'red',
-            'neutra' => 'gray',
-            default => 'gray'
-        };
-    }
-
-    /**
-     * ===================================
-     * QUERY BUILDERS ESTÁTICOS
-     * ===================================
-     */
 
     /**
      * Obter controles ativos (não excluídos)

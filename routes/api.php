@@ -172,19 +172,24 @@ Route::middleware('auth:api')->group(function () {
         Route::get('{id}/available-ucs', [UnidadeConsumidoraController::class, 'getAvailableUCs']);
     });
 
-    // ==========================================
     // CONFIGURAÇÕES - Configurações do sistema
     // ==========================================
     Route::prefix('configuracoes')->group(function () {
         Route::get('/', [ConfiguracaoController::class, 'index']);
         Route::post('/', [ConfiguracaoController::class, 'store']);
         Route::get('grupo/{grupo}', [ConfiguracaoController::class, 'getByGroup']);
-        Route::put('{id}', [ConfiguracaoController::class, 'update']);
-        Route::delete('{id}', [ConfiguracaoController::class, 'destroy']);
         
-        // Operações especiais
+        // ✅ ROTAS ESPECÍFICAS PRIMEIRO (antes das genéricas)
+        Route::get('calibragem-global/value', [ConfiguracaoController::class, 'getCalibragemGlobal']);
         Route::post('bulk-update', [ConfiguracaoController::class, 'bulkUpdate']);
         Route::post('reset-group/{grupo}', [ConfiguracaoController::class, 'resetGroup']);
+        
+        // ✅ ROTAS POR CHAVE (corretas)
+        Route::get('{chave}', [ConfiguracaoController::class, 'show']);
+        Route::put('{chave}', [ConfiguracaoController::class, 'update']);
+        
+        // ✅ ROTAS POR ID (se você tiver um método destroy que usa ID)
+        Route::delete('{id}', [ConfiguracaoController::class, 'destroy']);
     });
 
     // ==========================================

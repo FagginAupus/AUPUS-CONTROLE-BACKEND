@@ -13,17 +13,6 @@ use Tymon\JWTAuth\Facades\JWTAuth;
 
 class ConfiguracaoController extends Controller
 {
-    /**
-     * Constructor
-     */
-    public function __construct()
-    {
-        $this->middleware('auth:api');
-    }
-
-    /**
-     * Listar todas as configurações
-     */
     public function index(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();
@@ -183,7 +172,7 @@ class ConfiguracaoController extends Controller
         // Algumas configurações são públicas para consultores
         $configuracoesPúblicas = [
             'economia_padrao', 'bandeira_padrao', 'recorrencia_padrao', 
-            'beneficios_padrao', 'empresa_nome', 'sistema_versao'
+            'beneficios_padrao', 'empresa_nome', 'sistema_versao', 'calibragem_global'
         ];
 
         if (!$currentUser->isAdmin() && !in_array($chave, $configuracoesPúblicas)) {
@@ -218,6 +207,30 @@ class ConfiguracaoController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ NOVO: Buscar apenas o valor da calibragem global
+     */
+    public function getCalibragemGlobal(): JsonResponse
+    {
+        try {
+            $configuracao = Configuracao::porChave('calibragem_global')->first();
+            
+            $valor = $configuracao ? floatval($configuracao->valor) : 0.0;
+
+            return response()->json([
+                'success' => true,
+                'valor' => $valor
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao buscar calibragem global',
+                'valor' => 0.0
             ], 500);
         }
     }
@@ -388,6 +401,17 @@ class ConfiguracaoController extends Controller
                 ], 404);
             }
 
+            // ✅ NOVA VALIDAÇÃO: Especial para calibragem global
+            if ($chave === 'calibragem_global') {
+                $valor = floatval($request->valor);
+                if ($valor < 0 || $valor > 100) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Calibragem deve estar entre 0 e 100%'
+                    ], 422);
+                }
+            }
+
             $valorOriginal = $configuracao->valor;
             $valor = $request->valor;
             $tipo = $configuracao->tipo;
@@ -467,6 +491,7 @@ class ConfiguracaoController extends Controller
         }
     }
 
+    
     /**
      * Atualizar múltiplas configurações
      */
