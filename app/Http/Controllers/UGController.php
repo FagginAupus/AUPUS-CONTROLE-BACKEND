@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class UGController extends Controller
 {
@@ -149,64 +150,76 @@ class UGController extends Controller
         }
 
         try {
-            $request->validate([
-                'nomeUsina' => 'required|string|max:255',     // Frontend envia nomeUsina
-                'potenciaCC' => 'required|numeric|min:0',     // Frontend envia potenciaCC  
-                'fatorCapacidade' => 'required|numeric|min:0|max:100', // Frontend envia fatorCapacidade
-                'localizacao' => 'nullable|string|max:500',
-                'observacoes' => 'nullable|string|max:1000',
-                'apelido' => 'required|string|max:100',       // ADICIONAR campo obrigatório
-                'numero_unidade' => 'required|string|max:50', // ADICIONAR campo obrigatório
-            ], [
-                'nomeUsina.required' => 'Nome da usina é obrigatório',
-                'potenciaCC.required' => 'Potência CC é obrigatória',
-                'potenciaCC.numeric' => 'Potência CC deve ser um número',
-                'fatorCapacidade.required' => 'Fator de capacidade é obrigatório',
-                'fatorCapacidade.numeric' => 'Fator de capacidade deve ser um número',
-                'fatorCapacidade.max' => 'Fator de capacidade não pode ser maior que 100%',
-                'apelido.required' => 'Apelido é obrigatório',
-                'numero_unidade.required' => 'Número da unidade é obrigatório',
+            \Log::info('=== UGController::store() DADOS RECEBIDOS ===', [
+                'all_request_data' => $request->all(),
+                'content_type' => $request->header('Content-Type')
             ]);
 
-            // Calcular capacidade (720 horas * potência * fator / 100)
-            $capacidade = 720 * $request->potenciaCC * ($request->fatorCapacidade / 100);
+            // ✅ VALIDAÇÃO
+            $dadosValidados = $request->validate([
+                'nome_usina' => 'required|string|max:255',
+                'potencia_cc' => 'required|numeric|min:0.1|max:10000',
+                'fator_capacidade' => 'required|numeric|min:0.01|max:1',
+                'numero_unidade' => 'required|string|max:50',
+                'apelido' => 'required|string|max:255',
+                'localizacao' => 'nullable|string|max:255',
+                'observacoes_ug' => 'nullable|string|max:1000',
+                'gerador' => 'required|boolean',
+                'nexus_clube' => 'required|boolean',
+            ]);
 
+            \Log::info('✅ Dados validados com sucesso:', $dadosValidados);
+
+            // ✅ CRIAR UG usando ULID
             $ug = UnidadeConsumidora::create([
-                'usuario_id' => $currentUser->id,
-                'nome_usina' => $request->nomeUsina,        // Mapear corretamente
-                'potencia_cc' => $request->potenciaCC,      // Mapear corretamente  
-                'fator_capacidade' => $request->fatorCapacidade, // Mapear corretamente
-                'capacidade_calculada' => $capacidade,
-                'localizacao' => $request->localizacao,
-                'observacoes_ug' => $request->observacoes,
-                'apelido' => $request->apelido,             // ADICIONAR
-                'numero_unidade' => $request->numero_unidade, // ADICIONAR
-                'consumo_medio' => 0,                       // ADICIONAR padrão
-                'gerador' => true,                          // CORRIGIDO: usar 'gerador'
-                'nexus_clube' => true,                      // ADICIONADO: sempre true para UGs
-                'ucs_atribuidas' => 0,
-                'media_consumo_atribuido' => 0,
-                'mesmo_titular' => false,
-                'numero_cliente' => 0,
-                'tipo' => 'UG',
+                'id' => (string) \Illuminate\Support\Str::ulid(),
+                'usuario_id' => (string) $currentUser->id,
+                'concessionaria_id' => '01JB849ZDG0RPC5EB8ZFTB4GJN', // ✅ ULID padrão fixo
+                'nome_usina' => $dadosValidados['nome_usina'],
+                'potencia_cc' => (float) $dadosValidados['potencia_cc'],
+                'fator_capacidade' => (float) $dadosValidados['fator_capacidade'],
+                'numero_unidade' => $dadosValidados['numero_unidade'],
+                'apelido' => $dadosValidados['apelido'],
+                'localizacao' => $dadosValidados['localizacao'] ?? '',
+                'observacoes_ug' => $dadosValidados['observacoes_ug'] ?? '',
+                'gerador' => $dadosValidados['gerador'],
+                'nexus_clube' => $dadosValidados['nexus_clube'],
+                
+                // ✅ CALCULAR CAPACIDADE
+                'capacidade_calculada' => 720 * $dadosValidados['potencia_cc'] * $dadosValidados['fator_capacidade'],
+                
+                // Campos extras com valores padrão
+                'nexus_cativo' => false,
                 'service' => false,
                 'project' => false,
-                'nexus_cativo' => false,
-                'proprietario' => false,
-                'tensao_nominal' => 0,
+                'distribuidora' => $request->input('distribuidora', 'EQUATORIAL'),
+                'consumo_medio' => 0,
+                'tipo' => 'UG',
+                'classe' => 'Comercial',
+                'subclasse' => 'Comercial',
                 'grupo' => 'A',
                 'ligacao' => 'Trifásico',
+                'mesmo_titular' => false,
+                'numero_cliente' => '0',
+                'proprietario' => false,
+                'tensao_nominal' => 0,
                 'irrigante' => false,
                 'calibragem_percentual' => 0,
                 'relacao_te' => 1,
-                'classe' => 'Comercial',
-                'subclasse' => 'Comercial',
                 'tipo_conexao' => 'Rede',
                 'estrutura_tarifaria' => 'Convencional',
                 'desconto_fatura' => 0,
                 'desconto_bandeira' => 0,
+                'ucs_atribuidas' => 0,
+                'media_consumo_atribuido' => 0,
             ]);
 
+            \Log::info('✅ UG criada com sucesso', [
+                'ug_id' => $ug->id,
+                'nome_usina' => $ug->nome_usina
+            ]);
+
+            // Transformar para frontend
             $ugTransformada = [
                 'id' => $ug->id,
                 'nomeUsina' => $ug->nome_usina,
