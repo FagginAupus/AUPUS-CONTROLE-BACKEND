@@ -12,9 +12,7 @@ use Illuminate\Support\Facades\DB;
 
 class UGController extends Controller
 {
-    /**
-     * Listar todas as UGs
-     */
+    
     public function index(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();
@@ -27,21 +25,59 @@ class UGController extends Controller
         }
 
         try {
-            // Buscar apenas UGs que são gerador E fazem parte do nexus clube
-            $query = UnidadeConsumidora::where('gerador', true)
+            \Log::info('=== UGController::index() INICIADO ===', [
+                'user_id' => $currentUser->id,
+                'user_role' => $currentUser->role,
+                'timestamp' => now()->toISOString(),
+                'request_search' => $request->get('search', 'sem busca')
+            ]);
+
+            $search = $request->get('search');
+
+            // ✅ CORRIGIDO: Usar 'gerador' ao invés de 'is_ug'
+            $query = UnidadeConsumidora::query()
+                ->where('gerador', true)
                 ->where('nexus_clube', true)
                 ->whereNull('deleted_at');
 
-            // Filtros opcionais
-            if ($request->filled('search')) {
-                $search = $request->search;
+            \Log::info('UG Query construída', [
+                'sql_without_bindings' => $query->toSql(),
+                'search_term' => $search ?? 'nenhum'
+            ]);
+
+            if ($search) {
+                \Log::info('Aplicando filtro de busca', [
+                    'search' => $search,
+                    'pattern' => '%' . $search . '%'
+                ]);
                 $query->where('nome_usina', 'ILIKE', '%' . $search . '%');
             }
 
+            // Log antes de executar a query
+            \Log::info('Executando query para buscar UGs...');
             $ugs = $query->orderBy('nome_usina', 'asc')->get();
+
+            \Log::info('UGs encontradas', [
+                'total' => $ugs->count(),
+                'primeira_ug' => $ugs->first() ? [
+                    'id' => $ugs->first()->id,
+                    'nome' => $ugs->first()->nome_usina,
+                    'gerador' => $ugs->first()->gerador,
+                    'nexus_clube' => $ugs->first()->nexus_clube,
+                    'potencia_cc' => $ugs->first()->potencia_cc,
+                    'fator_capacidade' => $ugs->first()->fator_capacidade
+                ] : 'nenhuma'
+            ]);
 
             // Transformar dados para frontend
             $ugsTransformadas = $ugs->map(function ($ug) {
+                \Log::debug('Transformando UG', [
+                    'id' => $ug->id,
+                    'nome_usina' => $ug->nome_usina,
+                    'gerador' => $ug->gerador,
+                    'nexus_clube' => $ug->nexus_clube
+                ]);
+
                 return [
                     'id' => $ug->id,
                     'nomeUsina' => $ug->nome_usina,
@@ -57,16 +93,29 @@ class UGController extends Controller
                 ];
             });
 
-            return response()->json([
+            \Log::info('UGs transformadas para frontend', [
+                'total_transformadas' => $ugsTransformadas->count(),
+                'primeira_transformada' => $ugsTransformadas->first() ?: 'nenhuma'
+            ]);
+
+            $response = [
                 'success' => true,
                 'data' => $ugsTransformadas,
                 'total' => $ugsTransformadas->count()
+            ];
+
+            \Log::info('=== UGController::index() CONCLUÍDO COM SUCESSO ===', [
+                'total_retornado' => $ugsTransformadas->count()
             ]);
 
+            return response()->json($response);
+
         } catch (\Exception $e) {
-            \Log::error('Erro ao listar UGs', [
+            \Log::error('=== ERRO em UGController::index() ===', [
                 'user_id' => $currentUser->id,
-                'error' => $e->getMessage(),
+                'error_message' => $e->getMessage(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
                 'trace' => $e->getTraceAsString()
             ]);
 
