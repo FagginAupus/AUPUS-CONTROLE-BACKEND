@@ -16,7 +16,7 @@ use Tymon\JWTAuth\Facades\JWTAuth;
 class ControleController extends Controller
 {
     /**
-     * ✅ LISTAR CONTROLES COM FILTROS E PAGINAÇÃO
+     * ✅ LISTAR CONTROLES COM FILTROS E PAGINAÇÃO + DADOS EXPANDIDOS
      */
     public function index(Request $request): JsonResponse
     {
@@ -40,30 +40,49 @@ class ControleController extends Controller
             $page = max(1, (int)$request->get('page', 1));
             $perPage = min(100, max(1, (int)$request->get('per_page', 50)));
 
-            // Query base
+            // Query base com relacionamentos EXPANDIDOS
             $query = ControleClube::with([
                 'proposta' => function($q) {
+                    $q->select(['id', 'numero_proposta', 'nome_cliente', 'consultor', 'data_proposta', 'usuario_id']);
                 },
-                'unidadeConsumidora',
+                'unidadeConsumidora' => function($q) {
+                    $q->select(['id', 'numero_unidade', 'apelido', 'consumo_medio', 'distribuidora', 'ligacao']);
+                },
                 'unidadeGeradora' => function($q) {
-                    $q->where('is_ug', true);
+                    $q->where('is_ug', true)
+                      ->select(['id', 'nome_usina', 'potencia_cc', 'capacidade_calculada']);
                 }
             ]);
 
-            // Filtros baseados no role do usuário
+            // ✅ FILTROS HIERÁRQUICOS BASEADOS NO ROLE
             if ($currentUser->role === 'vendedor') {
+                // Vendedor vê apenas seus próprios controles
                 $query->whereHas('proposta', function ($q) use ($currentUser) {
                     $q->where('usuario_id', $currentUser->id);
                 });
             } elseif ($currentUser->role === 'gerente') {
+                // Gerente vê controles da sua equipe
                 $teamIds = collect([$currentUser->id]);
                 if (method_exists($currentUser, 'team')) {
-                    $teamIds = $teamIds->merge($currentUser->team()->pluck('id'));
+                    $teamIds = $teamIds->merge($currentUser->team->pluck('id'));
                 }
+                
                 $query->whereHas('proposta', function ($q) use ($teamIds) {
-                    $q->whereIn('usuario_id', $teamIds);
+                    $q->whereIn('usuario_id', $teamIds->toArray());
+                });
+            } elseif ($currentUser->role === 'consultor') {
+                // Consultor vê controles de toda sua hierarquia
+                $subordinadosIds = [];
+                if (method_exists($currentUser, 'getAllSubordinates')) {
+                    $subordinadosIds = array_column($currentUser->getAllSubordinates(), 'id');
+                }
+                $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
+                
+                $query->whereHas('proposta', function ($q) use ($usuariosPermitidos) {
+                    $q->whereIn('usuario_id', $usuariosPermitidos);
                 });
             }
+            // Admin vê todos - sem filtro
 
             // Filtros opcionais
             if ($request->filled('proposta_id')) {
@@ -75,29 +94,60 @@ class ControleController extends Controller
             }
 
             if ($request->filled('ug_id')) {
-                $query->where('ug_id', $request->ug_id);
+                if ($request->ug_id === 'null' || $request->ug_id === 'sem-ug') {
+                    $query->whereNull('ug_id');
+                } else {
+                    $query->where('ug_id', $request->ug_id);
+                }
+            }
+
+            if ($request->filled('consultor')) {
+                $query->whereHas('proposta', function ($q) use ($request) {
+                    $q->where('consultor', 'ILIKE', '%' . $request->consultor . '%');
+                });
+            }
+
+            if ($request->filled('search')) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->whereHas('proposta', function ($subQ) use ($search) {
+                        $subQ->where('nome_cliente', 'ILIKE', "%{$search}%")
+                             ->orWhere('numero_proposta', 'ILIKE', "%{$search}%");
+                    })->orWhereHas('unidadeConsumidora', function ($subQ) use ($search) {
+                        $subQ->where('numero_unidade', 'ILIKE', "%{$search}%")
+                             ->orWhere('apelido', 'ILIKE', "%{$search}%");
+                    });
+                });
             }
 
             // Ordenação
-            $sortBy = $request->get('sort_by', 'created_at');
-            $sortDir = $request->get('sort_dir', 'desc');
-            
-            $allowedSorts = ['created_at', 'data_entrada_controle', 'calibragem', 'valor_calibrado'];
-            if (in_array($sortBy, $allowedSorts)) {
-                $query->orderBy($sortBy, $sortDir === 'asc' ? 'asc' : 'desc');
-            } else {
-                $query->orderBy('created_at', 'desc');
-            }
+            $orderBy = $request->get('sort_by', 'created_at');
+            $orderDirection = in_array($request->get('sort_direction', 'desc'), ['asc', 'desc']) 
+                ? $request->get('sort_direction', 'desc') 
+                : 'desc';
 
-            // Paginação
+            $query->orderBy($orderBy, $orderDirection);
+
+            // Executar paginação
             $total = $query->count();
             $controles = $query->offset(($page - 1) * $perPage)
                               ->limit($perPage)
                               ->get();
 
-            // Formatar dados
+            // ✅ FORMATAR DADOS PARA O FRONTEND (DADOS EXPANDIDOS)
             $controlesFormatados = $controles->map(function ($controle) {
+                // Buscar nome da UG se existir
+                $nomeUG = null;
+                if ($controle->unidadeGeradora) {
+                    $nomeUG = $controle->unidadeGeradora->nome_usina;
+                } elseif ($controle->ug_id) {
+                    // Fallback se o relacionamento não carregou
+                    $ug = UnidadeConsumidora::where('id', $controle->ug_id)->where('is_ug', true)->first();
+                    $nomeUG = $ug ? $ug->nome_usina : null;
+                }
+
                 return [
+                    // ✅ DADOS DO CONTROLE
                     'id' => $controle->id,
                     'proposta_id' => $controle->proposta_id,
                     'uc_id' => $controle->uc_id,
@@ -109,35 +159,43 @@ class ControleController extends Controller
                     'created_at' => $controle->created_at,
                     'updated_at' => $controle->updated_at,
                     
-                    // Relacionamentos
-                    'proposta' => $controle->proposta ? [
-                        'id' => $controle->proposta->id,
-                        'numero_proposta' => $controle->proposta->numero_proposta,
-                        'nome_cliente' => $controle->proposta->nome_cliente,
-                        'consultor' => $controle->proposta->consultor,
-                        'status' => $this->obterStatusProposta($controle->proposta->unidades_consumidoras ?? '[]') // ✅ CORRIGIDO
-                    ] : null,
-                                        
-                    'unidade_consumidora' => $controle->unidadeConsumidora ? [
-                        'id' => $controle->unidadeConsumidora->id,
-                        'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
-                        'apelido' => $controle->unidadeConsumidora->apelido,
-                        'consumo_medio' => $controle->unidadeConsumidora->consumo_medio
-                    ] : null,
+                    // ✅ DADOS EXPANDIDOS DA PROPOSTA (CAMPOS NECESSÁRIOS PARA O FRONTEND)
+                    'numeroProposta' => $controle->proposta?->numero_proposta ?? 'N/A',
+                    'nomeCliente' => $controle->proposta?->nome_cliente ?? 'N/A',
+                    'consultor' => $controle->proposta?->consultor ?? 'N/A',
+                    'dataEntrada' => $controle->data_entrada_controle ?? $controle->created_at,
                     
-                    'unidade_geradora' => $controle->unidadeGeradora ? [
-                        'id' => $controle->unidadeGeradora->id,
-                        'nome_usina' => $controle->unidadeGeradora->nome_usina,
-                        'potencia_cc' => $controle->unidadeGeradora->potencia_cc
-                    ] : null
+                    // ✅ DADOS EXPANDIDOS DA UC (CAMPOS NECESSÁRIOS PARA O FRONTEND)
+                    'numeroUC' => $controle->unidadeConsumidora?->numero_unidade ?? 'N/A',
+                    'apelido' => $controle->unidadeConsumidora?->apelido ?? 'N/A',
+                    'media' => $controle->unidadeConsumidora?->consumo_medio ?? 0,
+                    'distribuidora' => $controle->unidadeConsumidora?->distribuidora ?? 'N/A',
+                    'ligacao' => $controle->unidadeConsumidora?->ligacao ?? 'N/A',
+                    
+                    // ✅ DADOS EXPANDIDOS DA UG (SE EXISTIR)
+                    'ug' => $nomeUG,
+                    'ug_nome' => $nomeUG, // Alias para compatibilidade
+                    'potenciaUG' => $controle->unidadeGeradora?->potencia_cc ?? null,
+                    'capacidadeUG' => $controle->unidadeGeradora?->capacidade_calculada ?? null,
+                    
+                    // ✅ DADOS CALCULADOS
+                    'valorCalibrado' => $this->calcularValorCalibrado(
+                        $controle->unidadeConsumidora?->consumo_medio ?? 0,
+                        $controle->calibragem ?? 0
+                    ),
+                    
+                    // ✅ COMPATIBILIDADE COM FRONTEND ANTIGO
+                    'celular' => null, // Pode ser adicionado se existir no modelo
                 ];
             });
 
             Log::info('Controle clube carregado com sucesso', [
                 'total' => $total,
+                'returned' => $controlesFormatados->count(),
                 'page' => $page,
                 'per_page' => $perPage,
-                'user_id' => $currentUser->id
+                'user_id' => $currentUser->id,
+                'user_role' => $currentUser->role
             ]);
 
             return response()->json([
@@ -149,12 +207,15 @@ class ControleController extends Controller
                     'total' => $total,
                     'last_page' => ceil($total / $perPage),
                     'from' => ($page - 1) * $perPage + 1,
-                    'to' => min($page * $perPage, $total)
+                    'to' => min($page * $perPage, $total),
+                    'has_more_pages' => $page < ceil($total / $perPage)
                 ],
                 'filters' => [
                     'proposta_id' => $request->proposta_id,
                     'uc_id' => $request->uc_id,
-                    'ug_id' => $request->ug_id
+                    'ug_id' => $request->ug_id,
+                    'consultor' => $request->consultor,
+                    'search' => $request->search
                 ]
             ]);
 
@@ -163,7 +224,8 @@ class ControleController extends Controller
                 'error' => $e->getMessage(),
                 'line' => $e->getLine(),
                 'file' => basename($e->getFile()),
-                'user_id' => $currentUser->id ?? 'desconhecido'
+                'user_id' => $currentUser->id ?? 'desconhecido',
+                'request_data' => $request->all()
             ]);
 
             return response()->json([
@@ -179,84 +241,89 @@ class ControleController extends Controller
     }
 
     /**
+     * ✅ CALCULAR VALOR CALIBRADO
+     */
+    private function calcularValorCalibrado($media, $calibragem)
+    {
+        if (!$media || !$calibragem || $calibragem == 0) {
+            return 0;
+        }
+        
+        $mediaNum = floatval($media);
+        $calibragemNum = floatval($calibragem);
+        
+        return $mediaNum * (1 + ($calibragemNum / 100));
+    }
+
+    /**
      * ✅ CRIAR NOVO CONTROLE
      */
     public function store(Request $request): JsonResponse
     {
+        $currentUser = JWTAuth::user();
+        
+        if (!$currentUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
+        }
+
+        // Validação
+        $validator = Validator::make($request->all(), [
+            'proposta_id' => 'required|string|exists:propostas,id',
+            'uc_id' => 'required|string|exists:unidades_consumidoras,id',
+            'ug_id' => 'nullable|string|exists:unidades_consumidoras,id',
+            'calibragem' => 'nullable|numeric|min:0|max:100',
+            'observacoes' => 'nullable|string|max:1000'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dados de entrada inválidos',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
         try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            Log::info('Dados recebidos para criar controle', [
-                'user_id' => $currentUser->id,
-                'request_data' => $request->all()
-            ]);
-
-            // Validação
-            $validator = Validator::make($request->all(), [
-                'proposta_id' => 'required|string|exists:propostas,id',
-                'uc_id' => 'required|string|exists:unidades_consumidoras,id',
-                'ug_id' => 'nullable|string|exists:unidades_consumidoras,id',
-                'calibragem' => 'nullable|numeric|min:-100|max:100',
-                'valor_calibrado' => 'nullable|numeric|min:0',
-                'observacoes' => 'nullable|string|max:1000',
-                'data_entrada_controle' => 'nullable|date'
-            ], [
-                'proposta_id.required' => 'ID da proposta é obrigatório',
-                'proposta_id.exists' => 'Proposta não encontrada',
-                'uc_id.required' => 'ID da unidade consumidora é obrigatório',
-                'uc_id.exists' => 'Unidade consumidora não encontrada',
-                'ug_id.exists' => 'Unidade geradora não encontrada',
-                'calibragem.numeric' => 'Calibragem deve ser um número',
-                'calibragem.min' => 'Calibragem deve ser maior que -100%',
-                'calibragem.max' => 'Calibragem deve ser menor que 100%'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
             DB::beginTransaction();
 
-            // Verificar se já existe controle para essa UC na proposta
-            $controleExistente = ControleClube::where('proposta_id', $request->proposta_id)
-                                            ->where('uc_id', $request->uc_id)
-                                            ->first();
+            // Verificar se já existe controle para esta UC/Proposta
+            $existeControle = ControleClube::where('proposta_id', $request->proposta_id)
+                                         ->where('uc_id', $request->uc_id)
+                                         ->first();
 
-            if ($controleExistente) {
+            if ($existeControle) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Já existe um controle para esta UC nesta proposta'
+                    'message' => 'Já existe controle para esta UC/Proposta'
                 ], 409);
             }
 
+            // Calcular valor calibrado
+            $uc = UnidadeConsumidora::find($request->uc_id);
+            $valorCalibrado = null;
+            if ($request->calibragem && $uc && $uc->consumo_medio) {
+                $valorCalibrado = $this->calcularValorCalibrado($uc->consumo_medio, $request->calibragem);
+            }
+
             // Criar controle
-            $controle = new ControleClube();
-            $controle->id = (string) Str::uuid();
-            $controle->proposta_id = $request->proposta_id;
-            $controle->uc_id = $request->uc_id;
-            $controle->ug_id = $request->ug_id;
-            $controle->calibragem = $request->calibragem ?? 0.00;
-            $controle->valor_calibrado = $request->valor_calibrado;
-            $controle->observacoes = $request->observacoes;
-            $controle->data_entrada_controle = $request->data_entrada_controle ?? now();
-
-            $controle->save();
-
-            // Carregar relacionamentos para resposta
-            $controle->load(['proposta', 'unidadeConsumidora', 'unidadeGeradora']);
+            $controle = ControleClube::create([
+                'id' => Str::ulid(),
+                'proposta_id' => $request->proposta_id,
+                'uc_id' => $request->uc_id,
+                'ug_id' => $request->ug_id,
+                'calibragem' => $request->calibragem,
+                'valor_calibrado' => $valorCalibrado,
+                'observacoes' => $request->observacoes,
+                'data_entrada_controle' => now()
+            ]);
 
             DB::commit();
+
+            // Carregar com relacionamentos para resposta
+            $controle->load(['proposta', 'unidadeConsumidora', 'unidadeGeradora']);
 
             $controleFormatado = [
                 'id' => $controle->id,
@@ -267,19 +334,25 @@ class ControleController extends Controller
                 'valor_calibrado' => $controle->valor_calibrado,
                 'observacoes' => $controle->observacoes,
                 'data_entrada_controle' => $controle->data_entrada_controle,
-                'created_at' => $controle->created_at,
-                'updated_at' => $controle->updated_at,
                 
                 'proposta' => $controle->proposta ? [
                     'id' => $controle->proposta->id,
                     'numero_proposta' => $controle->proposta->numero_proposta,
-                    'nome_cliente' => $controle->proposta->nome_cliente
+                    'nome_cliente' => $controle->proposta->nome_cliente,
+                    'consultor' => $controle->proposta->consultor
                 ] : null,
                 
                 'unidade_consumidora' => $controle->unidadeConsumidora ? [
                     'id' => $controle->unidadeConsumidora->id,
                     'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
-                    'apelido' => $controle->unidadeConsumidora->apelido
+                    'apelido' => $controle->unidadeConsumidora->apelido,
+                    'consumo_medio' => $controle->unidadeConsumidora->consumo_medio
+                ] : null,
+                
+                'unidade_geradora' => $controle->unidadeGeradora ? [
+                    'id' => $controle->unidadeGeradora->id,
+                    'nome_usina' => $controle->unidadeGeradora->nome_usina,
+                    'potencia_cc' => $controle->unidadeGeradora->potencia_cc
                 ] : null
             ];
 
@@ -303,7 +376,126 @@ class ControleController extends Controller
                 'line' => $e->getLine(),
                 'file' => basename($e->getFile()),
                 'request_data' => $request->all(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor',
+                'debug' => config('app.debug') ? [
+                    'error' => $e->getMessage(),
+                    'line' => $e->getLine(),
+                    'file' => basename($e->getFile())
+                ] : null
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ ATUALIZAR CONTROLE (principalmente para UG e calibragem)
+     */
+    public function update(Request $request, string $id): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+        
+        if (!$currentUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
+        }
+
+        // Validação
+        $validator = Validator::make($request->all(), [
+            'ug_id' => 'nullable|string|exists:unidades_consumidoras,id',
+            'calibragem' => 'nullable|numeric|min:0|max:100',
+            'observacoes' => 'nullable|string|max:1000'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dados de entrada inválidos',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $controle = ControleClube::with(['proposta', 'unidadeConsumidora'])
+                                   ->find($id);
+
+            if (!$controle) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Controle não encontrado'
+                ], 404);
+            }
+
+            // Verificar permissões
+            if ($currentUser->role === 'vendedor' && 
+                $controle->proposta && 
+                $controle->proposta->usuario_id !== $currentUser->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sem permissão para editar este controle'
+                ], 403);
+            }
+
+            // Atualizar campos
+            if ($request->has('ug_id')) {
+                $controle->ug_id = $request->ug_id;
+            }
+
+            if ($request->has('calibragem')) {
+                $controle->calibragem = $request->calibragem;
+                
+                // Recalcular valor calibrado
+                if ($controle->unidadeConsumidora && $controle->unidadeConsumidora->consumo_medio) {
+                    $controle->valor_calibrado = $this->calcularValorCalibrado(
+                        $controle->unidadeConsumidora->consumo_medio,
+                        $request->calibragem
+                    );
+                }
+            }
+
+            if ($request->has('observacoes')) {
+                $controle->observacoes = $request->observacoes;
+            }
+
+            $controle->save();
+
+            DB::commit();
+
+            Log::info('Controle atualizado com sucesso', [
+                'controle_id' => $controle->id,
+                'changes' => $controle->getChanges(),
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Controle atualizado com sucesso',
+                'data' => [
+                    'id' => $controle->id,
+                    'ug_id' => $controle->ug_id,
+                    'calibragem' => $controle->calibragem,
+                    'valor_calibrado' => $controle->valor_calibrado,
+                    'observacoes' => $controle->observacoes,
+                    'updated_at' => $controle->updated_at
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            Log::error('Erro ao atualizar controle', [
+                'controle_id' => $id,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile()),
+                'user_id' => $currentUser->id
             ]);
 
             return response()->json([
@@ -369,15 +561,15 @@ class ControleController extends Controller
                     'id' => $controle->proposta->id,
                     'numero_proposta' => $controle->proposta->numero_proposta,
                     'nome_cliente' => $controle->proposta->nome_cliente,
-                    'consultor' => $controle->proposta->consultor,
-                    'status' => $this->obterStatusProposta($controle->proposta->unidades_consumidoras ?? '[]') // ✅ CORRIGIDO
+                    'consultor' => $controle->proposta->consultor
                 ] : null,
                                 
                 'unidade_consumidora' => $controle->unidadeConsumidora ? [
                     'id' => $controle->unidadeConsumidora->id,
                     'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
                     'apelido' => $controle->unidadeConsumidora->apelido,
-                    'consumo_medio' => $controle->unidadeConsumidora->consumo_medio
+                    'consumo_medio' => $controle->unidadeConsumidora->consumo_medio,
+                    'distribuidora' => $controle->unidadeConsumidora->distribuidora
                 ] : null,
                 
                 'unidade_geradora' => $controle->unidadeGeradora ? [
@@ -401,121 +593,18 @@ class ControleController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor'
+                'message' => 'Erro interno do servidor',
+                'debug' => config('app.debug') ? [
+                    'error' => $e->getMessage(),
+                    'line' => $e->getLine(),
+                    'file' => basename($e->getFile())
+                ] : null
             ], 500);
         }
     }
 
     /**
-     * ✅ ATUALIZAR CONTROLE
-     */
-    public function update(Request $request, string $id): JsonResponse
-    {
-        try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            $controle = ControleClube::find($id);
-
-            if (!$controle) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Controle não encontrado'
-                ], 404);
-            }
-
-            // Verificar permissão
-            if ($currentUser->role === 'vendedor') {
-                $proposta = Proposta::find($controle->proposta_id);
-                if (!$proposta || $proposta->usuario_id !== $currentUser->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Sem permissão para editar este controle'
-                    ], 403);
-                }
-            }
-
-            // Validação
-            $validator = Validator::make($request->all(), [
-                'ug_id' => 'sometimes|nullable|string|exists:unidades_consumidoras,id',
-                'calibragem' => 'sometimes|nullable|numeric|min:-100|max:100',
-                'valor_calibrado' => 'sometimes|nullable|numeric|min:0',
-                'observacoes' => 'sometimes|nullable|string|max:1000',
-                'data_entrada_controle' => 'sometimes|nullable|date'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
-            DB::beginTransaction();
-
-            // Atualizar campos
-            if ($request->has('ug_id')) $controle->ug_id = $request->ug_id;
-            if ($request->has('calibragem')) $controle->calibragem = $request->calibragem ?? 0.00;
-            if ($request->has('valor_calibrado')) $controle->valor_calibrado = $request->valor_calibrado;
-            if ($request->has('observacoes')) $controle->observacoes = $request->observacoes;
-            if ($request->has('data_entrada_controle')) $controle->data_entrada_controle = $request->data_entrada_controle;
-
-            $controle->save();
-
-            // Carregar relacionamentos
-            $controle->load(['proposta', 'unidadeConsumidora', 'unidadeGeradora']);
-
-            DB::commit();
-
-            $controleFormatado = [
-                'id' => $controle->id,
-                'proposta_id' => $controle->proposta_id,
-                'uc_id' => $controle->uc_id,
-                'ug_id' => $controle->ug_id,
-                'calibragem' => $controle->calibragem,
-                'valor_calibrado' => $controle->valor_calibrado,
-                'observacoes' => $controle->observacoes,
-                'data_entrada_controle' => $controle->data_entrada_controle,
-                'created_at' => $controle->created_at,
-                'updated_at' => $controle->updated_at
-            ];
-
-            Log::info('Controle atualizado com sucesso', [
-                'controle_id' => $controle->id,
-                'user_id' => $currentUser->id
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Controle atualizado com sucesso',
-                'data' => $controleFormatado
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            
-            Log::error('Erro ao atualizar controle', [
-                'controle_id' => $id,
-                'error' => $e->getMessage(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
-
-    /**
-     * ✅ EXCLUIR CONTROLE
+     * ✅ REMOVER CONTROLE
      */
     public function destroy(string $id): JsonResponse
     {
@@ -529,7 +618,7 @@ class ControleController extends Controller
                 ], 401);
             }
 
-            $controle = ControleClube::find($id);
+            $controle = ControleClube::with('proposta')->find($id);
 
             if (!$controle) {
                 return response()->json([
@@ -538,23 +627,18 @@ class ControleController extends Controller
                 ], 404);
             }
 
-            // Verificar permissão (apenas admin ou dono da proposta)
+            // Verificar permissões (apenas admin pode deletar)
             if ($currentUser->role !== 'admin') {
-                $proposta = Proposta::find($controle->proposta_id);
-                if (!$proposta || $proposta->usuario_id !== $currentUser->id) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Sem permissão para excluir este controle'
-                    ], 403);
-                }
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Apenas administradores podem excluir controles'
+                ], 403);
             }
 
-            // Soft delete
-            $controle->deleted_at = now();
-            $controle->save();
+            $controle->delete();
 
-            Log::info('Controle excluído', [
-                'controle_id' => $controle->id,
+            Log::info('Controle excluído com sucesso', [
+                'controle_id' => $id,
                 'user_id' => $currentUser->id
             ]);
 
@@ -574,114 +658,6 @@ class ControleController extends Controller
                 'success' => false,
                 'message' => 'Erro interno do servidor'
             ], 500);
-        }
-    }
-
-    /**
-     * ✅ ESTATÍSTICAS DO CONTROLE
-     */
-    public function statistics(Request $request): JsonResponse
-    {
-        try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            $query = ControleClube::query();
-
-            // Filtro por role
-            if ($currentUser->role === 'vendedor') {
-                $query->whereHas('proposta', function ($q) use ($currentUser) {
-                    $q->where('usuario_id', $currentUser->id);
-                });
-            } elseif ($currentUser->role === 'gerente') {
-                $teamIds = collect([$currentUser->id]);
-                if (method_exists($currentUser, 'team')) {
-                    $teamIds = $teamIds->merge($currentUser->team()->pluck('id'));
-                }
-                $query->whereHas('proposta', function ($q) use ($teamIds) {
-                    $q->whereIn('usuario_id', $teamIds);
-                });
-            }
-
-            $totalControles = $query->count();
-            $controlesComCalibragem = $query->where('calibragem', '!=', 0)->count();
-            $controlesComUG = $query->whereNotNull('ug_id')->count();
-            $mediaCalibragem = $query->avg('calibragem') ?? 0;
-
-            $estatisticas = [
-                'total_controles' => $totalControles,
-                'controles_com_calibragem' => $controlesComCalibragem,
-                'controles_com_ug' => $controlesComUG,
-                'media_calibragem' => round($mediaCalibragem, 2),
-                'percentual_com_calibragem' => $totalControles > 0 ? 
-                    round(($controlesComCalibragem / $totalControles) * 100, 2) : 0,
-                'percentual_com_ug' => $totalControles > 0 ? 
-                    round(($controlesComUG / $totalControles) * 100, 2) : 0
-            ];
-
-            return response()->json([
-                'success' => true,
-                'data' => $estatisticas
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Erro ao gerar estatísticas do controle', [
-                'error' => $e->getMessage(),
-                'user_id' => $currentUser->id ?? 'desconhecido'
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500);
-        }
-    }
-
-    /**
-     * ✅ OBTER STATUS DA PROPOSTA BASEADO NAS UCs
-     */
-    private function obterStatusProposta($unidadesJson): string
-    {
-        try {
-            $unidades = is_string($unidadesJson) ? json_decode($unidadesJson, true) : $unidadesJson;
-            
-            if (empty($unidades)) {
-                return 'Aguardando';
-            }
-            
-            $statusArray = array_column($unidades, 'status');
-            
-            // Se todas são fechadas
-            if (count(array_unique($statusArray)) === 1 && $statusArray[0] === 'Fechada') {
-                return 'Fechada';
-            }
-            
-            // Se tem pelo menos uma fechada
-            if (in_array('Fechada', $statusArray)) {
-                return 'Parcial';
-            }
-            
-            // Se todas são recusadas
-            if (count(array_unique($statusArray)) === 1 && $statusArray[0] === 'Recusada') {
-                return 'Recusada';
-            }
-            
-            // Se todas são canceladas
-            if (count(array_unique($statusArray)) === 1 && $statusArray[0] === 'Cancelada') {
-                return 'Cancelada';
-            }
-            
-            return 'Aguardando';
-            
-        } catch (\Exception $e) {
-            \Log::warning('Erro ao obter status da proposta', ['error' => $e->getMessage()]);
-            return 'Aguardando';
         }
     }
 }
