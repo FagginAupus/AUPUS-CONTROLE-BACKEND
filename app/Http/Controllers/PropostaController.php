@@ -11,9 +11,6 @@ use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
 
-
-
-
 class PropostaController extends Controller
 {
     /**
@@ -96,13 +93,61 @@ class PropostaController extends Controller
                 'user_id' => $currentUser->id
             ]);
 
+            // ✅ EXPANDIR PROPOSTAS PARA UCs (uma linha por UC)
+            $linhasExpandidas = [];
+
+            foreach ($propostasMapeadas as $proposta) {
+                $unidadesConsumidoras = $proposta['unidades_consumidoras'];
+                
+                if (empty($unidadesConsumidoras)) {
+                    // Se não tem UCs, criar uma linha padrão
+                    $linhasExpandidas[] = $proposta;
+                } else {
+                    // Para cada UC, criar uma linha separada
+                    foreach ($unidadesConsumidoras as $index => $uc) {
+                        $linhasExpandidas[] = [
+                            'id' => $proposta['id'] . '-UC-' . $index,
+                            'propostaId' => $proposta['id'],
+                            'numeroProposta' => $proposta['numeroProposta'],
+                            'nomeCliente' => $proposta['nomeCliente'],
+                            'consultor' => $proposta['consultor'],
+                            'data' => $proposta['data'],
+                            'status' => $uc['status'] ?? $proposta['status'],
+                            'observacoes' => $proposta['observacoes'],
+                            'recorrencia' => $proposta['recorrencia'],
+                            'descontoTarifa' => $proposta['descontoTarifa'],
+                            'descontoBandeira' => $proposta['descontoBandeira'],
+                            'beneficios' => $proposta['beneficios'],
+                            'documentacao' => $proposta['documentacao'],
+                            
+                            // Dados específicos desta UC
+                            'apelido' => $uc['apelido'] ?? "UC " . ($uc['numero_unidade'] ?? ($index + 1)),
+                            'numeroUC' => $uc['numero_unidade'] ?? $uc['numeroUC'] ?? '',
+                            'numeroCliente' => $uc['numero_cliente'] ?? $uc['numeroCliente'] ?? '',
+                            'ligacao' => $uc['ligacao'] ?? $uc['tipo_ligacao'] ?? '',
+                            'media' => $uc['consumo_medio'] ?? $uc['media'] ?? 0,
+                            'distribuidora' => $uc['distribuidora'] ?? '',
+                            
+                            'created_at' => $proposta['created_at'],
+                            'updated_at' => $proposta['updated_at']
+                        ];
+                    }
+                }
+            }
+
+            Log::info('Propostas expandidas', [
+                'propostas_originais' => count($propostasMapeadas),
+                'linhas_expandidas' => count($linhasExpandidas),
+                'user_id' => $currentUser->id
+            ]);
+
             return response()->json([
                 'success' => true,
-                'data' => $propostasMapeadas,
+                'data' => $linhasExpandidas, // ✅ RETORNAR LINHAS EXPANDIDAS
                 'pagination' => [
                     'current_page' => 1,
-                    'per_page' => count($propostasMapeadas),
-                    'total' => count($propostasMapeadas),
+                    'per_page' => count($linhasExpandidas),
+                    'total' => count($linhasExpandidas),
                     'last_page' => 1
                 ],
                 'filters' => []
