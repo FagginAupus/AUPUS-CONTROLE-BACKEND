@@ -133,6 +133,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('ugs-disponiveis', [ControleController::class, 'getUgsDisponiveis']);
         Route::patch('{id}/status-troca', [ControleController::class, 'updateStatusTroca']);
         Route::post('{id}/atribuir-ug', [ControleController::class, 'atribuirUg']);
+        Route::patch('{id}/remover-ug', [ControleController::class, 'removerUg']);  // ⬅️ ADICIONAR ESTA LINHA
         
         // Rotas genéricas por último
         Route::get('{id}', [ControleController::class, 'show']);
@@ -171,7 +172,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/', [\App\Http\Controllers\UGController::class, 'store']);
         Route::get('{id}', [\App\Http\Controllers\UGController::class, 'show']);
         Route::put('{id}', [\App\Http\Controllers\UGController::class, 'update']);
-        Route::delete('{id}', [\App\Http\Controllers\UGController::class, 'destroy']);
+        Route::delete('{id}', [\App\Http\Controllers\UGController::class, 'destroy']); // ✅ VERIFICAR SE EXISTE
         Route::get('statistics', [\App\Http\Controllers\UGController::class, 'statistics']);
     });
 

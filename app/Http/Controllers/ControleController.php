@@ -507,7 +507,7 @@ class ControleController extends Controller
             // Buscar UG
             $ug = DB::selectOne("
                 SELECT id, nome_usina, capacidade_calculada, media_consumo_atribuido,
-                       ucs_atribuidas, ucs_atribuidas_detalhes
+                    ucs_atribuidas, ucs_atribuidas_detalhes
                 FROM unidades_consumidoras 
                 WHERE id = ? AND gerador = true AND deleted_at IS NULL
             ", [$request->ug_id]);
@@ -583,6 +583,95 @@ class ControleController extends Controller
         }
     }
 
+    public function removerUg(string $id): JsonResponse
+    {
+        try {
+            $currentUser = JWTAuth::user();
+
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            // Verificar se é admin
+            if ($currentUser->role !== 'admin') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Apenas administradores podem gerenciar UGs'
+                ], 403);
+            }
+
+            DB::beginTransaction();
+
+            // Buscar controle
+            $controle = DB::selectOne("
+                SELECT cc.*, ug.nome_usina as ug_nome
+                FROM controle_clube cc
+                LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id
+                WHERE cc.id = ? AND cc.deleted_at IS NULL
+            ", [$id]);
+
+            if (!$controle) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Controle não encontrado'
+                ], 404);
+            }
+
+            if (!$controle->ug_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Este controle não possui UG atribuída'
+                ], 400);
+            }
+
+            // Remover UC dos detalhes da UG
+            $this->removerUcDaUg($controle->ug_id, $controle->uc_id);
+
+            // Remover UG do controle
+            DB::update("
+                UPDATE controle_clube 
+                SET ug_id = NULL, updated_at = NOW()
+                WHERE id = ?
+            ", [$id]);
+
+            DB::commit();
+
+            Log::info('UG removida com sucesso', [
+                'controle_id' => $id,
+                'ug_id' => $controle->ug_id,
+                'ug_nome' => $controle->ug_nome,
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "UG '{$controle->ug_nome}' removida com sucesso",
+                'data' => [
+                    'ug_id' => null,
+                    'ug_nome' => null
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            Log::error('Erro ao remover UG', [
+                'controle_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'user_id' => $currentUser->id ?? 'desconhecido'
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
     /**
      * ✅ HELPER: Adicionar UC a uma UG
      */
@@ -647,13 +736,24 @@ class ControleController extends Controller
     {
         // Buscar detalhes atuais
         $ug = DB::selectOne("
-            SELECT id, nome_usina, capacidade_calculada, media_consumo_atribuido,
-                ucs_atribuidas, ucs_atribuidas_detalhes
-            FROM unidades_consumidoras 
-            WHERE id = ? AND gerador = true AND deleted_at IS NULL
-        ", [$request->ug_id]);
+            SELECT ucs_atribuidas_detalhes, ucs_atribuidas, media_consumo_atribuido
+            FROM unidades_consumidoras WHERE id = ?
+        ", [$ugId]);
+
+        if (!$ug) {
+            Log::warning("UG não encontrada para remoção: {$ugId}");
+            return;
+        }
 
         $detalhes = json_decode($ug->ucs_atribuidas_detalhes ?? '[]', true);
+        
+        // ✅ LOG ANTES
+        Log::info('ANTES de remover UC:', [
+            'ug_id' => $ugId,
+            'uc_id' => $ucId,
+            'media_anterior' => $ug->media_consumo_atribuido,
+            'ucs_anterior' => count($detalhes)
+        ]);
         
         // Remover UC
         $detalhes = array_filter($detalhes, function($uc) use ($ucId) {
@@ -666,6 +766,14 @@ class ControleController extends Controller
         // Recalcular totais
         $totalUcs = count($detalhes);
         $totalMedia = array_sum(array_column($detalhes, 'media_calibrada'));
+        
+        // ✅ LOG DEPOIS
+        Log::info('DEPOIS de remover UC:', [
+            'ug_id' => $ugId,
+            'uc_removida' => $ucId,
+            'total_ucs' => $totalUcs,
+            'total_media' => $totalMedia
+        ]);
         
         // Atualizar UG
         DB::update("

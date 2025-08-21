@@ -650,21 +650,21 @@ class UnidadeConsumidoraController extends Controller
     {
         return [
             'id' => $ug->id,
-            'nome_usina' => $ug->nome_usina,
+            'nomeUsina' => $ug->nome_usina, // ✅ CORRIGIDO
             'apelido' => $ug->apelido,
-            'potencia_cc' => $ug->potencia_cc,
-            'fator_capacidade' => $ug->fator_capacidade,
-            'capacidade_calculada' => $ug->capacidade_calculada,
+            'potenciaCC' => (float) $ug->potencia_cc, // ✅ CORRIGIDO
+            'fatorCapacidade' => (float) ($ug->fator_capacidade * 100), // ✅ MULTIPLICAR POR 100
+            'capacidade' => (float) $ug->capacidade_calculada, // ✅ CORRIGIDO
             'localizacao' => $ug->localizacao,
-            'observacoes_ug' => $ug->observacoes_ug,
-            'ucs_atribuidas' => $ug->ucs_atribuidas,
-            'media_consumo_atribuido' => $ug->media_consumo_atribuido,
-            'nexus_clube' => $ug->nexus_clube,
-            'nexus_cativo' => $ug->nexus_cativo,
-            'service' => $ug->service,
-            'project' => $ug->project,
-            'created_at' => $ug->created_at?->format('Y-m-d H:i:s'),
-            'updated_at' => $ug->updated_at?->format('Y-m-d H:i:s'),
+            'observacoes' => $ug->observacoes_ug,
+            'ucsAtribuidas' => (int) $ug->ucs_atribuidas,
+            'mediaConsumoAtribuido' => (float) $ug->media_consumo_atribuido,
+            'nexusClube' => (bool) $ug->nexus_clube,
+            'nexusCativo' => (bool) $ug->nexus_cativo,
+            'service' => (bool) $ug->service,
+            'project' => (bool) $ug->project,
+            'dataCadastro' => $ug->created_at?->format('Y-m-d H:i:s'),
+            'dataAtualizacao' => $ug->updated_at?->format('Y-m-d H:i:s'),
             'permissions' => [
                 'can_view' => $this->canViewUnidade($currentUser, $ug),
                 'can_edit' => $this->canEditUnidade($currentUser, $ug),

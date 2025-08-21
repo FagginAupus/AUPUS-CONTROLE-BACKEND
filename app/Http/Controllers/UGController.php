@@ -72,23 +72,16 @@ class UGController extends Controller
 
             // Transformar dados para frontend
             $ugsTransformadas = $ugs->map(function ($ug) {
-                \Log::debug('Transformando UG', [
-                    'id' => $ug->id,
-                    'nome_usina' => $ug->nome_usina,
-                    'gerador' => $ug->gerador,
-                    'nexus_clube' => $ug->nexus_clube
-                ]);
-
                 return [
                     'id' => $ug->id,
                     'nomeUsina' => $ug->nome_usina,
                     'potenciaCC' => (float) $ug->potencia_cc,
-                    'fatorCapacidade' => (float) $ug->fator_capacidade,
+                    'fatorCapacidade' => (float) ($ug->fator_capacidade * 100), // ✅ MULTIPLICAR POR 100
                     'capacidade' => (float) $ug->capacidade_calculada,
                     'localizacao' => $ug->localizacao,
                     'observacoes' => $ug->observacoes_ug,
                     'ucsAtribuidas' => (int) $ug->ucs_atribuidas,
-                    'mediaConsumoAtribuido' => (float) $ug->media_consumo_atribuido,
+                    'mediaConsumoAtribuido' => (float) $ug->media_consumo_atribuido, // ✅ CORRIGIDO
                     'dataCadastro' => $ug->created_at?->toISOString(),
                     'dataAtualizacao' => $ug->updated_at?->toISOString(),
                 ];
@@ -159,7 +152,7 @@ class UGController extends Controller
             $dadosValidados = $request->validate([
                 'nome_usina' => 'required|string|max:255',
                 'potencia_cc' => 'required|numeric|min:0.1|max:10000',
-                'fator_capacidade' => 'required|numeric|min:0.01|max:1',
+                'fator_capacidade' => 'required|numeric|min:1|max:100', // ✅ CORRIGIDO: 1-100 ao invés de 0.01-1
                 'numero_unidade' => 'required|string|max:50',
                 'apelido' => 'required|string|max:255',
                 'localizacao' => 'nullable|string|max:255',
@@ -177,7 +170,7 @@ class UGController extends Controller
                 'concessionaria_id' => '01JB849ZDG0RPC5EB8ZFTB4GJN', // ✅ ULID padrão fixo
                 'nome_usina' => $dadosValidados['nome_usina'],
                 'potencia_cc' => (float) $dadosValidados['potencia_cc'],
-                'fator_capacidade' => (float) $dadosValidados['fator_capacidade'],
+                'fator_capacidade' => (float) ($dadosValidados['fator_capacidade'] / 100),
                 'numero_unidade' => $dadosValidados['numero_unidade'],
                 'apelido' => $dadosValidados['apelido'],
                 'localizacao' => $dadosValidados['localizacao'] ?? '',
@@ -186,7 +179,8 @@ class UGController extends Controller
                 'nexus_clube' => $dadosValidados['nexus_clube'],
                 
                 // ✅ CALCULAR CAPACIDADE
-                'capacidade_calculada' => 720 * $dadosValidados['potencia_cc'] * $dadosValidados['fator_capacidade'],
+                'capacidade_calculada' => 720 * $dadosValidados['potencia_cc'] * ($dadosValidados['fator_capacidade'] / 100),
+                
                 
                 // Campos extras com valores padrão
                 'nexus_cativo' => false,
@@ -224,12 +218,12 @@ class UGController extends Controller
                 'id' => $ug->id,
                 'nomeUsina' => $ug->nome_usina,
                 'potenciaCC' => (float) $ug->potencia_cc,
-                'fatorCapacidade' => (float) $ug->fator_capacidade,
+                'fatorCapacidade' => (float) ($ug->fator_capacidade * 100), // ✅ MULTIPLICAR POR 100
                 'capacidade' => (float) $ug->capacidade_calculada,
                 'localizacao' => $ug->localizacao,
                 'observacoes' => $ug->observacoes_ug,
-                'ucsAtribuidas' => 0,
-                'mediaConsumoAtribuido' => 0,
+                'ucsAtribuidas' => (int) $ug->ucs_atribuidas,
+                'mediaConsumoAtribuido' => (float) $ug->media_consumo_atribuido,
                 'dataCadastro' => $ug->created_at?->toISOString(),
                 'dataAtualizacao' => $ug->updated_at?->toISOString(),
             ];
@@ -287,7 +281,7 @@ class UGController extends Controller
                 'id' => $ug->id,
                 'nomeUsina' => $ug->nome_usina,
                 'potenciaCC' => (float) $ug->potencia_cc,
-                'fatorCapacidade' => (float) $ug->fator_capacidade,
+                'fatorCapacidade' => (float) ($ug->fator_capacidade * 100), // ✅ MULTIPLICAR POR 100
                 'capacidade' => (float) $ug->capacidade_calculada,
                 'localizacao' => $ug->localizacao,
                 'observacoes' => $ug->observacoes_ug,
@@ -354,7 +348,7 @@ class UGController extends Controller
             $request->validate([
                 'nomeUsina' => 'sometimes|required|string|max:255',
                 'potenciaCC' => 'sometimes|required|numeric|min:0',
-                'fatorCapacidade' => 'sometimes|required|numeric|min:0|max:100',
+                'fatorCapacidade' => 'sometimes|required|numeric|min:1|max:100', // ✅ CORRIGIDO
                 'localizacao' => 'sometimes|nullable|string|max:500',
                 'observacoes' => 'sometimes|nullable|string|max:1000',
             ]);
@@ -384,8 +378,9 @@ class UGController extends Controller
             // Recalcular capacidade se potência ou fator mudaram
             if ($request->has('potenciaCC') || $request->has('fatorCapacidade')) {
                 $potencia = $request->potenciaCC ?? $ug->potencia_cc;
-                $fator = $request->fatorCapacidade ?? $ug->fator_capacidade;
+                $fator = $request->fatorCapacidade ?? ($ug->fator_capacidade * 100); // ✅ MULTIPLICAR POR 100 para comparar
                 $dadosAtualizacao['capacidade_calculada'] = 720 * $potencia * ($fator / 100);
+                $dadosAtualizacao['fator_capacidade'] = $fator / 100; // ✅ ARMAZENAR COMO DECIMAL
             }
 
             $ug->update($dadosAtualizacao);
@@ -394,7 +389,7 @@ class UGController extends Controller
                 'id' => $ug->id,
                 'nomeUsina' => $ug->nome_usina,
                 'potenciaCC' => (float) $ug->potencia_cc,
-                'fatorCapacidade' => (float) $ug->fator_capacidade,
+                'fatorCapacidade' => (float) ($ug->fator_capacidade * 100), // ✅ MULTIPLICAR POR 100 para frontend
                 'capacidade' => (float) $ug->capacidade_calculada,
                 'localizacao' => $ug->localizacao,
                 'observacoes' => $ug->observacoes_ug,
@@ -452,7 +447,6 @@ class UGController extends Controller
             ], 401);
         }
 
-        // Verificar se é admin
         if ($currentUser->role !== 'admin') {
             return response()->json([
                 'success' => false,
@@ -461,42 +455,101 @@ class UGController extends Controller
         }
 
         try {
-            $ug = UnidadeConsumidora::where('id', $id)
-                ->where('gerador', true) // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
-                ->where('nexus_clube', true) // ADICIONADO: verificar nexus_clube
-                ->whereNull('deleted_at')
-                ->firstOrFail();
+            \Log::info('Iniciando exclusão de UG', ['ug_id' => $id]);
 
-            // Verificar se há UCs atribuídas a esta UG
+            // ✅ 1. Verificar se UG existe e pode ser excluída
+            $ug = DB::selectOne("
+                SELECT id, nome_usina, ucs_atribuidas, deleted_at
+                FROM unidades_consumidoras 
+                WHERE id = ? AND gerador = true AND nexus_clube = true AND deleted_at IS NULL
+            ", [$id]);
+
+            if (!$ug) {
+                \Log::warning('UG não encontrada', ['ug_id' => $id]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'UG não encontrada'
+                ], 404);
+            }
+
+            \Log::info('UG encontrada', [
+                'ug_id' => $ug->id,
+                'nome_usina' => $ug->nome_usina,
+                'ucs_atribuidas' => $ug->ucs_atribuidas
+            ]);
+
+            // ✅ 2. Verificar se há UCs atribuídas
             if ($ug->ucs_atribuidas > 0) {
+                \Log::warning('UG possui UCs atribuídas', [
+                    'ug_id' => $id,
+                    'ucs_atribuidas' => $ug->ucs_atribuidas
+                ]);
+                
                 return response()->json([
                     'success' => false,
                     'message' => 'Não é possível excluir UG com UCs atribuídas. Remova as UCs primeiro.'
-                ], 422);
+                ], 400);
             }
 
-            // Soft delete
-            $ug->update([
-                'deleted_at' => now(),
+            // ✅ 3. Executar soft delete com DB::update DIRETAMENTE
+            $agora = now()->format('Y-m-d H:i:s');
+            
+            \Log::info('Executando soft delete', [
+                'ug_id' => $id,
+                'deleted_at' => $agora,
                 'deleted_by' => $currentUser->id
+            ]);
+
+            $rowsAffected = DB::update("
+                UPDATE unidades_consumidoras 
+                SET deleted_at = ?, deleted_by = ?, updated_at = ?
+                WHERE id = ? AND deleted_at IS NULL
+            ", [$agora, $currentUser->id, $agora, $id]);
+
+            \Log::info('Resultado do UPDATE', [
+                'ug_id' => $id,
+                'rows_affected' => $rowsAffected,
+                'deleted_at' => $agora
+            ]);
+
+            // ✅ 4. Verificar se a atualização funcionou
+            if ($rowsAffected === 0) {
+                \Log::error('Nenhuma linha foi atualizada', ['ug_id' => $id]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Falha ao excluir UG - nenhuma linha afetada'
+                ], 500);
+            }
+
+            // ✅ 5. Confirmar que foi excluída
+            $ugExcluida = DB::selectOne("
+                SELECT deleted_at, deleted_by 
+                FROM unidades_consumidoras 
+                WHERE id = ?
+            ", [$id]);
+
+            \Log::info('✅ UG EXCLUÍDA COM SUCESSO!', [
+                'ug_id' => $id,
+                'nome_usina' => $ug->nome_usina,
+                'rows_affected' => $rowsAffected,
+                'deleted_at_confirmacao' => $ugExcluida->deleted_at,
+                'deleted_by_confirmacao' => $ugExcluida->deleted_by,
+                'user_id' => $currentUser->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'UG excluída com sucesso'
+                'message' => "UG '{$ug->nome_usina}' excluída com sucesso"
             ]);
 
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'UG não encontrada'
-            ], 404);
-
         } catch (\Exception $e) {
-            \Log::error('Erro ao excluir UG', [
+            \Log::error('❌ ERRO ao excluir UG', [
                 'ug_id' => $id,
                 'user_id' => $currentUser->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile()),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
