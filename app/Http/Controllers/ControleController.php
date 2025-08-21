@@ -77,7 +77,7 @@ class ControleController extends Controller
                 FROM controle_clube cc
                 LEFT JOIN propostas p ON cc.proposta_id = p.id
                 LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
-                LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.is_ug = true
+                LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
                 WHERE cc.deleted_at IS NULL
             ";
 
@@ -378,16 +378,11 @@ class ControleController extends Controller
 
             // Buscar todas as UGs
             $ugs = DB::select("
-                SELECT 
-                    id,
-                    nome_usina,
-                    potencia_cc,
-                    capacidade_calculada,
-                    ucs_atribuidas,
-                    media_consumo_atribuido,
-                    ucs_atribuidas_detalhes
+                SELECT id, nome_usina, potencia_cc, fator_capacidade, 
+                    ucs_atribuidas, media_consumo_atribuido
                 FROM unidades_consumidoras 
-                WHERE is_ug = true 
+                WHERE gerador = true 
+                AND nexus_clube = true 
                 AND deleted_at IS NULL
                 ORDER BY nome_usina
             ");
@@ -459,8 +454,8 @@ class ControleController extends Controller
             return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
         }
 
-        $validator = Validator::make($request->all(), [
-            'ug_id' => 'required|string|exists:unidades_consumidoras,id'
+        $validator = Validator::make($request->all(), [  // ✅ UM $ APENAS
+            'ug_id' => 'required|string'
         ]);
 
         if ($validator->fails()) {
@@ -469,6 +464,19 @@ class ControleController extends Controller
                 'message' => 'UG inválida',
                 'errors' => $validator->errors()
             ], 422);
+        }
+
+        // Validação customizada para UG
+        $ugExiste = DB::selectOne("
+            SELECT id, nome_usina FROM unidades_consumidoras 
+            WHERE id = ? AND gerador = true
+        ", [$request->ug_id]);
+
+        if (!$ugExiste) {
+            return response()->json([
+                'success' => false,
+                'message' => 'UG não encontrada ou não é uma unidade geradora'
+            ], 404);
         }
 
         try {
@@ -501,7 +509,7 @@ class ControleController extends Controller
                 SELECT id, nome_usina, capacidade_calculada, media_consumo_atribuido,
                        ucs_atribuidas, ucs_atribuidas_detalhes
                 FROM unidades_consumidoras 
-                WHERE id = ? AND is_ug = true AND deleted_at IS NULL
+                WHERE id = ? AND gerador = true AND deleted_at IS NULL
             ", [$request->ug_id]);
 
             if (!$ug) {
@@ -535,8 +543,8 @@ class ControleController extends Controller
                 'numero_uc' => $controle->numero_unidade,
                 'apelido' => $controle->apelido,
                 'proposta_id' => $controle->proposta_id,
-                'media' => $consumoMedio,
-                'media_calibrada' => $consumoCalibrado
+                'media' => $consumoMedio, // ✅ Média original
+                'media_calibrada' => $consumoCalibrado // ✅ Média calibrada (que deve ser somada)
             ]);
 
             // Atualizar controle
@@ -588,6 +596,14 @@ class ControleController extends Controller
 
         $detalhes = json_decode($ug->ucs_atribuidas_detalhes ?? '[]', true);
         
+        // ✅ LOG ANTES
+        Log::info('ANTES de adicionar UC:', [
+            'ug_id' => $ugId,
+            'media_anterior' => $ug->media_consumo_atribuido,
+            'ucs_anterior' => count($detalhes),
+            'nova_uc_media' => $ucData['media_calibrada']
+        ]);
+        
         // Remover UC se já existir (evitar duplicatas)
         $detalhes = array_filter($detalhes, function($uc) use ($ucData) {
             return $uc['uc_id'] !== $ucData['uc_id'];
@@ -599,6 +615,14 @@ class ControleController extends Controller
         // Recalcular totais
         $totalUcs = count($detalhes);
         $totalMedia = array_sum(array_column($detalhes, 'media_calibrada'));
+        
+        // ✅ LOG DEPOIS
+        Log::info('DEPOIS de calcular totais:', [
+            'ug_id' => $ugId,
+            'total_ucs' => $totalUcs,
+            'total_media' => $totalMedia,
+            'detalhes' => $detalhes
+        ]);
         
         // Atualizar UG
         DB::update("
@@ -623,9 +647,11 @@ class ControleController extends Controller
     {
         // Buscar detalhes atuais
         $ug = DB::selectOne("
-            SELECT ucs_atribuidas_detalhes
-            FROM unidades_consumidoras WHERE id = ?
-        ", [$ugId]);
+            SELECT id, nome_usina, capacidade_calculada, media_consumo_atribuido,
+                ucs_atribuidas, ucs_atribuidas_detalhes
+            FROM unidades_consumidoras 
+            WHERE id = ? AND gerador = true AND deleted_at IS NULL
+        ", [$request->ug_id]);
 
         $detalhes = json_decode($ug->ucs_atribuidas_detalhes ?? '[]', true);
         
@@ -662,12 +688,18 @@ class ControleController extends Controller
      */
     private function calcularValorCalibrado($media, $calibragem)
     {
-        if (!$media || !$calibragem || $calibragem == 0) {
-            return 0;
+        $mediaNum = floatval($media);
+        
+        if (!$mediaNum) {
+            return 0; // Se não tem média, retorna 0
         }
         
-        $mediaNum = floatval($media);
         $calibragemNum = floatval($calibragem);
+        
+        // ✅ CORREÇÃO: Se calibragem for 0, retorna apenas a média
+        if ($calibragemNum == 0) {
+            return $mediaNum;
+        }
         
         return $mediaNum * (1 + ($calibragemNum / 100));
     }
