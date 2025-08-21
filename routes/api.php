@@ -122,12 +122,19 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // ==========================================
-    // CONTROLE CLUBE - Gestão do controle (CORRIGIDO)
+    // ✅ CONTROLE CLUBE - ATUALIZADO COM NOVAS FUNCIONALIDADES
     // ==========================================
     Route::prefix('controle')->group(function () {
         Route::get('/', [ControleController::class, 'index']);
         Route::post('/', [ControleController::class, 'store']);
         Route::get('statistics', [ControleController::class, 'statistics']);
+        
+        // ✅ NOVAS ROTAS ESPECÍFICAS (ANTES das genéricas {id})
+        Route::get('ugs-disponiveis', [ControleController::class, 'getUgsDisponiveis']);
+        Route::patch('{id}/status-troca', [ControleController::class, 'updateStatusTroca']);
+        Route::post('{id}/atribuir-ug', [ControleController::class, 'atribuirUg']);
+        
+        // Rotas genéricas por último
         Route::get('{id}', [ControleController::class, 'show']);
         Route::put('{id}', [ControleController::class, 'update']);
         Route::delete('{id}', [ControleController::class, 'destroy']);
@@ -405,7 +412,10 @@ Route::fallback(function () {
             'controle' => [
                 'GET /api/controle',
                 'POST /api/controle',
-                'GET /api/controle/{id}'
+                'GET /api/controle/{id}',
+                'PATCH /api/controle/{id}/status-troca',
+                'POST /api/controle/{id}/atribuir-ug',
+                'GET /api/controle/ugs-disponiveis'
             ],
             'unidades-consumidoras' => [
                 'GET /api/unidades-consumidoras',

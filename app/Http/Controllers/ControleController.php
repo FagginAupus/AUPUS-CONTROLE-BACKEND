@@ -40,152 +40,163 @@ class ControleController extends Controller
             $page = max(1, (int)$request->get('page', 1));
             $perPage = min(100, max(1, (int)$request->get('per_page', 50)));
 
-            // Query base com relacionamentos EXPANDIDOS
-            $query = ControleClube::with([
-                'proposta' => function($q) {
-                    $q->select(['id', 'numero_proposta', 'nome_cliente', 'consultor', 'data_proposta', 'usuario_id']);
-                },
-                'unidadeConsumidora' => function($q) {
-                    $q->select(['id', 'numero_unidade', 'apelido', 'consumo_medio', 'distribuidora', 'ligacao']);
-                },
-                'unidadeGeradora' => function($q) {
-                    $q->where('is_ug', true)
-                      ->select(['id', 'nome_usina', 'potencia_cc', 'capacidade_calculada']);
-                }
-            ]);
+            // ✅ QUERY COM NOVOS CAMPOS
+            $query = "
+                SELECT 
+                    cc.id,
+                    cc.proposta_id,
+                    cc.uc_id,
+                    cc.ug_id,
+                    cc.calibragem,
+                    cc.valor_calibrado,
+                    cc.observacoes,
+                    cc.status_troca,
+                    cc.data_titularidade,
+                    cc.data_entrada_controle,
+                    cc.created_at,
+                    cc.updated_at,
+                    
+                    -- Dados da proposta
+                    p.numero_proposta,
+                    p.nome_cliente,
+                    p.consultor,
+                    p.data_proposta,
+                    p.usuario_id,
+                    
+                    -- Dados da UC
+                    uc.numero_unidade,
+                    uc.apelido,
+                    uc.consumo_medio,
+                    uc.ligacao,
+                    
+                    -- Dados da UG (se atribuída)
+                    ug.nome_usina as ug_nome,
+                    ug.potencia_cc as ug_potencia_cc,
+                    ug.capacidade_calculada as ug_capacidade
+                    
+                FROM controle_clube cc
+                LEFT JOIN propostas p ON cc.proposta_id = p.id
+                LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.is_ug = true
+                WHERE cc.deleted_at IS NULL
+            ";
+
+            $params = [];
 
             // ✅ FILTROS HIERÁRQUICOS BASEADOS NO ROLE
             if ($currentUser->role === 'vendedor') {
-                // Vendedor vê apenas seus próprios controles
-                $query->whereHas('proposta', function ($q) use ($currentUser) {
-                    $q->where('usuario_id', $currentUser->id);
-                });
+                $query .= " AND p.usuario_id = ?";
+                $params[] = $currentUser->id;
             } elseif ($currentUser->role === 'gerente') {
-                // Gerente vê controles da sua equipe
-                $teamIds = collect([$currentUser->id]);
-                if (method_exists($currentUser, 'team')) {
-                    $teamIds = $teamIds->merge($currentUser->team->pluck('id'));
-                }
-                
-                $query->whereHas('proposta', function ($q) use ($teamIds) {
-                    $q->whereIn('usuario_id', $teamIds->toArray());
-                });
+                // Implementar lógica de equipe se necessário
+                $query .= " AND p.usuario_id = ?";
+                $params[] = $currentUser->id;
             } elseif ($currentUser->role === 'consultor') {
-                // Consultor vê controles de toda sua hierarquia
-                $subordinadosIds = [];
-                if (method_exists($currentUser, 'getAllSubordinates')) {
-                    $subordinadosIds = array_column($currentUser->getAllSubordinates(), 'id');
-                }
-                $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
-                
-                $query->whereHas('proposta', function ($q) use ($usuariosPermitidos) {
-                    $q->whereIn('usuario_id', $usuariosPermitidos);
-                });
+                // Implementar lógica de subordinados se necessário
+                $query .= " AND p.usuario_id = ?";
+                $params[] = $currentUser->id;
             }
-            // Admin vê todos - sem filtro
 
             // Filtros opcionais
             if ($request->filled('proposta_id')) {
-                $query->where('proposta_id', $request->proposta_id);
+                $query .= " AND cc.proposta_id = ?";
+                $params[] = $request->proposta_id;
             }
 
             if ($request->filled('uc_id')) {
-                $query->where('uc_id', $request->uc_id);
+                $query .= " AND cc.uc_id = ?";
+                $params[] = $request->uc_id;
             }
 
             if ($request->filled('ug_id')) {
                 if ($request->ug_id === 'null' || $request->ug_id === 'sem-ug') {
-                    $query->whereNull('ug_id');
+                    $query .= " AND cc.ug_id IS NULL";
                 } else {
-                    $query->where('ug_id', $request->ug_id);
+                    $query .= " AND cc.ug_id = ?";
+                    $params[] = $request->ug_id;
                 }
             }
 
             if ($request->filled('consultor')) {
-                $query->whereHas('proposta', function ($q) use ($request) {
-                    $q->where('consultor', 'ILIKE', '%' . $request->consultor . '%');
-                });
+                $query .= " AND p.consultor ILIKE ?";
+                $params[] = '%' . $request->consultor . '%';
             }
 
             if ($request->filled('search')) {
                 $search = $request->search;
-                $query->where(function ($q) use ($search) {
-                    $q->whereHas('proposta', function ($subQ) use ($search) {
-                        $subQ->where('nome_cliente', 'ILIKE', "%{$search}%")
-                             ->orWhere('numero_proposta', 'ILIKE', "%{$search}%");
-                    })->orWhereHas('unidadeConsumidora', function ($subQ) use ($search) {
-                        $subQ->where('numero_unidade', 'ILIKE', "%{$search}%")
-                             ->orWhere('apelido', 'ILIKE', "%{$search}%");
-                    });
-                });
+                $query .= " AND (p.nome_cliente ILIKE ? OR p.numero_proposta ILIKE ? OR uc.numero_unidade::text ILIKE ? OR uc.apelido ILIKE ?)";
+                $params[] = "%{$search}%";
+                $params[] = "%{$search}%";
+                $params[] = "%{$search}%";
+                $params[] = "%{$search}%";
             }
 
-            // Ordenação
+            // Contar total
+            $countQuery = str_replace(
+                "SELECT cc.id, cc.proposta_id, cc.uc_id, cc.ug_id, cc.calibragem, cc.valor_calibrado, cc.observacoes, cc.status_troca, cc.data_titularidade, cc.data_entrada_controle, cc.created_at, cc.updated_at, p.numero_proposta, p.nome_cliente, p.consultor, p.data_proposta, p.usuario_id, uc.numero_unidade, uc.apelido, uc.consumo_medio, uc.ligacao, ug.nome_usina as ug_nome, ug.potencia_cc as ug_potencia_cc, ug.capacidade_calculada as ug_capacidade",
+                "SELECT COUNT(*) as total",
+                $query
+            );
+
+            $totalResult = DB::selectOne($countQuery, $params);
+            $total = $totalResult->total ?? 0;
+
+            // Ordenação e paginação
             $orderBy = $request->get('sort_by', 'created_at');
             $orderDirection = in_array($request->get('sort_direction', 'desc'), ['asc', 'desc']) 
                 ? $request->get('sort_direction', 'desc') 
                 : 'desc';
 
-            $query->orderBy($orderBy, $orderDirection);
+            $query .= " ORDER BY cc.{$orderBy} {$orderDirection}";
+            $query .= " LIMIT ? OFFSET ?";
+            $params[] = $perPage;
+            $params[] = ($page - 1) * $perPage;
 
-            // Executar paginação
-            $total = $query->count();
-            $controles = $query->offset(($page - 1) * $perPage)
-                              ->limit($perPage)
-                              ->get();
+            $controles = DB::select($query, $params);
 
-            // ✅ FORMATAR DADOS PARA O FRONTEND (DADOS EXPANDIDOS)
-            $controlesFormatados = $controles->map(function ($controle) {
-                // Buscar nome da UG se existir
-                $nomeUG = null;
-                if ($controle->unidadeGeradora) {
-                    $nomeUG = $controle->unidadeGeradora->nome_usina;
-                } elseif ($controle->ug_id) {
-                    // Fallback se o relacionamento não carregou
-                    $ug = UnidadeConsumidora::where('id', $controle->ug_id)->where('is_ug', true)->first();
-                    $nomeUG = $ug ? $ug->nome_usina : null;
-                }
-
+            // ✅ FORMATAR DADOS PARA O FRONTEND COM NOVOS CAMPOS
+            $controlesFormatados = collect($controles)->map(function ($controle) {
                 return [
-                    // ✅ DADOS DO CONTROLE
+                    // IDs
                     'id' => $controle->id,
-                    'proposta_id' => $controle->proposta_id,
-                    'uc_id' => $controle->uc_id,
-                    'ug_id' => $controle->ug_id,
-                    'calibragem' => $controle->calibragem,
-                    'valor_calibrado' => $controle->valor_calibrado,
-                    'observacoes' => $controle->observacoes,
-                    'data_entrada_controle' => $controle->data_entrada_controle,
-                    'created_at' => $controle->created_at,
-                    'updated_at' => $controle->updated_at,
+                    'propostaId' => $controle->proposta_id,
+                    'ucId' => $controle->uc_id,
+                    'ugId' => $controle->ug_id,
                     
-                    // ✅ DADOS EXPANDIDOS DA PROPOSTA (CAMPOS NECESSÁRIOS PARA O FRONTEND)
-                    'numeroProposta' => $controle->proposta?->numero_proposta ?? 'N/A',
-                    'nomeCliente' => $controle->proposta?->nome_cliente ?? 'N/A',
-                    'consultor' => $controle->proposta?->consultor ?? 'N/A',
-                    'dataEntrada' => $controle->data_entrada_controle ?? $controle->created_at,
+                    // Dados da proposta
+                    'numeroProposta' => $controle->numero_proposta ?? 'N/A',
+                    'nomeCliente' => $controle->nome_cliente ?? 'N/A',
+                    'consultor' => $controle->consultor ?? 'N/A',
+                    'dataProposta' => $controle->data_proposta,
                     
-                    // ✅ DADOS EXPANDIDOS DA UC (CAMPOS NECESSÁRIOS PARA O FRONTEND)
-                    'numeroUC' => $controle->unidadeConsumidora?->numero_unidade ?? 'N/A',
-                    'apelido' => $controle->unidadeConsumidora?->apelido ?? 'N/A',
-                    'media' => $controle->unidadeConsumidora?->consumo_medio ?? 0,
-                    'distribuidora' => $controle->unidadeConsumidora?->distribuidora ?? 'N/A',
-                    'ligacao' => $controle->unidadeConsumidora?->ligacao ?? 'N/A',
+                    // Dados da UC
+                    'numeroUC' => $controle->numero_unidade ?? 'N/A',
+                    'apelido' => $controle->apelido ?? 'N/A',
+                    'media' => floatval($controle->consumo_medio ?? 0),
+                    'ligacao' => $controle->ligacao ?? 'N/A',
                     
-                    // ✅ DADOS EXPANDIDOS DA UG (SE EXISTIR)
-                    'ug' => $nomeUG,
-                    'ug_nome' => $nomeUG, // Alias para compatibilidade
-                    'potenciaUG' => $controle->unidadeGeradora?->potencia_cc ?? null,
-                    'capacidadeUG' => $controle->unidadeGeradora?->capacidade_calculada ?? null,
+                    // ✅ NOVOS CAMPOS: Status de troca
+                    'statusTroca' => $controle->status_troca ?? 'Aguardando',
+                    'dataTitularidade' => $controle->data_titularidade,
                     
-                    // ✅ DADOS CALCULADOS
+                    // Dados da UG
+                    'ug' => $controle->ug_nome,
+                    'ugNome' => $controle->ug_nome,
+                    'ugPotencia' => floatval($controle->ug_potencia_cc ?? 0),
+                    'ugCapacidade' => floatval($controle->ug_capacidade ?? 0),
+                    
+                    // Calibragem
+                    'calibragem' => floatval($controle->calibragem ?? 0),
                     'valorCalibrado' => $this->calcularValorCalibrado(
-                        $controle->unidadeConsumidora?->consumo_medio ?? 0,
-                        $controle->calibragem ?? 0
+                        floatval($controle->consumo_medio ?? 0),
+                        floatval($controle->calibragem ?? 0)
                     ),
                     
-                    // ✅ COMPATIBILIDADE COM FRONTEND ANTIGO
-                    'celular' => null, // Pode ser adicionado se existir no modelo
+                    // Metadados
+                    'observacoes' => $controle->observacoes,
+                    'dataEntradaControle' => $controle->data_entrada_controle,
+                    'createdAt' => $controle->created_at,
+                    'updatedAt' => $controle->updated_at
                 ];
             });
 
@@ -238,6 +249,412 @@ class ControleController extends Controller
                 ] : null
             ], 500);
         }
+    }
+
+    /**
+     * ✅ ATUALIZAR STATUS DE TROCA DE TITULARIDADE
+     */
+    public function updateStatusTroca(Request $request, string $id): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+        
+        if (!$currentUser) {
+            return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'status_troca' => 'required|in:Aguardando,Em andamento,Finalizado',
+            'data_titularidade' => 'required|date|before_or_equal:today'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dados inválidos',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            // Buscar controle
+            $controle = DB::selectOne(
+                "SELECT cc.*, p.nome_cliente, uc.apelido, uc.numero_unidade,
+                        ug.nome_usina as ug_nome
+                 FROM controle_clube cc
+                 LEFT JOIN propostas p ON cc.proposta_id = p.id
+                 LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id  
+                 LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id
+                 WHERE cc.id = ? AND cc.deleted_at IS NULL",
+                [$id]
+            );
+
+            if (!$controle) {
+                return response()->json(['success' => false, 'message' => 'Controle não encontrado'], 404);
+            }
+
+            // Verificar se está tentando SAIR de "Finalizado" com UG atribuída
+            $statusAnterior = $controle->status_troca;
+            $novoStatus = $request->status_troca;
+            $ugAtual = $controle->ug_id;
+
+            if ($statusAnterior === 'Finalizado' && $novoStatus !== 'Finalizado' && $ugAtual) {
+                // Desatribuir UG automaticamente
+                Log::info('Desatribuindo UG por mudança de status', [
+                    'controle_id' => $id,
+                    'ug_id' => $ugAtual,
+                    'ug_nome' => $controle->ug_nome,
+                    'status_anterior' => $statusAnterior,
+                    'status_novo' => $novoStatus
+                ]);
+
+                // Remover UC dos detalhes da UG
+                $this->removerUcDaUg($ugAtual, $controle->uc_id);
+                
+                // Limpar UG do controle
+                DB::update(
+                    "UPDATE controle_clube SET ug_id = NULL WHERE id = ?",
+                    [$id]
+                );
+            }
+
+            // Atualizar status e data
+            DB::update(
+                "UPDATE controle_clube 
+                 SET status_troca = ?, data_titularidade = ?, updated_at = NOW()
+                 WHERE id = ?",
+                [$novoStatus, $request->data_titularidade, $id]
+            );
+
+            DB::commit();
+
+            $mensagem = $statusAnterior === 'Finalizado' && $novoStatus !== 'Finalizado' && $ugAtual
+                ? "Status atualizado e UG '{$controle->ug_nome}' foi desatribuída"
+                : 'Status de troca atualizado com sucesso';
+
+            return response()->json([
+                'success' => true,
+                'message' => $mensagem,
+                'data' => [
+                    'status_troca' => $novoStatus,
+                    'data_titularidade' => $request->data_titularidade,
+                    'ug_desatribuida' => $statusAnterior === 'Finalizado' && $novoStatus !== 'Finalizado' && $ugAtual
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            Log::error('Erro ao atualizar status de troca', [
+                'controle_id' => $id,
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ LISTAR UGs DISPONÍVEIS COM ANÁLISE DE CAPACIDADE
+     */
+    public function getUgsDisponiveis(): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+        
+        if (!$currentUser) {
+            return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
+        }
+
+        try {
+            // Buscar calibragem global
+            $calibragemGlobal = DB::selectOne(
+                "SELECT valor FROM configuracoes WHERE chave = 'calibragem_global'"
+            )->valor ?? 0;
+
+            // Buscar todas as UGs
+            $ugs = DB::select("
+                SELECT 
+                    id,
+                    nome_usina,
+                    potencia_cc,
+                    capacidade_calculada,
+                    ucs_atribuidas,
+                    media_consumo_atribuido,
+                    ucs_atribuidas_detalhes
+                FROM unidades_consumidoras 
+                WHERE is_ug = true 
+                AND deleted_at IS NULL
+                ORDER BY nome_usina
+            ");
+
+            $ugsAnalise = [];
+            
+            foreach ($ugs as $ug) {
+                $capacidadeTotal = floatval($ug->capacidade_calculada ?? 0);
+                $consumoAtribuido = floatval($ug->media_consumo_atribuido ?? 0);
+                
+                // Calcular consumo disponível
+                $consumoDisponivel = max(0, $capacidadeTotal - $consumoAtribuido);
+                
+                // Status da UG
+                $percentualUso = $capacidadeTotal > 0 ? ($consumoAtribuido / $capacidadeTotal) * 100 : 0;
+                
+                if ($percentualUso >= 95) {
+                    $status = 'Cheia';
+                    $statusColor = 'danger';
+                } elseif ($percentualUso >= 80) {
+                    $status = 'Quase Cheia';
+                    $statusColor = 'warning';
+                } else {
+                    $status = 'Disponível';
+                    $statusColor = 'success';
+                }
+
+                $ugsAnalise[] = [
+                    'id' => $ug->id,
+                    'nome_usina' => $ug->nome_usina,
+                    'potencia_cc' => floatval($ug->potencia_cc ?? 0),
+                    'capacidade_total' => $capacidadeTotal,
+                    'consumo_atribuido' => $consumoAtribuido,
+                    'consumo_disponivel' => $consumoDisponivel,
+                    'ucs_atribuidas' => intval($ug->ucs_atribuidas ?? 0),
+                    'percentual_uso' => round($percentualUso, 1),
+                    'status' => $status,
+                    'status_color' => $statusColor,
+                    'calibragem_global' => floatval($calibragemGlobal)
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $ugsAnalise
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao buscar UGs disponíveis', [
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ ATRIBUIR UG A UM CONTROLE
+     */
+    public function atribuirUg(Request $request, string $id): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+        
+        if (!$currentUser) {
+            return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'ug_id' => 'required|string|exists:unidades_consumidoras,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'UG inválida',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            // Buscar controle
+            $controle = DB::selectOne("
+                SELECT cc.*, uc.consumo_medio, uc.apelido, uc.numero_unidade,
+                       p.nome_cliente, p.numero_proposta
+                FROM controle_clube cc
+                LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                LEFT JOIN propostas p ON cc.proposta_id = p.id
+                WHERE cc.id = ? AND cc.deleted_at IS NULL
+            ", [$id]);
+
+            if (!$controle) {
+                return response()->json(['success' => false, 'message' => 'Controle não encontrado'], 404);
+            }
+
+            // Verificar se status permite atribuição
+            if ($controle->status_troca !== 'Finalizado') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Status deve ser "Finalizado" para atribuir UG'
+                ], 400);
+            }
+
+            // Buscar UG
+            $ug = DB::selectOne("
+                SELECT id, nome_usina, capacidade_calculada, media_consumo_atribuido,
+                       ucs_atribuidas, ucs_atribuidas_detalhes
+                FROM unidades_consumidoras 
+                WHERE id = ? AND is_ug = true AND deleted_at IS NULL
+            ", [$request->ug_id]);
+
+            if (!$ug) {
+                return response()->json(['success' => false, 'message' => 'UG não encontrada'], 404);
+            }
+
+            // Calcular consumo calibrado
+            $calibragem = floatval($controle->calibragem ?? 0);
+            $consumoMedio = floatval($controle->consumo_medio ?? 0);
+            $consumoCalibrado = $this->calcularValorCalibrado($consumoMedio, $calibragem);
+
+            // Verificar capacidade da UG
+            $capacidadeTotal = floatval($ug->capacidade_calculada ?? 0);
+            $consumoAtual = floatval($ug->media_consumo_atribuido ?? 0);
+            
+            if (($consumoAtual + $consumoCalibrado) > $capacidadeTotal) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'UG não tem capacidade suficiente para esta UC'
+                ], 400);
+            }
+
+            // Remover UC de UG anterior (se houver)
+            if ($controle->ug_id) {
+                $this->removerUcDaUg($controle->ug_id, $controle->uc_id);
+            }
+
+            // Adicionar UC à nova UG
+            $this->adicionarUcAUg($request->ug_id, [
+                'uc_id' => $controle->uc_id,
+                'numero_uc' => $controle->numero_unidade,
+                'apelido' => $controle->apelido,
+                'proposta_id' => $controle->proposta_id,
+                'media' => $consumoMedio,
+                'media_calibrada' => $consumoCalibrado
+            ]);
+
+            // Atualizar controle
+            DB::update("
+                UPDATE controle_clube 
+                SET ug_id = ?, updated_at = NOW()
+                WHERE id = ?
+            ", [$request->ug_id, $id]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => "UG '{$ug->nome_usina}' atribuída com sucesso",
+                'data' => [
+                    'ug_id' => $request->ug_id,
+                    'ug_nome' => $ug->nome_usina,
+                    'consumo_calibrado' => $consumoCalibrado
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            Log::error('Erro ao atribuir UG', [
+                'controle_id' => $id,
+                'ug_id' => $request->ug_id,
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ HELPER: Adicionar UC a uma UG
+     */
+    private function adicionarUcAUg(string $ugId, array $ucData): void
+    {
+        // Buscar detalhes atuais
+        $ug = DB::selectOne("
+            SELECT ucs_atribuidas_detalhes, ucs_atribuidas, media_consumo_atribuido
+            FROM unidades_consumidoras WHERE id = ?
+        ", [$ugId]);
+
+        $detalhes = json_decode($ug->ucs_atribuidas_detalhes ?? '[]', true);
+        
+        // Remover UC se já existir (evitar duplicatas)
+        $detalhes = array_filter($detalhes, function($uc) use ($ucData) {
+            return $uc['uc_id'] !== $ucData['uc_id'];
+        });
+        
+        // Adicionar nova UC
+        $detalhes[] = $ucData;
+        
+        // Recalcular totais
+        $totalUcs = count($detalhes);
+        $totalMedia = array_sum(array_column($detalhes, 'media_calibrada'));
+        
+        // Atualizar UG
+        DB::update("
+            UPDATE unidades_consumidoras 
+            SET ucs_atribuidas_detalhes = ?,
+                ucs_atribuidas = ?,
+                media_consumo_atribuido = ?,
+                updated_at = NOW()
+            WHERE id = ?
+        ", [
+            json_encode($detalhes, JSON_UNESCAPED_UNICODE),
+            $totalUcs,
+            $totalMedia,
+            $ugId
+        ]);
+    }
+
+    /**
+     * ✅ HELPER: Remover UC de uma UG
+     */
+    private function removerUcDaUg(string $ugId, string $ucId): void
+    {
+        // Buscar detalhes atuais
+        $ug = DB::selectOne("
+            SELECT ucs_atribuidas_detalhes
+            FROM unidades_consumidoras WHERE id = ?
+        ", [$ugId]);
+
+        $detalhes = json_decode($ug->ucs_atribuidas_detalhes ?? '[]', true);
+        
+        // Remover UC
+        $detalhes = array_filter($detalhes, function($uc) use ($ucId) {
+            return $uc['uc_id'] !== $ucId;
+        });
+        
+        // Reindexar array
+        $detalhes = array_values($detalhes);
+        
+        // Recalcular totais
+        $totalUcs = count($detalhes);
+        $totalMedia = array_sum(array_column($detalhes, 'media_calibrada'));
+        
+        // Atualizar UG
+        DB::update("
+            UPDATE unidades_consumidoras 
+            SET ucs_atribuidas_detalhes = ?,
+                ucs_atribuidas = ?,
+                media_consumo_atribuido = ?,
+                updated_at = NOW()
+            WHERE id = ?
+        ", [
+            json_encode($detalhes, JSON_UNESCAPED_UNICODE),
+            $totalUcs,
+            $totalMedia,
+            $ugId
+        ]);
     }
 
     /**
@@ -553,6 +970,8 @@ class ControleController extends Controller
                 'calibragem' => $controle->calibragem,
                 'valor_calibrado' => $controle->valor_calibrado,
                 'observacoes' => $controle->observacoes,
+                'status_troca' => $controle->status_troca,
+                'data_titularidade' => $controle->data_titularidade,
                 'data_entrada_controle' => $controle->data_entrada_controle,
                 'created_at' => $controle->created_at,
                 'updated_at' => $controle->updated_at,
@@ -568,8 +987,7 @@ class ControleController extends Controller
                     'id' => $controle->unidadeConsumidora->id,
                     'numero_unidade' => $controle->unidadeConsumidora->numero_unidade,
                     'apelido' => $controle->unidadeConsumidora->apelido,
-                    'consumo_medio' => $controle->unidadeConsumidora->consumo_medio,
-                    'distribuidora' => $controle->unidadeConsumidora->distribuidora
+                    'consumo_medio' => $controle->unidadeConsumidora->consumo_medio
                 ] : null,
                 
                 'unidade_geradora' => $controle->unidadeGeradora ? [
