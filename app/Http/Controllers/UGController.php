@@ -177,11 +177,7 @@ class UGController extends Controller
                 'observacoes_ug' => $dadosValidados['observacoes_ug'] ?? '',
                 'gerador' => $dadosValidados['gerador'],
                 'nexus_clube' => $dadosValidados['nexus_clube'],
-                
-                // ✅ CALCULAR CAPACIDADE
-                'capacidade_calculada' => 720 * $dadosValidados['potencia_cc'] * ($dadosValidados['fator_capacidade'] / 100),
-                
-                
+            
                 // Campos extras com valores padrão
                 'nexus_cativo' => false,
                 'service' => false,
@@ -218,7 +214,7 @@ class UGController extends Controller
                 'id' => $ug->id,
                 'nomeUsina' => $ug->nome_usina,
                 'potenciaCC' => (float) $ug->potencia_cc,
-                'fatorCapacidade' => (float) ($ug->fator_capacidade * 100), // ✅ MULTIPLICAR POR 100
+                'fatorCapacidade' => (float) $ug->fator_capacidade,
                 'capacidade' => (float) $ug->capacidade_calculada,
                 'localizacao' => $ug->localizacao,
                 'observacoes' => $ug->observacoes_ug,
@@ -378,8 +374,8 @@ class UGController extends Controller
             // Recalcular capacidade se potência ou fator mudaram
             if ($request->has('potenciaCC') || $request->has('fatorCapacidade')) {
                 $potencia = $request->potenciaCC ?? $ug->potencia_cc;
-                $fator = $request->fatorCapacidade ?? ($ug->fator_capacidade * 100); // ✅ MULTIPLICAR POR 100 para comparar
-                $dadosAtualizacao['capacidade_calculada'] = 720 * $potencia * ($fator / 100);
+                $fator = $request->fatorCapacidade ?? $ug->fator_capacidade; // ✅ VALOR DIRETO
+                $dadosAtualizacao['fator_capacidade'] = $fator; // ✅ ARMAZENAR DIRETO
                 $dadosAtualizacao['fator_capacidade'] = $fator / 100; // ✅ ARMAZENAR COMO DECIMAL
             }
 

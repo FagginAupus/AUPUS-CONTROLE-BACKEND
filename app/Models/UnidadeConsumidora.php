@@ -276,7 +276,8 @@ class UnidadeConsumidora extends Model
             return 'N/A';
         }
         
-        return number_format($this->capacidade_calculada, 0, ',', '.') . ' kWh/mês';
+        // CORREÇÃO: Não usar separador de milhares para evitar confusão
+        return number_format($this->capacidade_calculada, 0, ',', '') . ' kWh/mês';
     }
 
     /**
@@ -326,7 +327,7 @@ class UnidadeConsumidora extends Model
             return 0;
         }
         
-        return 720 * $this->potencia_cc * ($this->fator_capacidade / 100);
+        return 720 * $this->potencia_cc * ($this->fator_capacidade);
     }
 
     /**

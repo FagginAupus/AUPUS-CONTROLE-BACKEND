@@ -235,7 +235,7 @@ class UnidadeConsumidoraController extends Controller
                     'nome_usina' => trim($request->nome_usina),
                     'potencia_cc' => $request->potencia_cc,
                     'fator_capacidade' => $request->fator_capacidade,
-                    'capacidade_calculada' => 720 * $request->potencia_cc * ($request->fator_capacidade / 100),
+                    'capacidade_calculada' => 720 * $request->potencia_cc * ($request->fator_capacidade),
                     'localizacao' => $request->localizacao ? trim($request->localizacao) : null,
                     'observacoes_ug' => $request->observacoes_ug ? trim($request->observacoes_ug) : null,
                     'ucs_atribuidas' => 0,
@@ -653,8 +653,8 @@ class UnidadeConsumidoraController extends Controller
             'nomeUsina' => $ug->nome_usina, // ✅ CORRIGIDO
             'apelido' => $ug->apelido,
             'potenciaCC' => (float) $ug->potencia_cc, // ✅ CORRIGIDO
-            'fatorCapacidade' => (float) ($ug->fator_capacidade * 100), // ✅ MULTIPLICAR POR 100
-            'capacidade' => (float) $ug->capacidade_calculada, // ✅ CORRIGIDO
+            'fatorCapacidade' => (float) $ug->fator_capacidade,
+            'capacidade' => (float) $ug->capacidade_calculada,
             'localizacao' => $ug->localizacao,
             'observacoes' => $ug->observacoes_ug,
             'ucsAtribuidas' => (int) $ug->ucs_atribuidas,

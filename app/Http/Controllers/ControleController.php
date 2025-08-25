@@ -362,12 +362,31 @@ class ControleController extends Controller
     /**
      * ✅ LISTAR UGs DISPONÍVEIS COM ANÁLISE DE CAPACIDADE
      */
-    public function getUgsDisponiveis(): JsonResponse
+    public function getUgsDisponiveis(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();
         
         if (!$currentUser) {
             return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
+        }
+
+        // ✅ BUSCAR DADOS DA UC ESPECÍFICA (se fornecida)
+        $ucId = $request->get('uc_id');
+        $consumoUc = 0;
+        $calibragem = 0;
+        
+        if ($ucId) {
+            $controle = DB::selectOne("
+                SELECT cc.calibragem, uc.consumo_medio
+                FROM controle_clube cc
+                LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                WHERE cc.uc_id = ? AND cc.deleted_at IS NULL
+            ", [$ucId]);
+            
+            if ($controle) {
+                $consumoUc = floatval($controle->consumo_medio ?? 0);
+                $calibragem = floatval($controle->calibragem ?? 0);
+            }
         }
 
         try {
@@ -376,10 +395,10 @@ class ControleController extends Controller
                 "SELECT valor FROM configuracoes WHERE chave = 'calibragem_global'"
             )->valor ?? 0;
 
-            // Buscar todas as UGs
+            // ✅ QUERY CORRIGIDA: Incluir capacidade_calculada
             $ugs = DB::select("
                 SELECT id, nome_usina, potencia_cc, fator_capacidade, 
-                    ucs_atribuidas, media_consumo_atribuido
+                    capacidade_calculada, ucs_atribuidas, media_consumo_atribuido
                 FROM unidades_consumidoras 
                 WHERE gerador = true 
                 AND nexus_clube = true 
@@ -395,6 +414,10 @@ class ControleController extends Controller
                 
                 // Calcular consumo disponível
                 $consumoDisponivel = max(0, $capacidadeTotal - $consumoAtribuido);
+                
+                // ✅ CALCULAR SE PODE RECEBER A UC ESPECÍFICA
+                $consumoUcCalibrado = $this->calcularValorCalibrado($consumoUc, $calibragem);
+                $podeReceberUc = $consumoDisponivel >= $consumoUcCalibrado;
                 
                 // Status da UG
                 $percentualUso = $capacidadeTotal > 0 ? ($consumoAtribuido / $capacidadeTotal) * 100 : 0;
@@ -415,12 +438,14 @@ class ControleController extends Controller
                     'nome_usina' => $ug->nome_usina,
                     'potencia_cc' => floatval($ug->potencia_cc ?? 0),
                     'capacidade_total' => $capacidadeTotal,
-                    'consumo_atribuido' => $consumoAtribuido,
+                    'consumo_atribuido' => $consumoAtribuido, // ✅ Agora vai aparecer o valor correto
                     'consumo_disponivel' => $consumoDisponivel,
                     'ucs_atribuidas' => intval($ug->ucs_atribuidas ?? 0),
                     'percentual_uso' => round($percentualUso, 1),
                     'status' => $status,
                     'status_color' => $statusColor,
+                    'pode_receber_uc' => $podeReceberUc, // ✅ Nova propriedade
+                    'consumo_uc_calibrado' => $consumoUcCalibrado, // ✅ Para debug
                     'calibragem_global' => floatval($calibragemGlobal)
                 ];
             }
