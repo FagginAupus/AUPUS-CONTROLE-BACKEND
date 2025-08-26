@@ -237,8 +237,8 @@ class PropostaController extends Controller
                 id, numero_proposta, data_proposta, nome_cliente, consultor, 
                 usuario_id, recorrencia, desconto_tarifa, desconto_bandeira,
                 observacoes, beneficios, unidades_consumidoras,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                inflacao, tarifa_tributos, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
             $params = [
                 $id,
@@ -252,7 +252,9 @@ class PropostaController extends Controller
                 $this->formatarDesconto($request->bandeira ?? 20),  
                 $request->observacoes ?? '',
                 $beneficiosJson,
-                $ucJson
+                $ucJson,
+                $request->inflacao ?? 2.00,              
+                $request->tarifa_tributos ?? 0.98
             ];
 
             $result = DB::insert($sql, $params);
@@ -475,7 +477,27 @@ class PropostaController extends Controller
                     'message' => 'Proposta não encontrada ou sem permissão'
                 ], 404);
             }
+            
+            if ($request->has('inflacao')) {
+                $valor = floatval($request->inflacao);
+                if ($valor < 0 || $valor > 100) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Inflação deve estar entre 0 e 100%'
+                    ], 422);
+                }
+            }
 
+            if ($request->has('tarifa_tributos')) {
+                $valor = floatval($request->tarifa_tributos);
+                if ($valor < 0) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Tarifa com tributos deve ser um valor positivo'
+                    ], 422);
+                }
+            }
+            
             $updateFields = [];
             $updateParams = [];
 
@@ -483,7 +505,7 @@ class PropostaController extends Controller
             $numeroUC = $request->get('numeroUC') ?? $request->get('numero_uc');
 
             // 1️⃣ CAMPOS GERAIS (aplicam para toda a proposta)
-            $camposGerais = ['nome_cliente', 'consultor', 'data_proposta', 'observacoes', 'recorrencia'];
+            $camposGerais = ['nome_cliente', 'consultor', 'data_proposta', 'observacoes', 'recorrencia', 'inflacao', 'tarifa_tributos'];
             foreach ($camposGerais as $campo) {
                 if ($request->has($campo)) {
                     $updateFields[] = "{$campo} = ?";
@@ -553,8 +575,7 @@ class PropostaController extends Controller
                     $updateParams[] = json_encode($unidadesAtuais, JSON_UNESCAPED_UNICODE);
                 }
             }
-            
-            // E o código continua normal...
+        
             if (empty($updateFields)) {
                 return response()->json([
                     'success' => false,
@@ -562,7 +583,6 @@ class PropostaController extends Controller
                 ], 400);
             }
 
-            // ✅ ATUALIZAR NO BANCO
             $updateFields[] = 'updated_at = NOW()';
             $updateParams[] = $id;
 
@@ -574,7 +594,6 @@ class PropostaController extends Controller
                 throw new \Exception('Nenhuma linha foi atualizada');
             }
 
-            // ✅ BUSCAR PROPOSTA ATUALIZADA
             $propostaAtualizada = DB::selectOne("SELECT * FROM propostas WHERE id = ?", [$id]);
 
             if ($request->has('status') && $request->status === 'Fechada') {
@@ -617,7 +636,9 @@ class PropostaController extends Controller
                 'media' => $primeiraUC['consumo_medio'] ?? $primeiraUC['media'] ?? 0,
                 'distribuidora' => $primeiraUC['distribuidora'] ?? '',
                 'beneficios' => $beneficios,
-                'unidadesConsumidoras' => $unidadesConsumidoras
+                'unidadesConsumidoras' => $unidadesConsumidoras,
+                'inflacao' => $propostaAtualizada->inflacao,              
+                'tarifaTributos' => $propostaAtualizada->tarifa_tributos,
             ];
 
             return response()->json([
@@ -818,6 +839,32 @@ class PropostaController extends Controller
                 'numeroUC' => 'required|string',
                 'tipoDocumento' => 'required|string'
             ]);
+
+            if ($request->has('inflacao')) {
+                $validatorInflacao = Validator::make($request->all(), [
+                    'inflacao' => 'numeric|min:0|max:100'
+                ]);
+                if ($validatorInflacao->fails()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Inflação deve ser um número entre 0 e 100',
+                        'errors' => $validatorInflacao->errors()
+                    ], 422);
+                }
+            }
+
+            if ($request->has('tarifa_tributos')) {
+                $validatorTarifa = Validator::make($request->all(), [
+                    'tarifa_tributos' => 'numeric|min:0'
+                ]);
+                if ($validatorTarifa->fails()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Tarifa com tributos deve ser um número positivo',
+                        'errors' => $validatorTarifa->errors()
+                    ], 422);
+                }
+            }
 
             if ($validator->fails()) {
                 return response()->json([
