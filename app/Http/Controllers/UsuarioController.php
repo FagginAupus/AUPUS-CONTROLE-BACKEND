@@ -9,15 +9,19 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use Illuminate\Routing\Controllers\HasMiddleware;
+use Illuminate\Routing\Controllers\Middleware;
 
-class UsuarioController extends Controller
+class UsuarioController extends Controller implements HasMiddleware
 {
     /**
-     * Constructor
+     * Get the middleware that should be assigned to the controller.
      */
-    public function __construct()
+    public static function middleware(): array
     {
-        $this->middleware('auth:api');
+        return [
+            new Middleware('auth:api'),
+        ];
     }
 
     /**
@@ -136,25 +140,31 @@ class UsuarioController extends Controller
         $validator = Validator::make($request->all(), [
             'nome' => 'required|string|min:3|max:200',
             'email' => 'required|email|unique:usuarios,email',
-            'password' => 'required|string|min:6',
+            'password' => 'required|string|min:8', // Mudou para 8 caracteres mínimo
             'role' => 'required|in:admin,consultor,gerente,vendedor',
-            'telefone' => 'nullable|string|max:20',
-            'instagram' => 'nullable|string|max:100',
-            'cidade' => 'nullable|string|max:100',
-            'estado' => 'nullable|string|max:2',
-            'cpf_cnpj' => 'nullable|string|max:20',
-            'endereco' => 'nullable|string|max:255',
-            'cep' => 'nullable|string|max:10',
+            'telefone' => 'required|string|max:20', // Agora obrigatório
+            'cidade' => 'required|string|max:100', // Agora obrigatório
+            'estado' => 'required|string|max:2', // Agora obrigatório
+            'cpf_cnpj' => 'required|string|max:20', // Agora obrigatório
+            'endereco' => 'required|string|max:255', // Agora obrigatório
+            'cep' => 'required|string|max:10', // Agora obrigatório
+            'pix' => $request->role === 'consultor' ? 'required|string|max:255' : 'nullable|string|max:255',
             'manager_id' => 'nullable|exists:usuarios,id'
         ], [
-            'nome.required' => 'Nome é obrigatório',
+            'nome.required' => 'Nome completo é obrigatório',
             'email.required' => 'Email é obrigatório',
             'email.email' => 'Email deve ter formato válido',
             'email.unique' => 'Este email já está em uso',
             'password.required' => 'Senha é obrigatória',
-            'password.min' => 'Senha deve ter pelo menos 6 caracteres',
-            'role.required' => 'Role é obrigatório',
-            'role.in' => 'Role deve ser: admin, consultor, gerente ou vendedor'
+            'password.min' => 'Senha deve ter pelo menos 8 caracteres',
+            'telefone.required' => 'Celular é obrigatório',
+            'cidade.required' => 'Cidade é obrigatória',
+            'estado.required' => 'Estado é obrigatório', 
+            'cpf_cnpj.required' => 'CPF é obrigatório',
+            'endereco.required' => 'Endereço é obrigatório',
+            'cep.required' => 'CEP é obrigatório',
+            'pix.required' => 'Chave PIX é obrigatória para consultores',
+            'role.required' => 'Tipo de usuário é obrigatório'
         ]);
 
         if ($validator->fails()) {
@@ -180,18 +190,24 @@ class UsuarioController extends Controller
                 'senha' => $request->password,
                 'role' => $request->role,
                 'telefone' => $request->telefone,
-                'instagram' => $request->instagram,
                 'cidade' => $request->cidade,
                 'estado' => $request->estado,
                 'cpf_cnpj' => $request->cpf_cnpj,
                 'endereco' => $request->endereco,
                 'cep' => $request->cep,
-                'manager_id' => $request->manager_id ?? $currentUser->id,
+                'pix' => $request->pix, // ADICIONAR ESTA LINHA
+                'manager_id' => $request->manager_id ?? null,
                 'is_active' => true
             ]);
 
-            // Criar notificação de boas-vindas
-            Notificacao::criarUsuarioCriado($novoUsuario, $currentUser);
+            // Criar notificação de boas-vindas se a classe existir
+            try {
+                if (class_exists('App\Models\Notificacao')) {
+                    Notificacao::criarUsuarioCriado($novoUsuario, $currentUser);
+                }
+            } catch (\Exception $e) {
+                // Ignorar erro de notificação
+            }
 
             return response()->json([
                 'success' => true,

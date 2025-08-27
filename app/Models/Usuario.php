@@ -13,12 +13,28 @@ use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 use Carbon\Carbon;
+use Illuminate\Support\Str;
 
 class Usuario extends Authenticatable implements JWTSubject
 {
     use HasFactory, HasUuids, SoftDeletes, Notifiable, HasRoles;
 
     protected $table = 'usuarios';
+
+    // ==========================================
+    // CONFIGURAÇÃO DE ID - USAR ULID
+    // ==========================================
+    
+    public $incrementing = false;
+    protected $keyType = 'string';
+
+    /**
+     * Generate a new ULID for the model.
+     */
+    public function newUniqueId(): string
+    {
+        return (string) Str::ulid();
+    }
 
     protected $fillable = [
         'nome',
@@ -32,6 +48,7 @@ class Usuario extends Authenticatable implements JWTSubject
         'estado',
         'endereco',
         'cep',
+        'pix', // ADICIONADO CAMPO PIX
         'role',
         'manager_id',
         'is_active',
