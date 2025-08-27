@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use Illuminate\Support\Facades\DB;
 
 class UnidadeConsumidoraController extends Controller
 {
@@ -524,40 +525,49 @@ class UnidadeConsumidoraController extends Controller
         return $this->destroy($id);
     }
 
-    /**
-     * ✅ MÉTODO CRIADO: Estatísticas das UGs
-     */
-    public function statisticsUGs(Request $request): JsonResponse
+
+    public function statistics(Request $request): JsonResponse
     {
-        $currentUser = JWTAuth::user();
-
-        if (!$currentUser) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401);
-        }
-
         try {
-            $query = UnidadeConsumidora::where('gerador', true)
-                                    ->where('nexus_clube', true) // ADICIONADO
-                                    ->whereNull('deleted_at');
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
+            }
 
-            // Filtros baseados no papel do usuário
-            if (!$currentUser->isAdmin()) {
-                if ($currentUser->isGerente()) {
+            $query = DB::table('unidades_consumidoras')
+                    ->where('gerador', true)
+                    ->where('nexus_clube', true) 
+                    ->whereNull('deleted_at');
+
+            // Aplicar filtros baseados na role do usuário
+            if ($currentUser->role === 'admin') {
+                // Admin vê tudo
+            } else {
+                if ($currentUser->role === 'gerente') {
                     $query->where('concessionaria_id', $currentUser->concessionaria_atual_id);
                 } else {
                     $query->where('usuario_id', $currentUser->id);
                 }
             }
 
+            $ugs = $query->get();
+            
+            // Calcular estatísticas dinamicamente
+            $totalUcsAtribuidas = 0;
+            $totalMediaConsumo = 0;
+            
+            foreach ($ugs as $ug) {
+                $totalUcsAtribuidas += $this->obterUcsAtribuidas($ug->id);
+                $totalMediaConsumo += $this->obterMediaConsumoAtribuido($ug->id);
+            }
+
             $stats = [
-                'total' => $query->count(),
-                'capacidadeTotal' => $query->sum('capacidade_calculada'),
-                'ucsAtribuidas' => $query->sum('ucs_atribuidas'),
-                'mediaConsumo' => $query->avg('media_consumo_atribuido'),
-                'potenciaTotal' => $query->sum('potencia_cc'),
+                'total' => $ugs->count(),
+                'capacidadeTotal' => $ugs->sum('capacidade_calculada'),
+                'ucsAtribuidas' => $totalUcsAtribuidas, // Calculado dinamicamente
+                'mediaConsumo' => $ugs->count() > 0 ? $totalMediaConsumo / $ugs->count() : 0, // Calculado dinamicamente
+                'potenciaTotal' => $ugs->sum('potencia_cc'),
             ];
 
             return response()->json([
@@ -576,6 +586,34 @@ class UnidadeConsumidoraController extends Controller
                 'message' => 'Erro interno do servidor'
             ], 500);
         }
+    }
+
+    /**
+     * Obter quantidade de UCs atribuídas a uma UG
+     */
+    private function obterUcsAtribuidas(string $ugId): int
+    {
+        $result = DB::selectOne("
+            SELECT COUNT(*) as total 
+            FROM controle_clube 
+            WHERE ug_id = ? AND deleted_at IS NULL
+        ", [$ugId]);
+        
+        return intval($result->total ?? 0);
+    }
+
+    /**
+     * Obter média de consumo atribuído a uma UG
+     */
+    private function obterMediaConsumoAtribuido(string $ugId): float
+    {
+        $result = DB::selectOne("
+            SELECT COALESCE(SUM(cc.valor_calibrado), 0) as total
+            FROM controle_clube cc
+            WHERE cc.ug_id = ? AND cc.deleted_at IS NULL
+        ", [$ugId]);
+        
+        return floatval($result->total ?? 0);
     }
 
     // ========================================

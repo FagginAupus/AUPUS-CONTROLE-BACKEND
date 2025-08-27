@@ -600,10 +600,17 @@ class PropostaController extends Controller
                 Log::info('Status alterado para Fechada - populando controle', [
                     'proposta_id' => $id,
                     'status_anterior' => $proposta->status ?? 'desconhecido',
-                    'status_novo' => $request->status
+                    'status_novo' => $request->status,
+                    'uc_especifica' => $numeroUC ?? null
                 ]);
                 
-                $this->popularControleAutomatico($id);
+                // Se há numeroUC, significa que é uma atualização de UC específica
+                if ($numeroUC) {
+                    $this->popularControleAutomaticoParaUC($id, $numeroUC);
+                } else {
+                    // Se não há numeroUC, é uma atualização geral da proposta
+                    $this->popularControleAutomatico($id);
+                }
             }
 
             DB::commit();
@@ -814,6 +821,168 @@ class PropostaController extends Controller
         } catch (\Exception $e) {
             Log::error('Erro ao popular controle automático', [
                 'proposta_id' => $proposta_id,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile())
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * ✅ POPULAR CONTROLE AUTOMATICAMENTE PARA UMA UC ESPECÍFICA
+     */
+    public function popularControleAutomaticoParaUC($proposta_id, $numero_uc)
+    {
+        try {
+            $currentUser = JWTAuth::user();
+            
+            Log::info('Iniciando population do controle para UC específica', [
+                'proposta_id' => $proposta_id,
+                'numero_uc' => $numero_uc,
+                'user_id' => $currentUser->id
+            ]);
+            
+            // ✅ BUSCAR PROPOSTA
+            $proposta = DB::selectOne("SELECT * FROM propostas WHERE id = ?", [$proposta_id]);
+            
+            if (!$proposta) {
+                Log::warning('Proposta não encontrada', ['proposta_id' => $proposta_id]);
+                return false;
+            }
+
+            // ✅ BUSCAR A UC ESPECÍFICA NA PROPOSTA
+            $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+            
+            if (empty($unidadesConsumidoras)) {
+                Log::warning('Nenhuma UC encontrada na proposta', ['proposta_id' => $proposta_id]);
+                return false;
+            }
+
+            // Encontrar apenas a UC específica
+            $ucEspecifica = null;
+            foreach ($unidadesConsumidoras as $uc) {
+                if (($uc['numero_unidade'] ?? $uc['numeroUC'] ?? '') == $numero_uc) {
+                    $ucEspecifica = $uc;
+                    break;
+                }
+            }
+
+            if (!$ucEspecifica) {
+                Log::warning('UC específica não encontrada', [
+                    'proposta_id' => $proposta_id,
+                    'numero_uc' => $numero_uc
+                ]);
+                return false;
+            }
+
+            Log::info('UC específica encontrada para processar', [
+                'proposta_id' => $proposta_id,
+                'numero_uc' => $numero_uc,
+                'uc_data' => $ucEspecifica
+            ]);
+
+            // ✅ PROCESSAR APENAS ESTA UC
+            $numeroUC = $ucEspecifica['numero_unidade'] ?? $ucEspecifica['numeroUC'] ?? $numero_uc;
+
+            if (empty($numeroUC)) {
+                Log::warning('Número da UC não encontrado', ['uc_data' => $ucEspecifica]);
+                return false;
+            }
+
+            // ✅ BUSCAR OU CRIAR UC NO BANCO
+            $ucBanco = DB::selectOne("
+                SELECT id FROM unidades_consumidoras 
+                WHERE numero_unidade = ? AND usuario_id = ? AND deleted_at IS NULL
+            ", [$numeroUC, $currentUser->id]);
+
+            $ucIdFinal = null;
+
+            if ($ucBanco) {
+                $ucIdFinal = $ucBanco->id;
+                Log::info('UC já existe no banco', ['uc_id' => $ucIdFinal, 'numero_uc' => $numeroUC]);
+            } else {
+                // ✅ CRIAR UC NO BANCO
+                $ucIdFinal = \Illuminate\Support\Str::ulid()->toString();
+                
+                DB::insert("
+                    INSERT INTO unidades_consumidoras (
+                        id, usuario_id, concessionaria_id, endereco_id, numero_unidade, 
+                        apelido, consumo_medio, ligacao, distribuidora, proposta_id,
+                        localizacao, gerador, grupo, desconto_fatura, desconto_bandeira,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                ", [
+                    $ucIdFinal,                                          // id (ULID)
+                    $currentUser->id,                                    // usuario_id (usuário logado)
+                    '01JB849ZDG0RPC5EB8ZFTB4GJN',                       // concessionaria_id (EQUATORIAL)
+                    null,                                                // endereco_id (deixar em branco por enquanto)
+                    $numeroUC,                                           // numero_unidade
+                    $ucEspecifica['apelido'] ?? 'UC ' . $numeroUC,      // apelido
+                    $ucEspecifica['consumo_medio'] ?? $ucEspecifica['media'] ?? 0, // consumo_medio
+                    $ucEspecifica['ligacao'] ?? 'Monofásica',           // ligacao
+                    $ucEspecifica['distribuidora'] ?? 'EQUATORIAL GO',   // distribuidora
+                    $proposta_id,                                        // proposta_id
+                    $ucEspecifica['endereco_uc'] ?? $ucEspecifica['localizacao'] ?? null, // localizacao
+                    false,                                               // gerador (sempre false para UCs normais)
+                    'B',                                                 // grupo
+                    $this->extrairValorDesconto($proposta->desconto_tarifa), // desconto_fatura
+                    $this->extrairValorDesconto($proposta->desconto_bandeira), // desconto_bandeira
+                ]);
+
+                Log::info('UC criada no banco para UC específica', ['uc_id' => $ucIdFinal, 'numero_uc' => $numeroUC]);
+            }
+
+            // ✅ VERIFICAR SE JÁ EXISTE CONTROLE PARA ESTA UC
+            $controleExistente = DB::selectOne("
+                SELECT id FROM controle_clube 
+                WHERE proposta_id = ? AND uc_id = ?", 
+                [$proposta_id, $ucIdFinal]
+            );
+
+            if (!$controleExistente) {
+                // ✅ GERAR ULID PARA O CONTROLE
+                $controleId = \Illuminate\Support\Str::ulid()->toString();
+                
+                // ✅ CRIAR CONTROLE
+                DB::insert("
+                    INSERT INTO controle_clube (
+                        id, proposta_id, uc_id, calibragem, 
+                        data_entrada_controle, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, NOW(), NOW(), NOW())
+                ", [
+                    $controleId,
+                    $proposta_id,
+                    $ucIdFinal,
+                    0.00
+                ]);
+
+                Log::info('Controle criado com sucesso para UC específica', [
+                    'controle_id' => $controleId,
+                    'proposta_id' => $proposta_id,
+                    'uc_id' => $ucIdFinal,
+                    'numero_uc' => $numeroUC
+                ]);
+            } else {
+                Log::info('Controle já existia para esta UC', [
+                    'controle_existente_id' => $controleExistente->id,
+                    'proposta_id' => $proposta_id,
+                    'uc_id' => $ucIdFinal,
+                    'numero_uc' => $numeroUC
+                ]);
+            }
+
+            Log::info('Population do controle para UC específica concluída', [
+                'proposta_id' => $proposta_id,
+                'numero_uc' => $numeroUC
+            ]);
+            
+            return true;
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao popular controle automático para UC específica', [
+                'proposta_id' => $proposta_id,
+                'numero_uc' => $numero_uc,
                 'error' => $e->getMessage(),
                 'line' => $e->getLine(),
                 'file' => basename($e->getFile())

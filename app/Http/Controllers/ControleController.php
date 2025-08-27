@@ -359,10 +359,7 @@ class ControleController extends Controller
         }
     }
 
-    /**
-     * ✅ LISTAR UGs DISPONÍVEIS COM ANÁLISE DE CAPACIDADE
-     */
-    public function getUgsDisponiveis(Request $request): JsonResponse
+    public function ugsDisponiveis(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();
         
@@ -370,11 +367,11 @@ class ControleController extends Controller
             return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
         }
 
-        // ✅ BUSCAR DADOS DA UC ESPECÍFICA (se fornecida)
-        $ucId = $request->get('uc_id');
+        // Para calibragem
+        $ucId = $request->query('uc_id');
         $consumoUc = 0;
         $calibragem = 0;
-        
+
         if ($ucId) {
             $controle = DB::selectOne("
                 SELECT cc.calibragem, uc.consumo_medio
@@ -395,10 +392,9 @@ class ControleController extends Controller
                 "SELECT valor FROM configuracoes WHERE chave = 'calibragem_global'"
             )->valor ?? 0;
 
-            // ✅ QUERY CORRIGIDA: Incluir capacidade_calculada
+            // ✅ QUERY SIMPLIFICADA - SEM colunas redundantes
             $ugs = DB::select("
-                SELECT id, nome_usina, potencia_cc, fator_capacidade, 
-                    capacidade_calculada, ucs_atribuidas, media_consumo_atribuido
+                SELECT id, nome_usina, potencia_cc, fator_capacidade, capacidade_calculada
                 FROM unidades_consumidoras 
                 WHERE gerador = true 
                 AND nexus_clube = true 
@@ -410,12 +406,15 @@ class ControleController extends Controller
             
             foreach ($ugs as $ug) {
                 $capacidadeTotal = floatval($ug->capacidade_calculada ?? 0);
-                $consumoAtribuido = floatval($ug->media_consumo_atribuido ?? 0);
+                
+                // ✅ CALCULAR DINAMICAMENTE
+                $ucsAtribuidas = $this->obterUcsAtribuidas($ug->id);
+                $consumoAtribuido = $this->obterMediaConsumoAtribuido($ug->id);
                 
                 // Calcular consumo disponível
                 $consumoDisponivel = max(0, $capacidadeTotal - $consumoAtribuido);
                 
-                // ✅ CALCULAR SE PODE RECEBER A UC ESPECÍFICA
+                // Calcular se pode receber a UC específica
                 $consumoUcCalibrado = $this->calcularValorCalibrado($consumoUc, $calibragem);
                 $podeReceberUc = $consumoDisponivel >= $consumoUcCalibrado;
                 
@@ -438,14 +437,14 @@ class ControleController extends Controller
                     'nome_usina' => $ug->nome_usina,
                     'potencia_cc' => floatval($ug->potencia_cc ?? 0),
                     'capacidade_total' => $capacidadeTotal,
-                    'consumo_atribuido' => $consumoAtribuido, // ✅ Agora vai aparecer o valor correto
+                    'consumo_atribuido' => $consumoAtribuido,
                     'consumo_disponivel' => $consumoDisponivel,
-                    'ucs_atribuidas' => intval($ug->ucs_atribuidas ?? 0),
+                    'ucs_atribuidas' => $ucsAtribuidas,
                     'percentual_uso' => round($percentualUso, 1),
                     'status' => $status,
                     'status_color' => $statusColor,
-                    'pode_receber_uc' => $podeReceberUc, // ✅ Nova propriedade
-                    'consumo_uc_calibrado' => $consumoUcCalibrado, // ✅ Para debug
+                    'pode_receber_uc' => $podeReceberUc,
+                    'consumo_uc_calibrado' => $consumoUcCalibrado,
                     'calibragem_global' => floatval($calibragemGlobal)
                 ];
             }
@@ -468,9 +467,6 @@ class ControleController extends Controller
         }
     }
 
-    /**
-     * ✅ ATRIBUIR UG A UM CONTROLE
-     */
     public function atribuirUg(Request $request, string $id): JsonResponse
     {
         $currentUser = JWTAuth::user();
@@ -479,7 +475,7 @@ class ControleController extends Controller
             return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
         }
 
-        $validator = Validator::make($request->all(), [  // ✅ UM $ APENAS
+        $validator = Validator::make($request->all(), [
             'ug_id' => 'required|string'
         ]);
 
@@ -510,7 +506,7 @@ class ControleController extends Controller
             // Buscar controle
             $controle = DB::selectOne("
                 SELECT cc.*, uc.consumo_medio, uc.apelido, uc.numero_unidade,
-                       p.nome_cliente, p.numero_proposta
+                    p.nome_cliente, p.numero_proposta
                 FROM controle_clube cc
                 LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
                 LEFT JOIN propostas p ON cc.proposta_id = p.id
@@ -529,10 +525,9 @@ class ControleController extends Controller
                 ], 400);
             }
 
-            // Buscar UG
+            // Buscar UG - SEM as colunas redundantes
             $ug = DB::selectOne("
-                SELECT id, nome_usina, capacidade_calculada, media_consumo_atribuido,
-                    ucs_atribuidas, ucs_atribuidas_detalhes
+                SELECT id, nome_usina, capacidade_calculada
                 FROM unidades_consumidoras 
                 WHERE id = ? AND gerador = true AND deleted_at IS NULL
             ", [$request->ug_id]);
@@ -546,38 +541,23 @@ class ControleController extends Controller
             $consumoMedio = floatval($controle->consumo_medio ?? 0);
             $consumoCalibrado = $this->calcularValorCalibrado($consumoMedio, $calibragem);
 
-            // Verificar capacidade da UG
+            // Verificar capacidade da UG - CALCULADO DINAMICAMENTE
             $capacidadeTotal = floatval($ug->capacidade_calculada ?? 0);
-            $consumoAtual = floatval($ug->media_consumo_atribuido ?? 0);
+            $consumoAtualAtribuido = $this->obterMediaConsumoAtribuido($request->ug_id);
             
-            if (($consumoAtual + $consumoCalibrado) > $capacidadeTotal) {
+            if (($consumoAtualAtribuido + $consumoCalibrado) > $capacidadeTotal) {
                 return response()->json([
                     'success' => false,
                     'message' => 'UG não tem capacidade suficiente para esta UC'
                 ], 400);
             }
 
-            // Remover UC de UG anterior (se houver)
-            if ($controle->ug_id) {
-                $this->removerUcDaUg($controle->ug_id, $controle->uc_id);
-            }
-
-            // Adicionar UC à nova UG
-            $this->adicionarUcAUg($request->ug_id, [
-                'uc_id' => $controle->uc_id,
-                'numero_uc' => $controle->numero_unidade,
-                'apelido' => $controle->apelido,
-                'proposta_id' => $controle->proposta_id,
-                'media' => $consumoMedio, // ✅ Média original
-                'media_calibrada' => $consumoCalibrado // ✅ Média calibrada (que deve ser somada)
-            ]);
-
-            // Atualizar controle
+            // Atualizar controle - APENAS ISSO É NECESSÁRIO
             DB::update("
                 UPDATE controle_clube 
-                SET ug_id = ?, updated_at = NOW()
+                SET ug_id = ?, valor_calibrado = ?, updated_at = NOW()
                 WHERE id = ?
-            ", [$request->ug_id, $id]);
+            ", [$request->ug_id, $consumoCalibrado, $id]);
 
             DB::commit();
 
@@ -652,13 +632,10 @@ class ControleController extends Controller
                 ], 400);
             }
 
-            // Remover UC dos detalhes da UG
-            $this->removerUcDaUg($controle->ug_id, $controle->uc_id);
-
-            // Remover UG do controle
+            // Remover UG do controle - SÓ ISSO É NECESSÁRIO
             DB::update("
                 UPDATE controle_clube 
-                SET ug_id = NULL, updated_at = NOW()
+                SET ug_id = NULL, valor_calibrado = NULL, updated_at = NOW()
                 WHERE id = ?
             ", [$id]);
 
@@ -698,125 +675,6 @@ class ControleController extends Controller
     }
 
     /**
-     * ✅ HELPER: Adicionar UC a uma UG
-     */
-    private function adicionarUcAUg(string $ugId, array $ucData): void
-    {
-        // Buscar detalhes atuais
-        $ug = DB::selectOne("
-            SELECT ucs_atribuidas_detalhes, ucs_atribuidas, media_consumo_atribuido
-            FROM unidades_consumidoras WHERE id = ?
-        ", [$ugId]);
-
-        $detalhes = json_decode($ug->ucs_atribuidas_detalhes ?? '[]', true);
-        
-        // ✅ LOG ANTES
-        Log::info('ANTES de adicionar UC:', [
-            'ug_id' => $ugId,
-            'media_anterior' => $ug->media_consumo_atribuido,
-            'ucs_anterior' => count($detalhes),
-            'nova_uc_media' => $ucData['media_calibrada']
-        ]);
-        
-        // Remover UC se já existir (evitar duplicatas)
-        $detalhes = array_filter($detalhes, function($uc) use ($ucData) {
-            return $uc['uc_id'] !== $ucData['uc_id'];
-        });
-        
-        // Adicionar nova UC
-        $detalhes[] = $ucData;
-        
-        // Recalcular totais
-        $totalUcs = count($detalhes);
-        $totalMedia = array_sum(array_column($detalhes, 'media_calibrada'));
-        
-        // ✅ LOG DEPOIS
-        Log::info('DEPOIS de calcular totais:', [
-            'ug_id' => $ugId,
-            'total_ucs' => $totalUcs,
-            'total_media' => $totalMedia,
-            'detalhes' => $detalhes
-        ]);
-        
-        // Atualizar UG
-        DB::update("
-            UPDATE unidades_consumidoras 
-            SET ucs_atribuidas_detalhes = ?,
-                ucs_atribuidas = ?,
-                media_consumo_atribuido = ?,
-                updated_at = NOW()
-            WHERE id = ?
-        ", [
-            json_encode($detalhes, JSON_UNESCAPED_UNICODE),
-            $totalUcs,
-            $totalMedia,
-            $ugId
-        ]);
-    }
-
-    /**
-     * ✅ HELPER: Remover UC de uma UG
-     */
-    private function removerUcDaUg(string $ugId, string $ucId): void
-    {
-        // Buscar detalhes atuais
-        $ug = DB::selectOne("
-            SELECT ucs_atribuidas_detalhes, ucs_atribuidas, media_consumo_atribuido
-            FROM unidades_consumidoras WHERE id = ?
-        ", [$ugId]);
-
-        if (!$ug) {
-            Log::warning("UG não encontrada para remoção: {$ugId}");
-            return;
-        }
-
-        $detalhes = json_decode($ug->ucs_atribuidas_detalhes ?? '[]', true);
-        
-        // ✅ LOG ANTES
-        Log::info('ANTES de remover UC:', [
-            'ug_id' => $ugId,
-            'uc_id' => $ucId,
-            'media_anterior' => $ug->media_consumo_atribuido,
-            'ucs_anterior' => count($detalhes)
-        ]);
-        
-        // Remover UC
-        $detalhes = array_filter($detalhes, function($uc) use ($ucId) {
-            return $uc['uc_id'] !== $ucId;
-        });
-        
-        // Reindexar array
-        $detalhes = array_values($detalhes);
-        
-        // Recalcular totais
-        $totalUcs = count($detalhes);
-        $totalMedia = array_sum(array_column($detalhes, 'media_calibrada'));
-        
-        // ✅ LOG DEPOIS
-        Log::info('DEPOIS de remover UC:', [
-            'ug_id' => $ugId,
-            'uc_removida' => $ucId,
-            'total_ucs' => $totalUcs,
-            'total_media' => $totalMedia
-        ]);
-        
-        // Atualizar UG
-        DB::update("
-            UPDATE unidades_consumidoras 
-            SET ucs_atribuidas_detalhes = ?,
-                ucs_atribuidas = ?,
-                media_consumo_atribuido = ?,
-                updated_at = NOW()
-            WHERE id = ?
-        ", [
-            json_encode($detalhes, JSON_UNESCAPED_UNICODE),
-            $totalUcs,
-            $totalMedia,
-            $ugId
-        ]);
-    }
-
-    /**
      * ✅ CALCULAR VALOR CALIBRADO
      */
     private function calcularValorCalibrado($media, $calibragem)
@@ -835,6 +693,31 @@ class ControleController extends Controller
         }
         
         return $mediaNum * (1 + ($calibragemNum / 100));
+    }
+
+    private function obterUcsAtribuidas(string $ugId): int
+    {
+        $result = DB::selectOne("
+            SELECT COUNT(*) as total 
+            FROM controle_clube 
+            WHERE ug_id = ? AND deleted_at IS NULL
+        ", [$ugId]);
+        
+        return intval($result->total ?? 0);
+    }
+
+    /**
+     * ✅ OBTER MÉDIA DE CONSUMO ATRIBUÍDO A UMA UG
+     */
+    private function obterMediaConsumoAtribuido(string $ugId): float
+    {
+        $result = DB::selectOne("
+            SELECT COALESCE(SUM(cc.valor_calibrado), 0) as total
+            FROM controle_clube cc
+            WHERE cc.ug_id = ? AND cc.deleted_at IS NULL
+        ", [$ugId]);
+        
+        return floatval($result->total ?? 0);
     }
 
     /**
