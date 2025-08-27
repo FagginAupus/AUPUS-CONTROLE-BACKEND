@@ -367,22 +367,19 @@ class ControleController extends Controller
             return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
         }
 
-        // Para calibragem
+        // Para calibragem da UC específica (se fornecida)
         $ucId = $request->query('uc_id');
         $consumoUc = 0;
-        $calibragem = 0;
 
         if ($ucId) {
-            $controle = DB::selectOne("
-                SELECT cc.calibragem, uc.consumo_medio
-                FROM controle_clube cc
-                LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
-                WHERE cc.uc_id = ? AND cc.deleted_at IS NULL
+            $uc = DB::selectOne("
+                SELECT uc.consumo_medio
+                FROM unidades_consumidoras uc
+                WHERE uc.id = ? AND uc.deleted_at IS NULL
             ", [$ucId]);
             
-            if ($controle) {
-                $consumoUc = floatval($controle->consumo_medio ?? 0);
-                $calibragem = floatval($controle->calibragem ?? 0);
+            if ($uc) {
+                $consumoUc = floatval($uc->consumo_medio ?? 0);
             }
         }
 
@@ -392,7 +389,7 @@ class ControleController extends Controller
                 "SELECT valor FROM configuracoes WHERE chave = 'calibragem_global'"
             )->valor ?? 0;
 
-            // ✅ QUERY SIMPLIFICADA - SEM colunas redundantes
+            // Query simplificada - SEM colunas redundantes
             $ugs = DB::select("
                 SELECT id, nome_usina, potencia_cc, fator_capacidade, capacidade_calculada
                 FROM unidades_consumidoras 
@@ -407,15 +404,15 @@ class ControleController extends Controller
             foreach ($ugs as $ug) {
                 $capacidadeTotal = floatval($ug->capacidade_calculada ?? 0);
                 
-                // ✅ CALCULAR DINAMICAMENTE
+                // Calcular dinamicamente
                 $ucsAtribuidas = $this->obterUcsAtribuidas($ug->id);
                 $consumoAtribuido = $this->obterMediaConsumoAtribuido($ug->id);
                 
                 // Calcular consumo disponível
                 $consumoDisponivel = max(0, $capacidadeTotal - $consumoAtribuido);
                 
-                // Calcular se pode receber a UC específica
-                $consumoUcCalibrado = $this->calcularValorCalibrado($consumoUc, $calibragem);
+                // Calcular se pode receber a UC específica (usando calibragem global)
+                $consumoUcCalibrado = $this->calcularValorCalibrado($consumoUc);
                 $podeReceberUc = $consumoDisponivel >= $consumoUcCalibrado;
                 
                 // Status da UG
@@ -539,12 +536,12 @@ class ControleController extends Controller
             // Calcular consumo calibrado
             $calibragem = floatval($controle->calibragem ?? 0);
             $consumoMedio = floatval($controle->consumo_medio ?? 0);
-            $consumoCalibrado = $this->calcularValorCalibrado($consumoMedio, $calibragem);
+            $consumoCalibrado = $this->calcularValorCalibrado($consumoMedio); // Sem parâmetro de calibragem
 
             // Verificar capacidade da UG - CALCULADO DINAMICAMENTE
             $capacidadeTotal = floatval($ug->capacidade_calculada ?? 0);
             $consumoAtualAtribuido = $this->obterMediaConsumoAtribuido($request->ug_id);
-            
+
             if (($consumoAtualAtribuido + $consumoCalibrado) > $capacidadeTotal) {
                 return response()->json([
                     'success' => false,
@@ -552,12 +549,12 @@ class ControleController extends Controller
                 ], 400);
             }
 
-            // Atualizar controle - APENAS ISSO É NECESSÁRIO
+            // Atualizar controle - APENAS isso é necessário agora
             DB::update("
                 UPDATE controle_clube 
-                SET ug_id = ?, valor_calibrado = ?, updated_at = NOW()
+                SET ug_id = ?, updated_at = NOW()
                 WHERE id = ?
-            ", [$request->ug_id, $consumoCalibrado, $id]);
+            ", [$request->ug_id, $id]);
 
             DB::commit();
 
@@ -677,22 +674,26 @@ class ControleController extends Controller
     /**
      * ✅ CALCULAR VALOR CALIBRADO
      */
-    private function calcularValorCalibrado($media, $calibragem)
+    private function calcularValorCalibrado($media, $calibragemPersonalizada = null)
     {
         $mediaNum = floatval($media);
         
         if (!$mediaNum) {
-            return 0; // Se não tem média, retorna 0
+            return 0;
         }
         
-        $calibragemNum = floatval($calibragem);
-        
-        // ✅ CORREÇÃO: Se calibragem for 0, retorna apenas a média
-        if ($calibragemNum == 0) {
-            return $mediaNum;
+        // Se não passou calibragem personalizada, buscar a global
+        if ($calibragemPersonalizada === null) {
+            $calibragemGlobal = DB::selectOne(
+                "SELECT valor FROM configuracoes WHERE chave = 'calibragem_global'"
+            );
+            $calibragem = floatval($calibragemGlobal->valor ?? 0);
+        } else {
+            $calibragem = floatval($calibragemPersonalizada);
         }
         
-        return $mediaNum * (1 + ($calibragemNum / 100));
+        // Retorna: consumo × (1 + calibragem/100)
+        return $mediaNum * (1 + ($calibragem / 100));
     }
 
     private function obterUcsAtribuidas(string $ugId): int
@@ -707,17 +708,38 @@ class ControleController extends Controller
     }
 
     /**
-     * ✅ OBTER MÉDIA DE CONSUMO ATRIBUÍDO A UMA UG
+     * ✅ OBTER MÉDIA DE CONSUMO ATRIBUÍDO A UMA UG - CORRIGIDO
      */
     private function obterMediaConsumoAtribuido(string $ugId): float
     {
-        $result = DB::selectOne("
-            SELECT COALESCE(SUM(cc.valor_calibrado), 0) as total
+        // Buscar calibragem global
+        $calibragemGlobal = DB::selectOne(
+            "SELECT valor FROM configuracoes WHERE chave = 'calibragem_global'"
+        );
+        
+        $calibragemGlobalValor = floatval($calibragemGlobal->valor ?? 0);
+        
+        // Buscar todas as UCs atribuídas a esta UG
+        $ucsAtribuidas = DB::select("
+            SELECT uc.consumo_medio
             FROM controle_clube cc
+            INNER JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
             WHERE cc.ug_id = ? AND cc.deleted_at IS NULL
         ", [$ugId]);
         
-        return floatval($result->total ?? 0);
+        $totalCalibrado = 0;
+        
+        foreach ($ucsAtribuidas as $uc) {
+            $consumoMedio = floatval($uc->consumo_medio ?? 0);
+            
+            if ($consumoMedio > 0) {
+                // Aplicar calibragem: consumo × (1 + calibragem/100)
+                $consumoCalibrado = $consumoMedio * (1 + ($calibragemGlobalValor / 100));
+                $totalCalibrado += $consumoCalibrado;
+            }
+        }
+        
+        return $totalCalibrado;
     }
 
     /**

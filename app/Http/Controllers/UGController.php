@@ -32,15 +32,36 @@ class UGController extends Controller
      */
     private function obterMediaConsumoAtribuido(string $ugId): float
     {
-        $result = DB::selectOne("
-            SELECT COALESCE(SUM(cc.valor_calibrado), 0) as total
+        // Buscar calibragem global
+        $calibragemGlobal = DB::selectOne(
+            "SELECT valor FROM configuracoes WHERE chave = 'calibragem_global'"
+        );
+        
+        $calibragemGlobalValor = floatval($calibragemGlobal->valor ?? 0);
+        
+        // Buscar todas as UCs atribuídas a esta UG com seus consumos
+        $ucsAtribuidas = DB::select("
+            SELECT uc.consumo_medio
             FROM controle_clube cc
+            INNER JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
             WHERE cc.ug_id = ? AND cc.deleted_at IS NULL
         ", [$ugId]);
         
-        return floatval($result->total ?? 0);
+        $totalCalibrado = 0;
+        
+        foreach ($ucsAtribuidas as $uc) {
+            $consumoMedio = floatval($uc->consumo_medio ?? 0);
+            
+            if ($consumoMedio > 0) {
+                // Aplicar calibragem: consumo × (1 + calibragem/100)
+                $consumoCalibrado = $consumoMedio * (1 + ($calibragemGlobalValor / 100));
+                $totalCalibrado += $consumoCalibrado;
+            }
+        }
+        
+        return $totalCalibrado;
     }
-    
+        
     public function index(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();
@@ -64,15 +85,15 @@ class UGController extends Controller
 
             // Query simplificada sem as colunas redundantes
             $query = "
-                SELECT id, nome_usina, potencia_cc, fator_capacidade, 
-                       capacidade_calculada, localizacao, observacoes_ug,
-                       created_at, updated_at
+                SELECT id, nome_usina, numero_unidade, potencia_cc, fator_capacidade, 
+                    capacidade_calculada, localizacao, observacoes_ug,
+                    created_at, updated_at
                 FROM unidades_consumidoras 
                 WHERE gerador = true 
                 AND nexus_clube = true 
                 AND deleted_at IS NULL
             ";
-            
+                        
             $params = [];
 
             if ($search) {
@@ -98,7 +119,8 @@ class UGController extends Controller
 
                 $ugsTransformadas[] = [
                     'id' => $ug->id,
-                    'nomeUsina' => $ug->nome_usina,
+                    'nomeUsina' => $ug->nome_usina, 
+                    'numeroUnidade' => $ug->numero_unidade,
                     'potenciaCC' => (float) $ug->potencia_cc,
                     'fatorCapacidade' => (float) ($ug->fator_capacidade * 100),
                     'capacidade' => (float) $ug->capacidade_calculada,
@@ -231,6 +253,7 @@ class UGController extends Controller
             $ugTransformada = [
                 'id' => $ug->id,
                 'nomeUsina' => $ug->nome_usina,
+                'numeroUnidade' => $ug->numero_unidade,
                 'potenciaCC' => (float) $ug->potencia_cc,
                 'fatorCapacidade' => (float) $ug->fator_capacidade,
                 'capacidade' => (float) $ug->capacidade_calculada,
@@ -294,6 +317,7 @@ class UGController extends Controller
             $ugTransformada = [
                 'id' => $ug->id,
                 'nomeUsina' => $ug->nome_usina,
+                'numeroUnidade' => $ug->numero_unidade,
                 'potenciaCC' => (float) $ug->potencia_cc,
                 'fatorCapacidade' => (float) ($ug->fator_capacidade * 100),
                 'capacidade' => (float) $ug->capacidade_calculada,
