@@ -75,13 +75,14 @@ class UGController extends Controller
                 return [
                     'id' => $ug->id,
                     'nomeUsina' => $ug->nome_usina,
+                    'numeroUnidade' => $ug->numero_unidade, // ✅ ADICIONAR ESTA LINHA
                     'potenciaCC' => (float) $ug->potencia_cc,
-                    'fatorCapacidade' => (float) ($ug->fator_capacidade * 100), // ✅ MULTIPLICAR POR 100
+                    'fatorCapacidade' => (float) ($ug->fator_capacidade * 100),
                     'capacidade' => (float) $ug->capacidade_calculada,
                     'localizacao' => $ug->localizacao,
                     'observacoes' => $ug->observacoes_ug,
                     'ucsAtribuidas' => (int) $ug->ucs_atribuidas,
-                    'mediaConsumoAtribuido' => (float) $ug->media_consumo_atribuido, // ✅ CORRIGIDO
+                    'mediaConsumoAtribuido' => (float) $ug->media_consumo_atribuido,
                     'dataCadastro' => $ug->created_at?->toISOString(),
                     'dataAtualizacao' => $ug->updated_at?->toISOString(),
                 ];

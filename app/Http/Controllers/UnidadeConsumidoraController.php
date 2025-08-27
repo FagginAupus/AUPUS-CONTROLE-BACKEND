@@ -648,11 +648,21 @@ class UnidadeConsumidoraController extends Controller
      */
     private function transformUGForAPI(UnidadeConsumidora $ug, Usuario $currentUser): array
     {
+        // ✅ LOG TEMPORÁRIO PARA DEBUG
+        Log::info('DEBUG transformUGForAPI', [
+            'ug_id' => $ug->id,
+            'nome_usina' => $ug->nome_usina,
+            'numero_unidade' => $ug->numero_unidade, // Verificar se existe
+            'numero_unidade_exists' => isset($ug->numero_unidade),
+            'all_attributes' => $ug->getAttributes()
+        ]);
+
         return [
             'id' => $ug->id,
-            'nomeUsina' => $ug->nome_usina, // ✅ CORRIGIDO
+            'nomeUsina' => $ug->nome_usina,
             'apelido' => $ug->apelido,
-            'potenciaCC' => (float) $ug->potencia_cc, // ✅ CORRIGIDO
+            'numeroUnidade' => $ug->numero_unidade,
+            'potenciaCC' => (float) $ug->potencia_cc,
             'fatorCapacidade' => (float) $ug->fator_capacidade,
             'capacidade' => (float) $ug->capacidade_calculada,
             'localizacao' => $ug->localizacao,
