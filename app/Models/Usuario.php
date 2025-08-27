@@ -69,7 +69,7 @@ class Usuario extends Authenticatable implements JWTSubject
     ];
 
     protected $attributes = [
-        'status' => 'ativo',
+        'status' => 'Ativo',
         'role' => 'vendedor',
         'is_active' => true
     ];
