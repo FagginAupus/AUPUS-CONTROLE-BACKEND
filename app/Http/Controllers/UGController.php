@@ -404,7 +404,7 @@ class UGController extends Controller
             if ($request->has('fatorCapacidade')) {
                 $dadosAtualizacao['fator_capacidade'] = $request->fatorCapacidade / 100;
             }
-
+            
             if ($request->has('localizacao')) {
                 $dadosAtualizacao['localizacao'] = $request->localizacao;
             }
