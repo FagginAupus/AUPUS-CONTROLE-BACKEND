@@ -185,6 +185,13 @@ class UsuarioController extends Controller implements HasMiddleware
         }
 
         try {
+            $managerId = null;
+
+            if (in_array($request->role, ['gerente', 'vendedor'])) {
+                // Para gerentes e vendedores, o manager é quem está criando
+                $managerId = $currentUser->id;
+            }
+
             $novoUsuario = Usuario::create([
                 'nome' => $request->nome,
                 'email' => $request->email,
@@ -196,8 +203,8 @@ class UsuarioController extends Controller implements HasMiddleware
                 'cpf_cnpj' => $request->cpf_cnpj,
                 'endereco' => $request->endereco,
                 'cep' => $request->cep,
-                'pix' => $request->pix, // ADICIONAR ESTA LINHA
-                'manager_id' => $request->manager_id ?? null,
+                'pix' => $request->pix,
+                'manager_id' => $managerId,  
                 'is_active' => true
             ]);
 
