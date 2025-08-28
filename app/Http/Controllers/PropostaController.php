@@ -1112,9 +1112,38 @@ class PropostaController extends Controller
             $params = [$id];
 
             // Se não for admin, verificar se é proposta do usuário
-            if ($currentUser->role !== 'admin') {
-                $query .= " AND usuario_id = ?";
-                $params[] = $currentUser->id;
+            if (!$currentUser->isAdmin()) {
+                if ($currentUser->isConsultor()) {
+                    // Consultor vê suas propostas + propostas dos subordinados + propostas com seu nome
+                    $subordinados = $currentUser->getAllSubordinates();
+                    $subordinadosIds = array_column($subordinados, 'id');
+                    $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
+                    
+                    $placeholders = str_repeat('?,', count($usuariosPermitidos) - 1) . '?';
+                    $query .= " AND (usuario_id IN ({$placeholders}) OR consultor ILIKE ?)";
+                    $params = array_merge($params, $usuariosPermitidos);
+                    $params[] = '%' . $currentUser->nome . '%'; // Propostas onde ele é o consultor
+                    
+                } elseif ($currentUser->isGerente()) {
+                    // Gerente vê apenas suas propostas + propostas dos vendedores subordinados
+                    $subordinados = $currentUser->getAllSubordinates();
+                    $subordinadosIds = array_column($subordinados, 'id');
+                    $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
+                    
+                    if (!empty($usuariosPermitidos)) {
+                        $placeholders = str_repeat('?,', count($usuariosPermitidos) - 1) . '?';
+                        $query .= " AND usuario_id IN ({$placeholders})";
+                        $params = array_merge($params, $usuariosPermitidos);
+                    } else {
+                        $query .= " AND usuario_id = ?";
+                        $params[] = $currentUser->id;
+                    }
+                    
+                } else {
+                    // Vendedor vê apenas suas propostas
+                    $query .= " AND usuario_id = ?";
+                    $params[] = $currentUser->id;
+                }
             }
 
             $result = DB::update($query, $params);

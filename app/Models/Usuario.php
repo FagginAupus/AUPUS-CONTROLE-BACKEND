@@ -341,6 +341,70 @@ class Usuario extends Authenticatable implements JWTSubject
     }
 
     // ==========================================
+    // MÉTODOS DE HIERARQUIA
+    // ==========================================
+
+    /**
+     * Obtém todos os subordinados (diretos e indiretos)
+     */
+    public function getAllSubordinates(): array
+    {
+        $allSubordinates = [];
+        
+        // Subordinados diretos
+        $directSubordinates = $this->subordinados()->get();
+        
+        foreach ($directSubordinates as $subordinate) {
+            $allSubordinates[] = $subordinate->toArray();
+            
+            // Recursivamente buscar subordinados dos subordinados
+            $indirectSubordinates = $subordinate->getAllSubordinates();
+            $allSubordinates = array_merge($allSubordinates, $indirectSubordinates);
+        }
+        
+        return $allSubordinates;
+    }
+
+    /**
+     * Retorna o nível hierárquico do usuário
+     */
+    public function getHierarchyLevel(): int
+    {
+        switch ($this->role) {
+            case 'admin':
+                return 1;
+            case 'consultor':
+                return 2;
+            case 'gerente':
+                return 3;
+            case 'vendedor':
+                return 4;
+            default:
+                return 5;
+        }
+    }
+
+    /**
+     * Verifica se pode gerenciar outro usuário
+     */
+    public function canManageUser(Usuario $otherUser): bool
+    {
+        if ($this->isAdmin()) return true;
+        
+        // Consultor pode gerenciar gerentes e vendedores
+        if ($this->isConsultor() && in_array($otherUser->role, ['gerente', 'vendedor'])) {
+            return true;
+        }
+        
+        // Gerente pode gerenciar apenas vendedores
+        if ($this->isGerente() && $otherUser->isVendedor()) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    // ==========================================
     // JWT METHODS
     // ==========================================
 

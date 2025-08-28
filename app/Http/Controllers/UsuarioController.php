@@ -96,6 +96,7 @@ class UsuarioController extends Controller implements HasMiddleware
                     'subordinados_count' => $usuario->subordinados->count(),
                     'status_display' => $usuario->is_active ? 'Ativo' : 'Inativo',
                     'hierarchy_level' => $usuario->getHierarchyLevel(),
+                    'manager_name' => $usuario->manager?->nome ?? null,
                     'can_be_edited' => $this->canEditUser($usuario),
                     'can_be_deleted' => $this->canDeleteUser($usuario)
                 ];
@@ -443,17 +444,18 @@ class UsuarioController extends Controller implements HasMiddleware
         $currentUser = JWTAuth::user();
 
         try {
-            $subordinados = $currentUser->getAllSubordinates();
+            $subordinadosArray = $currentUser->getAllSubordinates();
+            $subordinados = collect($subordinadosArray);
 
-            $equipe = collect($subordinados)->map(function ($subordinado) {
+            $equipe = $subordinados->map(function ($subordinadoData) {
                 return [
-                    'id' => $subordinado['id'],
-                    'nome' => $subordinado['nome'],
-                    'email' => $subordinado['email'],
-                    'role' => $subordinado['role'],
-                    'is_active' => $subordinado['is_active'],
-                    'telefone' => $subordinado['telefone'],
-                    'hierarchy_level' => $subordinado->getHierarchyLevel()
+                    'id' => $subordinadoData['id'],
+                    'nome' => $subordinadoData['nome'],
+                    'email' => $subordinadoData['email'],
+                    'role' => $subordinadoData['role'],
+                    'is_active' => $subordinadoData['is_active'],
+                    'telefone' => $subordinadoData['telefone'] ?? null,
+                    'hierarchy_level' => $this->getHierarchyLevelByRole($subordinadoData['role'])
                 ];
             });
 
@@ -534,5 +536,16 @@ class UsuarioController extends Controller implements HasMiddleware
         if ($currentUser->id === $targetUser->id) return false;
         
         return $this->canCreateRole($currentUser, $newRole);
+    }
+
+    private function getHierarchyLevelByRole(string $role): int
+    {
+        switch ($role) {
+            case 'admin': return 1;
+            case 'consultor': return 2;
+            case 'gerente': return 3;
+            case 'vendedor': return 4;
+            default: return 5;
+        }
     }
 }
