@@ -37,16 +37,22 @@ class UsuarioController extends Controller implements HasMiddleware
             // Aplicar filtros hierárquicos
             if (!$currentUser->isAdmin()) {
                 if ($currentUser->isConsultor()) {
-                    // Consultor vê seus subordinados + ele mesmo
-                    $subordinadosIds = array_column($currentUser->getAllSubordinates(), 'id');
-                    $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
-                    $query->whereIn('id', $usuariosPermitidos);
+                    // Consultor vê apenas: subordinados diretos + ele mesmo
+                    $query->where(function($q) use ($currentUser) {
+                        $q->where('manager_id', $currentUser->id)  // ✅ Apenas subordinados diretos
+                        ->orWhere('id', $currentUser->id);       // ✅ Ele mesmo
+                    });
+                } elseif ($currentUser->isGerente()) {
+                    // Gerente vê: subordinados diretos + ele mesmo
+                    $query->where(function($q) use ($currentUser) {
+                        $q->where('manager_id', $currentUser->id)
+                        ->orWhere('id', $currentUser->id);
+                    });
                 } else {
-                    // Gerente e Vendedor veem apenas a si mesmos
+                    // Vendedor vê apenas a si mesmo
                     $query->where('id', $currentUser->id);
                 }
             }
-
             // Filtros opcionais
             if ($request->filled('role')) {
                 $query->where('role', $request->role);
@@ -188,10 +194,21 @@ class UsuarioController extends Controller implements HasMiddleware
         try {
             $managerId = null;
 
-            if (in_array($request->role, ['gerente', 'vendedor'])) {
-                // Para gerentes e vendedores, o manager é quem está criando
-                $managerId = $currentUser->id;
-            }
+                // Determinar manager_id baseado no role e hierarquia
+                if ($request->role === 'vendedor') {
+                    // Vendedores sempre têm manager (quem está criando)
+                    $managerId = $currentUser->id;
+                } elseif ($request->role === 'gerente') {
+                    // Gerentes podem ter manager se criados por consultor/admin
+                    if ($currentUser->isConsultor() || $currentUser->isAdmin()) {
+                        $managerId = $currentUser->isConsultor() ? $currentUser->id : $request->manager_id;
+                    }
+                } elseif ($request->role === 'consultor') {
+                    // Consultores podem ter manager se especificado por admin
+                    if ($currentUser->isAdmin() && $request->manager_id) {
+                        $managerId = $request->manager_id;
+                    }
+                }
 
             $novoUsuario = Usuario::create([
                 'nome' => $request->nome,
@@ -371,6 +388,18 @@ class UsuarioController extends Controller implements HasMiddleware
                 'cidade', 'estado', 'cpf_cnpj', 'endereco', 'cep', 'manager_id'
             ]));
 
+            if (class_exists('\App\Events\UsuarioAtualizado')) {
+                event(new \App\Events\UsuarioAtualizado($usuario));
+            }
+
+            // Se mudou o manager_id, invalidar cache da equipe
+            if ($usuario->wasChanged('manager_id')) {
+                $oldManagerId = $usuario->getOriginal('manager_id');
+                cache()->forget("team_cache_{$oldManagerId}");
+                cache()->forget("team_cache_{$usuario->manager_id}");
+                cache()->forget("team_cache_{$usuario->id}");
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Usuário atualizado com sucesso!',
@@ -413,6 +442,14 @@ class UsuarioController extends Controller implements HasMiddleware
             $usuario->is_active = !$usuario->is_active;
             $usuario->save();
 
+            event(new \App\Events\UsuarioAtualizado($usuario));
+
+            // Se mudou o manager_id, invalidar cache da equipe
+            if ($usuario->wasChanged('manager_id')) {
+                cache()->forget("team_cache_{$usuario->manager_id}");
+                cache()->forget("team_cache_{$request->manager_id}");
+            }
+
             $status = $usuario->is_active ? 'ativado' : 'desativado';
 
             // Criar notificação para o usuário afetado (se não for ele mesmo)
@@ -444,46 +481,62 @@ class UsuarioController extends Controller implements HasMiddleware
         }
     }
 
-    /**
-     * Obter equipe do usuário (subordinados)
-     */
-    public function getTeam(): JsonResponse
-    {
-        $currentUser = JWTAuth::user();
-
-        try {
-            $subordinadosArray = $currentUser->getAllSubordinates();
-            $subordinados = collect($subordinadosArray);
-
-            $equipe = $subordinados->map(function ($subordinadoData) {
-                return [
-                    'id' => $subordinadoData['id'],
-                    'nome' => $subordinadoData['nome'],
-                    'email' => $subordinadoData['email'],
-                    'role' => $subordinadoData['role'],
-                    'is_active' => $subordinadoData['is_active'],
-                    'telefone' => $subordinadoData['telefone'] ?? null,
-                    'hierarchy_level' => $this->getHierarchyLevelByRole($subordinadoData['role'])
-                ];
-            });
-
-            return response()->json([
-                'success' => true,
-                'data' => $equipe,
-                'meta' => [
-                    'total_team_members' => $equipe->count(),
-                    'active_members' => $equipe->where('is_active', true)->count(),
-                    'roles_distribution' => $equipe->groupBy('role')->map->count()
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro ao buscar equipe: ' . $e->getMessage()
-            ], 500);
+        /**
+         * Buscar equipe do usuário logado
+         */
+        public function getTeam(): JsonResponse
+        {
+            $currentUser = JWTAuth::user();
+            
+            try {
+                $cacheKey = "team_cache_{$currentUser->id}";
+                
+                $equipe = cache()->remember($cacheKey, 300, function() use ($currentUser) {
+                    $query = Usuario::with(['manager', 'subordinados'])
+                                ->where('is_active', true);
+                    
+                    if ($currentUser->isAdmin()) {
+                        // Admin vê todos
+                        $usuarios = $query->get();
+                    } elseif ($currentUser->isConsultor()) {
+                        // Consultor vê apenas: seus subordinados diretos + ele mesmo
+                        $usuarios = $query->where(function($q) use ($currentUser) {
+                            $q->where('manager_id', $currentUser->id)    // ✅ Apenas subordinados diretos
+                            ->orWhere('id', $currentUser->id);         // ✅ Ele mesmo
+                        })->get();
+                    } else {
+                        // Outros: subordinados + ele mesmo
+                        $usuarios = $query->where(function($q) use ($currentUser) {
+                            $q->where('manager_id', $currentUser->id)
+                            ->orWhere('id', $currentUser->id);
+                        })->get();
+                    }
+                    
+                    return $usuarios->map(function ($usuario) {
+                        return [
+                            'id' => $usuario->id,
+                            'name' => $usuario->nome,
+                            'email' => $usuario->email,
+                            'role' => $usuario->role,
+                            'manager_id' => $usuario->manager_id,
+                            'status' => $usuario->is_active ? 'Ativo' : 'Inativo',
+                            'telefone' => $usuario->telefone
+                        ];
+                    });
+                });
+                
+                return response()->json([
+                    'success' => true,
+                    'data' => $equipe
+                ]);
+                
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erro ao buscar equipe: ' . $e->getMessage()
+                ], 500);
+            }
         }
-    }
 
     // Métodos auxiliares para verificação de permissões
     private function canViewUser(Usuario $currentUser, Usuario $targetUser): bool
@@ -555,5 +608,23 @@ class UsuarioController extends Controller implements HasMiddleware
             case 'vendedor': return 4;
             default: return 5;
         }
+    }
+
+    public function invalidateTeamCache(Request $request): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+        
+        // Limpar cache específico do usuário
+        cache()->forget("team_cache_{$currentUser->id}");
+        
+        // Se for admin, limpar cache geral
+        if ($currentUser->isAdmin()) {
+            cache()->flush();
+        }
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Cache da equipe invalidado'
+        ]);
     }
 }
