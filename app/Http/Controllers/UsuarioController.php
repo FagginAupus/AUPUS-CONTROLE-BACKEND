@@ -489,40 +489,33 @@ class UsuarioController extends Controller implements HasMiddleware
             $currentUser = JWTAuth::user();
             
             try {
-                $cacheKey = "team_cache_{$currentUser->id}";
                 
-                $equipe = cache()->remember($cacheKey, 300, function() use ($currentUser) {
-                    $query = Usuario::with(['manager', 'subordinados'])
-                                ->where('is_active', true);
-                    
-                    if ($currentUser->isAdmin()) {
-                        // Admin vê todos
-                        $usuarios = $query->get();
-                    } elseif ($currentUser->isConsultor()) {
-                        // Consultor vê apenas: seus subordinados diretos + ele mesmo
-                        $usuarios = $query->where(function($q) use ($currentUser) {
-                            $q->where('manager_id', $currentUser->id)    // ✅ Apenas subordinados diretos
-                            ->orWhere('id', $currentUser->id);         // ✅ Ele mesmo
-                        })->get();
-                    } else {
-                        // Outros: subordinados + ele mesmo
-                        $usuarios = $query->where(function($q) use ($currentUser) {
-                            $q->where('manager_id', $currentUser->id)
-                            ->orWhere('id', $currentUser->id);
-                        })->get();
-                    }
-                    
-                    return $usuarios->map(function ($usuario) {
-                        return [
-                            'id' => $usuario->id,
-                            'name' => $usuario->nome,
-                            'email' => $usuario->email,
-                            'role' => $usuario->role,
-                            'manager_id' => $usuario->manager_id,
-                            'status' => $usuario->is_active ? 'Ativo' : 'Inativo',
-                            'telefone' => $usuario->telefone
-                        ];
-                    });
+                $query = Usuario::where('is_active', true);
+        
+                if ($currentUser->isAdmin()) {
+                    $usuarios = $query->get();
+                } elseif ($currentUser->isConsultor()) {
+                    $usuarios = $query->where(function($q) use ($currentUser) {
+                        $q->where('manager_id', $currentUser->id)
+                        ->orWhere('id', $currentUser->id);
+                    })->get();
+                } else {
+                    $usuarios = $query->where(function($q) use ($currentUser) {
+                        $q->where('manager_id', $currentUser->id)
+                        ->orWhere('id', $currentUser->id);
+                    })->get();
+                }
+                
+                $equipe = $usuarios->map(function ($usuario) {
+                    return [
+                        'id' => $usuario->id,
+                        'name' => $usuario->nome,
+                        'email' => $usuario->email,
+                        'role' => $usuario->role,
+                        'manager_id' => $usuario->manager_id,
+                        'status' => $usuario->is_active ? 'Ativo' : 'Inativo',
+                        'telefone' => $usuario->telefone
+                    ];
                 });
                 
                 return response()->json([
