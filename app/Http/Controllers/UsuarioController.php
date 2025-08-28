@@ -80,10 +80,12 @@ class UsuarioController extends Controller implements HasMiddleware
             $perPage = min($request->get('per_page', 15), 100);
             $usuarios = $query->paginate($perPage);
 
-            // Transformar dados para o frontend
             $usuarios->getCollection()->transform(function ($usuario) {
+                $managerInfo = $usuario->getManagerInfo(); // 👈 USAR O NOVO MÉTODO
+                
                 return [
                     'id' => $usuario->id,
+                    'name' => $usuario->nome, // 👈 MUDANÇA: 'name' em vez de 'nome'
                     'nome' => $usuario->nome,
                     'email' => $usuario->email,
                     'role' => $usuario->role,
@@ -103,7 +105,8 @@ class UsuarioController extends Controller implements HasMiddleware
                     'status_display' => $usuario->is_active ? 'Ativo' : 'Inativo',
                     'hierarchy_level' => $usuario->getHierarchyLevel(),
                     'manager_id' => $usuario->manager_id,
-                    'manager_name' => $usuario->manager?->nome ?? null,
+                    'manager_name' => $managerInfo ? $managerInfo->nome : null, // 👈 USAR getManagerInfo
+                    'manager_role' => $managerInfo ? $managerInfo->role : null, // 👈 ADICIONAR ROLE
                     'can_be_edited' => $this->canEditUser($usuario),
                     'can_be_deleted' => $this->canDeleteUser($usuario)
                 ];
@@ -196,12 +199,27 @@ class UsuarioController extends Controller implements HasMiddleware
 
                 // Determinar manager_id baseado no role e hierarquia
                 if ($request->role === 'vendedor') {
-                    // Vendedores sempre têm manager (quem está criando)
-                    $managerId = $currentUser->id;
+                    // Se o consultor está criando o vendedor e passou um manager_id (gerente), usar ele
+                    if ($currentUser->isConsultor() && $request->manager_id) {
+                        // Verificar se o gerente pertence ao consultor
+                        $gerente = Usuario::where('id', $request->manager_id)
+                            ->where('role', 'gerente')
+                            ->where('manager_id', $currentUser->id)
+                            ->first();
+                            
+                        if ($gerente) {
+                            $managerId = $request->manager_id; // O gerente selecionado
+                        } else {
+                            $managerId = $currentUser->id; // Se gerente inválido, consultor vira o manager
+                        }
+                    } else {
+                        // Se não passou manager_id ou é gerente criando, quem está criando vira o manager
+                        $managerId = $currentUser->id;
+                    }
                 } elseif ($request->role === 'gerente') {
-                    // Gerentes podem ter manager se criados por consultor/admin
+                    // Gerentes criados por consultor/admin têm eles como manager
                     if ($currentUser->isConsultor() || $currentUser->isAdmin()) {
-                        $managerId = $currentUser->isConsultor() ? $currentUser->id : $request->manager_id;
+                        $managerId = $currentUser->id;
                     }
                 } elseif ($request->role === 'consultor') {
                     // Consultores podem ter manager se especificado por admin
@@ -481,55 +499,82 @@ class UsuarioController extends Controller implements HasMiddleware
         }
     }
 
-        /**
-         * Buscar equipe do usuário logado
-         */
-        public function getTeam(): JsonResponse
-        {
-            $currentUser = JWTAuth::user();
-            
-            try {
-                
-                $query = Usuario::where('is_active', true);
-        
-                if ($currentUser->isAdmin()) {
-                    $usuarios = $query->get();
-                } elseif ($currentUser->isConsultor()) {
-                    $usuarios = $query->where(function($q) use ($currentUser) {
-                        $q->where('manager_id', $currentUser->id)
-                        ->orWhere('id', $currentUser->id);
-                    })->get();
-                } else {
-                    $usuarios = $query->where(function($q) use ($currentUser) {
-                        $q->where('manager_id', $currentUser->id)
-                        ->orWhere('id', $currentUser->id);
-                    })->get();
-                }
-                
-                $equipe = $usuarios->map(function ($usuario) {
-                    return [
-                        'id' => $usuario->id,
-                        'name' => $usuario->nome,
-                        'email' => $usuario->email,
-                        'role' => $usuario->role,
-                        'manager_id' => $usuario->manager_id,
-                        'status' => $usuario->is_active ? 'Ativo' : 'Inativo',
-                        'telefone' => $usuario->telefone
-                    ];
-                });
-                
-                return response()->json([
-                    'success' => true,
-                    'data' => $equipe
-                ]);
-                
-            } catch (\Exception $e) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Erro ao buscar equipe: ' . $e->getMessage()
-                ], 500);
-            }
+    public function getTeam(): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+
+        if (!$currentUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
         }
+
+        try {
+            $equipe = collect();
+
+            if ($currentUser->isAdmin()) {
+                // Admin vê todos os consultores
+                $equipe = Usuario::where('role', 'consultor')
+                            ->where('is_active', true)
+                            ->with('manager')
+                            ->get();
+            } elseif ($currentUser->isConsultor()) {
+                // 👇 CORREÇÃO PRINCIPAL: Consultor vê TODOS os subordinados (diretos e indiretos)
+                $todosSubordinados = $currentUser->getAllSubordinates();
+                $subordinadosIds = array_column($todosSubordinados, 'id');
+                
+                if (!empty($subordinadosIds)) {
+                    $equipe = Usuario::whereIn('id', $subordinadosIds)
+                                ->where('is_active', true)
+                                ->with('manager')
+                                ->get();
+                }
+            } elseif ($currentUser->isGerente()) {
+                // Gerente vê apenas seus vendedores diretos
+                $equipe = Usuario::where('manager_id', $currentUser->id)
+                            ->where('role', 'vendedor')
+                            ->where('is_active', true)
+                            ->with('manager')
+                            ->get();
+            } else {
+                // Vendedor não vê equipe
+                $equipe = collect();
+            }
+
+            $equipe = $equipe->map(function ($usuario) {
+                $managerInfo = $usuario->getManagerInfo();
+                
+                return [
+                    'id' => $usuario->id,
+                    'name' => $usuario->nome, // 👈 IMPORTANTE: usar 'name'
+                    'email' => $usuario->email,
+                    'role' => $usuario->role,
+                    'telefone' => $usuario->telefone,
+                    'cidade' => $usuario->cidade,
+                    'estado' => $usuario->estado,
+                    'created_at' => $usuario->created_at,
+                    'is_active' => $usuario->is_active,
+                    'manager_id' => $usuario->manager_id,
+                    'manager_name' => $managerInfo ? $managerInfo->nome : null,
+                    'manager_role' => $managerInfo ? $managerInfo->role : null,
+                    'status_display' => $usuario->is_active ? 'Ativo' : 'Inativo',
+                    'telefone' => $usuario->telefone
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $equipe
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao buscar equipe: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 
     // Métodos auxiliares para verificação de permissões
     private function canViewUser(Usuario $currentUser, Usuario $targetUser): bool

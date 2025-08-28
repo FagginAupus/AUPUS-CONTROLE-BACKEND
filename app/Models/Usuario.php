@@ -126,6 +126,15 @@ class Usuario extends Authenticatable implements JWTSubject
         return $this->hasMany(Usuario::class, 'manager_id');
     }
 
+    public function getManagerInfo()
+    {
+        if (!$this->manager_id) {
+            return null;
+        }
+        
+        return $this->manager()->select('id', 'nome', 'email', 'role')->first();
+    }
+
     public function propostas(): HasMany
     {
         return $this->hasMany(Proposta::class, 'usuario_id');
