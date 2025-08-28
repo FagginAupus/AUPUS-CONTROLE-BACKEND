@@ -96,6 +96,7 @@ class UsuarioController extends Controller implements HasMiddleware
                     'subordinados_count' => $usuario->subordinados->count(),
                     'status_display' => $usuario->is_active ? 'Ativo' : 'Inativo',
                     'hierarchy_level' => $usuario->getHierarchyLevel(),
+                    'manager_id' => $usuario->manager_id,
                     'manager_name' => $usuario->manager?->nome ?? null,
                     'can_be_edited' => $this->canEditUser($usuario),
                     'can_be_deleted' => $this->canDeleteUser($usuario)
