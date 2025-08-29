@@ -25,12 +25,12 @@ class Proposta extends Model
     /**
      * Campos que podem ser preenchidos via mass assignment
      */
-    protected $fillable = [
+        protected $fillable = [
         'id',
         'numero_proposta',
         'data_proposta',
         'nome_cliente',
-        'consultor',
+        'consultor_id',  
         'usuario_id',
         'recorrencia',
         'economia',

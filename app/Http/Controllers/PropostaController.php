@@ -172,6 +172,11 @@ class PropostaController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        Log::info('=== DEBUG REQUEST CONSULTOR ===', [
+            'consultor_id_request' => $request->consultor_id ?? 'não encontrado',
+            'consultor_request' => $request->consultor ?? 'não encontrado',
+            'all_request' => $request->all()
+        ]);
         try {
             $currentUser = JWTAuth::user();
             
@@ -188,13 +193,19 @@ class PropostaController extends Controller
             ]);
 
 
+            $consultorId = null;
             if ($request->has('consultor_id') && $request->consultor_id) {
-                $consultorExiste = DB::selectOne("SELECT id FROM usuarios WHERE id = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')", [$request->consultor_id]);
-                if (!$consultorExiste) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Consultor não encontrado ou inválido'
-                    ], 422);
+                $consultorId = $request->consultor_id;
+            } elseif ($request->has('consultor') && $request->consultor) {
+                // Buscar por nome se não vier ID
+                $consultorEncontrado = DB::selectOne("
+                    SELECT id FROM usuarios 
+                    WHERE nome = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                    AND deleted_at IS NULL
+                ", [$request->consultor]);
+                
+                if ($consultorEncontrado) {
+                    $consultorId = $consultorEncontrado->id;
                 }
             }
             DB::beginTransaction();
@@ -255,7 +266,7 @@ class PropostaController extends Controller
                 $numeroProposta,
                 $request->data_proposta ?? date('Y-m-d'),
                 $request->nome_cliente,
-                $request->consultor_id,
+                $consultorId,  
                 $currentUser->id,
                 $request->recorrencia ?? '3%',
                 $this->formatarDesconto($request->economia ?? 20),   
@@ -453,7 +464,12 @@ class PropostaController extends Controller
      * ✅ ATUALIZAR PROPOSTA
      */
     public function update(Request $request, string $id): JsonResponse
-    {
+    {   
+        Log::info('=== DEBUG REQUEST CONSULTOR ===', [
+            'consultor_id_request' => $request->consultor_id ?? 'não encontrado',
+            'consultor_request' => $request->consultor ?? 'não encontrado',
+            'all_request' => $request->all()
+        ]);
         try {
             $currentUser = JWTAuth::user();
             
@@ -516,13 +532,74 @@ class PropostaController extends Controller
             $numeroUC = $request->get('numeroUC') ?? $request->get('numero_uc');
 
             // 1️⃣ CAMPOS GERAIS (aplicam para toda a proposta)
-            $camposGerais = ['nome_cliente', 'consultor_id', 'data_proposta', 'observacoes', 'recorrencia', 'inflacao', 'tarifa_tributos'];
+            $camposGerais = ['nome_cliente', 'data_proposta', 'observacoes', 'recorrencia', 'inflacao', 'tarifa_tributos'];
             foreach ($camposGerais as $campo) {
                 if ($request->has($campo)) {
                     $updateFields[] = "{$campo} = ?";
                     $updateParams[] = $request->get($campo);
                 }
             }
+
+            // ✅ ADICIONAR ESTA SEÇÃO - Tratar campo 'consultor' (nome) enviado pelo frontend
+            if ($request->has('consultor') && $request->consultor) {
+                // Buscar ID do consultor pelo nome
+                $consultorEncontrado = DB::selectOne("
+                    SELECT id FROM usuarios 
+                    WHERE nome = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                    AND deleted_at IS NULL
+                ", [$request->consultor]);
+                
+                if ($consultorEncontrado) {
+                    $updateFields[] = 'consultor_id = ?';
+                    $updateParams[] = $consultorEncontrado->id;
+                    
+                    Log::info('✅ Consultor encontrado e será atualizado', [
+                        'nome_consultor' => $request->consultor,
+                        'consultor_id' => $consultorEncontrado->id
+                    ]);
+                } else {
+                    Log::warning('❌ Consultor não encontrado pelo nome', [
+                        'nome_pesquisado' => $request->consultor
+                    ]);
+                }
+            }
+
+            // Tratar consultor_id direto (se vier)
+            if ($request->has('consultor_id') && $request->consultor_id) {
+                $consultorExiste = DB::selectOne("
+                    SELECT id FROM usuarios 
+                    WHERE id = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                    AND deleted_at IS NULL
+                ", [$request->consultor_id]);
+                
+                if ($consultorExiste) {
+                    $updateFields[] = 'consultor_id = ?';
+                    $updateParams[] = $request->consultor_id;
+                    
+                    Log::info('✅ Consultor_id direto será atualizado', [
+                        'consultor_id' => $request->consultor_id
+                    ]);
+                }
+            }
+
+            // Tratar consultor_id direto (se vier)
+            if ($request->has('consultor_id') && $request->consultor_id) {
+                $consultorExiste = DB::selectOne("
+                    SELECT id FROM usuarios 
+                    WHERE id = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                    AND deleted_at IS NULL
+                ", [$request->consultor_id]);
+                
+                if ($consultorExiste) {
+                    $updateFields[] = 'consultor_id = ?';
+                    $updateParams[] = $request->consultor_id;
+                    
+                    Log::info('✅ Consultor_id direto será atualizado', [
+                        'consultor_id' => $request->consultor_id
+                    ]);
+                }
+            }
+
 
             // Descontos especiais
             if ($request->has('descontoTarifa') || $request->has('economia')) {
@@ -596,7 +673,12 @@ class PropostaController extends Controller
 
             $updateFields[] = 'updated_at = NOW()';
             $updateParams[] = $id;
-
+            
+            Log::info('🔍 FINAL - Campos e parâmetros do UPDATE:', [
+                'updateFields' => $updateFields,
+                'updateParams' => $updateParams,
+                'proposta_id' => $id
+            ]);
             $updateSql = "UPDATE propostas SET " . implode(', ', $updateFields) . " WHERE id = ?";
             
             $result = DB::update($updateSql, $updateParams);
