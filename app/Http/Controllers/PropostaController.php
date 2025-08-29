@@ -33,16 +33,14 @@ class PropostaController extends Controller
                 'user_role' => $currentUser->role
             ]);
 
-            $query = "SELECT * FROM propostas WHERE deleted_at IS NULL";
+            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
             $params = [];
 
-            // Se não for admin, filtrar apenas as propostas do usuário
             if ($currentUser->role !== 'admin') {
-                $query .= " AND usuario_id = ?";
+                $query .= " AND p.usuario_id = ?";
                 $params[] = $currentUser->id;
             }
-
-            $query .= " ORDER BY created_at DESC";
+            $query .= " ORDER BY p.created_at DESC";
             
             $propostas = DB::select($query, $params);
 
@@ -61,7 +59,8 @@ class PropostaController extends Controller
                     'id' => $proposta->id,
                     'numeroProposta' => $proposta->numero_proposta,
                     'nomeCliente' => $proposta->nome_cliente,
-                    'consultor' => $proposta->consultor,
+                    'consultor' => $proposta->consultor_nome ?? 'Sem consultor',
+                    'consultor_id' => $proposta->consultor_id,
                     'data' => $proposta->data_proposta,
                     'status' => $this->obterStatusProposta($unidadesConsumidoras),
                     'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
@@ -111,6 +110,7 @@ class PropostaController extends Controller
                             'numeroProposta' => $proposta['numeroProposta'],
                             'nomeCliente' => $proposta['nomeCliente'],
                             'consultor' => $proposta['consultor'],
+                            'consultor_id' => $proposta['consultor_id'],
                             'data' => $proposta['data'],
                             'status' => $uc['status'] ?? $proposta['status'],
                             'observacoes' => $proposta['observacoes'],
@@ -187,6 +187,16 @@ class PropostaController extends Controller
                 'request_data' => $request->all()
             ]);
 
+
+            if ($request->has('consultor_id') && $request->consultor_id) {
+                $consultorExiste = DB::selectOne("SELECT id FROM usuarios WHERE id = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')", [$request->consultor_id]);
+                if (!$consultorExiste) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Consultor não encontrado ou inválido'
+                    ], 422);
+                }
+            }
             DB::beginTransaction();
 
             // ✅ GERAR ID E NÚMERO DA PROPOSTA
@@ -234,7 +244,7 @@ class PropostaController extends Controller
 
             // ✅ INSERIR PROPOSTA NO BANCO
             $sql = "INSERT INTO propostas (
-                id, numero_proposta, data_proposta, nome_cliente, consultor, 
+                id, numero_proposta, data_proposta, nome_cliente, consultor_id, 
                 usuario_id, recorrencia, desconto_tarifa, desconto_bandeira,
                 observacoes, beneficios, unidades_consumidoras,
                 inflacao, tarifa_tributos, created_at, updated_at
@@ -245,7 +255,7 @@ class PropostaController extends Controller
                 $numeroProposta,
                 $request->data_proposta ?? date('Y-m-d'),
                 $request->nome_cliente,
-                $request->consultor,
+                $request->consultor_id,
                 $currentUser->id,
                 $request->recorrencia ?? '3%',
                 $this->formatarDesconto($request->economia ?? 20),   
@@ -264,7 +274,7 @@ class PropostaController extends Controller
             }
 
             // ✅ BUSCAR PROPOSTA INSERIDA
-            $propostaInserida = DB::selectOne("SELECT * FROM propostas WHERE id = ?", [$id]);
+            $propostaInserida = DB::selectOne("SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.id = ?", [$id]);
 
             if (!$propostaInserida) {
                 throw new \Exception('Proposta não encontrada após inserção');
@@ -294,7 +304,8 @@ class PropostaController extends Controller
                 'id' => $propostaInserida->id,
                 'numeroProposta' => $propostaInserida->numero_proposta,
                 'nomeCliente' => $propostaInserida->nome_cliente,
-                'consultor' => $propostaInserida->consultor,
+                'consultor' => $propostaInserida->consultor_nome ?? 'Sem consultor',
+                'consultor_id' => $propostaInserida->consultor_id,
                 'data' => $propostaInserida->data_proposta,
                 'status' => $this->obterStatusProposta($unidadesConsumidoras),
                 'descontoTarifa' => $propostaInserida->desconto_tarifa,
@@ -349,12 +360,12 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            $query = "SELECT * FROM propostas WHERE id = ? AND deleted_at IS NULL";
+            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.id = ? AND p.deleted_at IS NULL";
             $params = [$id];
 
             // Se não for admin, verificar se é proposta do usuário
             if ($currentUser->role !== 'admin') {
-                $query .= " AND usuario_id = ?";
+                $query .= " AND p.usuario_id = ?";
                 $params[] = $currentUser->id;
             }
 
@@ -380,7 +391,8 @@ class PropostaController extends Controller
                 'numeroProposta' => $proposta->numero_proposta, // Compatibilidade frontend
                 'nome_cliente' => $proposta->nome_cliente,
                 'nomeCliente' => $proposta->nome_cliente, // Compatibilidade frontend
-                'consultor' => $proposta->consultor,
+                'consultor' => $proposta->consultor_nome ?? 'Sem consultor',
+                'consultor_id' => $proposta->consultor_id,
                 'data_proposta' => $proposta->data_proposta,
                 'data' => $proposta->data_proposta, // Compatibilidade frontend
                 'status' => $this->obterStatusProposta($unidadesConsumidoras),
@@ -461,14 +473,13 @@ class PropostaController extends Controller
             DB::beginTransaction();
 
             // ✅ VERIFICAR SE PROPOSTA EXISTE E USUÁRIO TEM PERMISSÃO
-            $query = "SELECT * FROM propostas WHERE id = ? AND deleted_at IS NULL";
+            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.id = ? AND p.deleted_at IS NULL";
             $params = [$id];
 
             if ($currentUser->role !== 'admin') {
-                $query .= " AND usuario_id = ?";
+                $query .= " AND p.usuario_id = ?";
                 $params[] = $currentUser->id;
             }
-
             $proposta = DB::selectOne($query, $params);
 
             if (!$proposta) {
@@ -505,7 +516,7 @@ class PropostaController extends Controller
             $numeroUC = $request->get('numeroUC') ?? $request->get('numero_uc');
 
             // 1️⃣ CAMPOS GERAIS (aplicam para toda a proposta)
-            $camposGerais = ['nome_cliente', 'consultor', 'data_proposta', 'observacoes', 'recorrencia', 'inflacao', 'tarifa_tributos'];
+            $camposGerais = ['nome_cliente', 'consultor_id', 'data_proposta', 'observacoes', 'recorrencia', 'inflacao', 'tarifa_tributos'];
             foreach ($camposGerais as $campo) {
                 if ($request->has($campo)) {
                     $updateFields[] = "{$campo} = ?";
@@ -629,7 +640,8 @@ class PropostaController extends Controller
                 'id' => $propostaAtualizada->id,
                 'numeroProposta' => $propostaAtualizada->numero_proposta,
                 'nomeCliente' => $propostaAtualizada->nome_cliente,
-                'consultor' => $propostaAtualizada->consultor,
+                'consultor' => $proposta->consultor_nome ?? 'Sem consultor',
+                'consultor_id' => $propostaAtualizada->consultor_id,
                 'data' => $propostaAtualizada->data_proposta,
                 'status' => $this->obterStatusProposta($unidadesConsumidoras),
                 'economia' => $this->extrairValorDesconto($propostaAtualizada->desconto_tarifa),
@@ -1108,7 +1120,7 @@ class PropostaController extends Controller
                 'user_id' => $currentUser->id
             ]);
 
-            $query = "UPDATE propostas SET deleted_at = NOW(), updated_at = NOW() WHERE id = ? AND deleted_at IS NULL";
+            $query = "UPDATE propostas p SET deleted_at = NOW(), updated_at = NOW() WHERE p.id = ? AND p.deleted_at IS NULL";
             $params = [$id];
 
             // Se não for admin, verificar se é proposta do usuário
@@ -1120,10 +1132,10 @@ class PropostaController extends Controller
                     $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
                     
                     $placeholders = str_repeat('?,', count($usuariosPermitidos) - 1) . '?';
-                    $query .= " AND (usuario_id IN ({$placeholders}) OR consultor ILIKE ?)";
+                    $query .= " AND (p.usuario_id IN ({$placeholders}) OR p.consultor_id = ?)";
                     $params = array_merge($params, $usuariosPermitidos);
-                    $params[] = '%' . $currentUser->nome . '%'; // Propostas onde ele é o consultor
-                    
+                    $params[] = $currentUser->id;
+                                        
                 } elseif ($currentUser->isGerente()) {
                     // Gerente vê apenas suas propostas + propostas dos vendedores subordinados
                     $subordinados = $currentUser->getAllSubordinates();
@@ -1135,13 +1147,13 @@ class PropostaController extends Controller
                         $query .= " AND usuario_id IN ({$placeholders})";
                         $params = array_merge($params, $usuariosPermitidos);
                     } else {
-                        $query .= " AND usuario_id = ?";
+                        $query .= " AND p.usuario_id = ?";
                         $params[] = $currentUser->id;
                     }
                     
                 } else {
                     // Vendedor vê apenas suas propostas
-                    $query .= " AND usuario_id = ?";
+                    $query .= " AND p.usuario_id = ?";
                     $params[] = $currentUser->id;
                 }
             }

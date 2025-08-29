@@ -59,7 +59,7 @@ class ControleController extends Controller
                     -- Dados da proposta
                     p.numero_proposta,
                     p.nome_cliente,
-                    p.consultor,
+                    u_consultor.nome as consultor,
                     p.data_proposta,
                     p.usuario_id,
                     
@@ -76,6 +76,7 @@ class ControleController extends Controller
                     
                 FROM controle_clube cc
                 LEFT JOIN propostas p ON cc.proposta_id = p.id
+                LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
                 LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
                 LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
                 WHERE cc.deleted_at IS NULL
@@ -118,7 +119,7 @@ class ControleController extends Controller
             }
 
             if ($request->filled('consultor')) {
-                $query .= " AND p.consultor ILIKE ?";
+                $query .= " AND u_consultor.nome ILIKE ?";
                 $params[] = '%' . $request->consultor . '%';
             }
 
@@ -133,7 +134,7 @@ class ControleController extends Controller
 
             // Contar total
             $countQuery = str_replace(
-                "SELECT cc.id, cc.proposta_id, cc.uc_id, cc.ug_id, cc.calibragem, cc.valor_calibrado, cc.observacoes, cc.status_troca, cc.data_titularidade, cc.data_entrada_controle, cc.created_at, cc.updated_at, p.numero_proposta, p.nome_cliente, p.consultor, p.data_proposta, p.usuario_id, uc.numero_unidade, uc.apelido, uc.consumo_medio, uc.ligacao, ug.nome_usina as ug_nome, ug.potencia_cc as ug_potencia_cc, ug.capacidade_calculada as ug_capacidade",
+                "SELECT cc.id, cc.proposta_id, cc.uc_id, cc.ug_id, cc.calibragem, cc.valor_calibrado, cc.observacoes, cc.status_troca, cc.data_titularidade, cc.data_entrada_controle, cc.created_at, cc.updated_at, p.numero_proposta, p.nome_cliente, u_consultor.nome as consultor, p.data_proposta, p.usuario_id, uc.numero_unidade, uc.apelido, uc.consumo_medio, uc.ligacao, ug.nome_usina as ug_nome, ug.potencia_cc as ug_potencia_cc, ug.capacidade_calculada as ug_capacidade",
                 "SELECT COUNT(*) as total",
                 $query
             );
