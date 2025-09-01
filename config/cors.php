@@ -40,6 +40,7 @@ return [
 
     'allowed_headers' => [
         'Accept',
+        'Content-Type',
         'Authorization',
         'Content-Type',
         'X-Requested-With',
@@ -47,15 +48,23 @@ return [
         'Origin',
         'Cache-Control',
         'Pragma',
+        'X-New-Token',        
+        'X-Token-Refreshed',
+        'X-Token-Warning',    
+        'X-Token-Expires-In',
     ],
 
     'exposed_headers' => [
         'Authorization',
         'X-Total-Count',
         'X-Page-Count',
+        'X-New-Token',       
+        'X-Token-Refreshed', 
+        'X-Token-Warning',   
+        'X-Token-Expires-In',
     ],
 
-    'max_age' => 86400,
+    'max_age' => 0,
 
     'supports_credentials' => true,
 

@@ -67,7 +67,7 @@ Route::prefix('auth')->group(function () {
 // ==========================================
 // ROTAS PROTEGIDAS (REQUEREM AUTENTICAÇÃO JWT)
 // ==========================================
-Route::middleware('auth:api')->group(function () {
+Route::middleware(['auth:api', 'jwt.auto.refresh'])->group(function () {
     
     // ==========================================
     // AUTH - Autenticação
@@ -77,6 +77,10 @@ Route::middleware('auth:api')->group(function () {
         Route::post('refresh', [AuthController::class, 'refresh']);
         Route::get('me', [AuthController::class, 'me']);
         Route::post('change-password', [AuthController::class, 'changePassword']);
+        
+        // ✅ ADICIONAR ESTAS DUAS LINHAS:
+        Route::post('extend-session', [AuthController::class, 'extendSession']);
+        Route::get('session-status', [AuthController::class, 'sessionStatus']);
     });
 
     // ==========================================
@@ -123,6 +127,9 @@ Route::middleware('auth:api')->group(function () {
         Route::put('{id}', [PropostaController::class, 'update']);
         Route::patch('{id}/status', [PropostaController::class, 'updateStatus']);
         Route::delete('{id}', [PropostaController::class, 'destroy']);
+
+        Route::post('draft', [PropostaController::class, 'saveDraft']);
+        Route::put('{id}/draft', [PropostaController::class, 'updateDraft']);
     });
 
     // ==========================================
