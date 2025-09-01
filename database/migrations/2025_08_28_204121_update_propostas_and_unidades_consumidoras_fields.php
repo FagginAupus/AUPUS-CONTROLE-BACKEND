@@ -45,22 +45,6 @@ return new class extends Migration
             $table->decimal('potencia_ca', 10, 2)->nullable()->after('potencia_cc')
                   ->comment('Potência CA em kWp (para UGs)');
         });
-
-        // ===============================================
-        // CONSTRAINT PARA UGs (OPCIONAL - GARANTIR INTEGRIDADE)
-        // ===============================================
-        
-        DB::statement('
-            ALTER TABLE unidades_consumidoras 
-            ADD CONSTRAINT chk_ug_fields_updated
-            CHECK (
-                (is_ug = false) OR 
-                (is_ug = true AND 
-                 nome_usina IS NOT NULL AND 
-                 potencia_cc IS NOT NULL AND 
-                 fator_capacidade IS NOT NULL)
-            )
-        ');
     }
 
     /**
