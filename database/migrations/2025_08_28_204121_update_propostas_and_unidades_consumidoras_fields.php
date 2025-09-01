@@ -12,21 +12,15 @@ return new class extends Migration
     public function up(): void
     {
         // ===============================================
-        // TABELA: propostas - ATUALIZAR CAMPO CONSULTOR
+        // TABELA: propostas - ADICIONAR CAMPO CONSULTOR_ID (MANTER CONSULTOR)
         // ===============================================
         
         Schema::table('propostas', function (Blueprint $table) {
-            // Remover índice existente antes de dropar coluna
-            $table->dropIndex('idx_propostas_consultor');
+            // Adicionar campo consultor_id (foreign key) MANTENDO o campo consultor existente
+            $table->string('consultor_id', 36)->nullable()->after('consultor')
+                  ->comment('ID do consultor responsável (FK para usuarios)');
             
-            // Remover campo consultor (nome)
-            $table->dropColumn('consultor');
-            
-            // Adicionar campo consultor_id (foreign key)
-            $table->string('consultor_id', 36)->nullable()->after('nome_cliente')
-                  ->comment('ID do consultor responsável');
-            
-            // Criar novo índice
+            // Criar índice para o novo campo
             $table->index('consultor_id', 'idx_propostas_consultor_id');
             
             // Foreign key para usuarios
@@ -52,7 +46,21 @@ return new class extends Migration
                   ->comment('Potência CA em kWp (para UGs)');
         });
 
+        // ===============================================
+        // CONSTRAINT PARA UGs (OPCIONAL - GARANTIR INTEGRIDADE)
+        // ===============================================
         
+        DB::statement('
+            ALTER TABLE unidades_consumidoras 
+            ADD CONSTRAINT chk_ug_fields_updated
+            CHECK (
+                (is_ug = false) OR 
+                (is_ug = true AND 
+                 nome_usina IS NOT NULL AND 
+                 potencia_cc IS NOT NULL AND 
+                 fator_capacidade IS NOT NULL)
+            )
+        ');
     }
 
     /**
@@ -69,15 +77,8 @@ return new class extends Migration
             $table->dropForeign('fk_propostas_consultor');
             $table->dropIndex('idx_propostas_consultor_id');
             
-            // Remover consultor_id
+            // Remover apenas o campo consultor_id (mantém consultor original)
             $table->dropColumn('consultor_id');
-            
-            // Restaurar campo consultor (nome)
-            $table->string('consultor', 100)->after('nome_cliente')
-                  ->comment('Nome do consultor responsável');
-            
-            // Restaurar índice
-            $table->index('consultor', 'idx_propostas_consultor');
         });
 
         // ===============================================
@@ -101,19 +102,7 @@ return new class extends Migration
         
         DB::statement('
             ALTER TABLE unidades_consumidoras 
-            DROP CONSTRAINT IF EXISTS chk_ug_fields
-        ');
-        
-        DB::statement('
-            ALTER TABLE unidades_consumidoras 
-            ADD CONSTRAINT chk_ug_fields 
-            CHECK (
-                (gerador = false) OR 
-                (gerador = true AND 
-                 nome_usina IS NOT NULL AND 
-                 potencia_cc IS NOT NULL AND 
-                 fator_capacidade IS NOT NULL)
-            )
+            DROP CONSTRAINT IF EXISTS chk_ug_fields_updated
         ');
     }
 };
