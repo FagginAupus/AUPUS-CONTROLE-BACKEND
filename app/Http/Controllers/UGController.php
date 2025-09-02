@@ -193,6 +193,7 @@ class UGController extends Controller
             $dadosValidados = $request->validate([
                 'nome_usina' => 'required|string|max:255',
                 'potencia_cc' => 'required|numeric|min:0.1|max:10000',
+                'potencia_ca' => 'required|numeric|min:0.1|max:10000',
                 'fator_capacidade' => 'required|numeric|min:1|max:100',
                 'numero_unidade' => 'required|string|max:50',
                 'apelido' => 'required|string|max:255',
@@ -211,6 +212,7 @@ class UGController extends Controller
                 'concessionaria_id' => '01JB849ZDG0RPC5EB8ZFTB4GJN',
                 'nome_usina' => $dadosValidados['nome_usina'],
                 'potencia_cc' => (float) $dadosValidados['potencia_cc'],
+                'potencia_ca' => (float) $dadosValidados['potencia_ca'],
                 'fator_capacidade' => (float) ($dadosValidados['fator_capacidade'] / 100),
                 'numero_unidade' => $dadosValidados['numero_unidade'],
                 'apelido' => $dadosValidados['apelido'],
@@ -254,6 +256,7 @@ class UGController extends Controller
                 'nomeUsina' => $ug->nome_usina,
                 'numeroUnidade' => $ug->numero_unidade,
                 'potenciaCC' => (float) $ug->potencia_cc,
+                'potenciaCA' => (float) $ug->potencia_ca,
                 'fatorCapacidade' => (float) $ug->fator_capacidade,
                 'capacidade' => (float) $ug->capacidade_calculada,
                 'localizacao' => $ug->localizacao,
@@ -400,6 +403,10 @@ class UGController extends Controller
                 $dadosAtualizacao['potencia_cc'] = $request->potenciaCC;
             }
 
+            if ($request->has('potenciaCA')) {
+                $dadosAtualizacao['potencia_ca'] = $request->potenciaCA;
+            }
+
             if ($request->has('fatorCapacidade')) {
                 $dadosAtualizacao['fator_capacidade'] = $request->fatorCapacidade / 100;
             }
@@ -425,6 +432,7 @@ class UGController extends Controller
                 'id' => $ug->id,
                 'nomeUsina' => $ug->nome_usina,
                 'potenciaCC' => (float) $ug->potencia_cc,
+                'potenciaCA' => (float) $ug->potencia_ca,
                 'fatorCapacidade' => (float) ($ug->fator_capacidade * 100),
                 'capacidade' => (float) $ug->capacidade_calculada,
                 'localizacao' => $ug->localizacao,

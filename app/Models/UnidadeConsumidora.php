@@ -65,9 +65,9 @@ class UnidadeConsumidora extends Model
         'distribuidora',
         'tipo_ligacao',
         'valor_fatura',
-        // REMOVIDO: 'is_ug', // Campo removido (duplicado)
         'nome_usina',
         'potencia_cc',
+        'potencia_ca',
         'fator_capacidade',
         'capacidade_calculada',
         'localizacao',
@@ -99,6 +99,7 @@ class UnidadeConsumidora extends Model
         'desconto_bandeira' => 'decimal:2',
         'valor_fatura' => 'decimal:2',
         'potencia_cc' => 'decimal:2',
+        'potencia_ca'=> 'decimal:2',
         'fator_capacidade' => 'decimal:2',
         'capacidade_calculada' => 'decimal:2',
         

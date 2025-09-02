@@ -192,6 +192,7 @@ class UnidadeConsumidoraController extends Controller
                 $baseRules += [
                     'nome_usina' => 'required|string|max:200',
                     'potencia_cc' => 'required|numeric|min:0',
+                    'potencia_ca' => 'required|numeric|min:0',
                     'fator_capacidade' => 'required|numeric|min:0|max:100',
                     'localizacao' => 'nullable|string|max:300',
                     'observacoes_ug' => 'nullable|string|max:1000'
@@ -235,6 +236,7 @@ class UnidadeConsumidoraController extends Controller
                 $dadosUnidade += [
                     'nome_usina' => trim($request->nome_usina),
                     'potencia_cc' => $request->potencia_cc,
+                    'potencia_ca' => $request->potencia_ca,
                     'fator_capacidade' => $request->fator_capacidade,
                     'capacidade_calculada' => 720 * $request->potencia_cc * ($request->fator_capacidade),
                     'localizacao' => $request->localizacao ? trim($request->localizacao) : null,
@@ -396,7 +398,7 @@ class UnidadeConsumidoraController extends Controller
 
             $dadosAtualizacao = $request->only([
                 'apelido', 'consumo_medio', 'distribuidora', 'ligacao',
-                'nome_usina', 'potencia_cc', 'fator_capacidade', 
+                'nome_usina', 'potencia_cc', 'potencia_ca','fator_capacidade', 
                 'localizacao', 'observacoes_ug', 'nexus_clube', 
                 'nexus_cativo', 'service', 'project'
             ]);
