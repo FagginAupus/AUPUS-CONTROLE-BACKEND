@@ -435,4 +435,52 @@ class AuthController extends Controller
             ], 500);
         }
     }
+    public function extendSession(): JsonResponse
+    {
+        try {
+            $newToken = JWTAuth::refresh();
+            $user = JWTAuth::user();
+            
+            return response()->json([
+                'success' => true,
+                'token' => $newToken,
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->nome,
+                    'email' => $user->email,
+                    'role' => $user->role
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao estender sessão'
+            ], 401);
+        }
+    }
+
+    /**
+     * Verificar status da sessão
+     */
+    public function sessionStatus(): JsonResponse
+    {
+        try {
+            $payload = JWTAuth::getPayload();
+            $exp = $payload->get('exp');
+            $now = time();
+            $timeLeft = $exp - $now;
+            
+            return response()->json([
+                'success' => true,
+                'expires_in' => $timeLeft,
+                'expires_at' => date('Y-m-d H:i:s', $exp),
+                'warning' => $timeLeft < 1800 // Menos de 30 minutos
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao verificar sessão'
+            ], 401);
+        }
+    }
 }

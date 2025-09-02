@@ -76,5 +76,6 @@ class Kernel extends HttpKernel
         'rate.limit' => \App\Http\Middleware\ApiRateLimit::class,
         'jwt.auth' => \Tymon\JWTAuth\Http\Middleware\Authenticate::class,
         'jwt.refresh' => \Tymon\JWTAuth\Http\Middleware\RefreshToken::class,
+        'jwt.auto.refresh' => \App\Http\Middleware\JwtAutoRefresh::class,
     ];
 }

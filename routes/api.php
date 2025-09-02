@@ -67,7 +67,7 @@ Route::prefix('auth')->group(function () {
 // ==========================================
 // ROTAS PROTEGIDAS (REQUEREM AUTENTICAÇÃO JWT)
 // ==========================================
-Route::middleware(['auth:api', 'jwt.auto.refresh'])->group(function () {
+Route::middleware('auth:api')->group(function () {
     
     // ==========================================
     // AUTH - Autenticação
