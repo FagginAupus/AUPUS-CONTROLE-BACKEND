@@ -239,8 +239,8 @@ Route::middleware('auth:api')->group(function () {
         // ✅ ADICIONAR ESTAS DUAS LINHAS:
         Route::post('extend-session', [AuthController::class, 'extendSession']);
         Route::get('session-status', [AuthController::class, 'sessionStatus']);
-        Route::get('/auth/check-default-password', [AuthController::class, 'checkDefaultPassword']);
-        Route::post('/auth/change-default-password', [AuthController::class, 'changeDefaultPassword']);
+        Route::get('check-default-password', [AuthController::class, 'checkDefaultPassword']);
+        Route::post('change-default-password', [AuthController::class, 'changeDefaultPassword']);
     });
 
     // ==========================================
