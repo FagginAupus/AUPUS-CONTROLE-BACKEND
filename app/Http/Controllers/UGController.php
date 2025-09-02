@@ -241,7 +241,6 @@ class UGController extends Controller
                 'estrutura_tarifaria' => 'Convencional',
                 'desconto_fatura' => 0,
                 'desconto_bandeira' => 0,
-                // REMOVIDO: ucs_atribuidas e media_consumo_atribuido
             ]);
 
             \Log::info('✅ UG criada com sucesso', [

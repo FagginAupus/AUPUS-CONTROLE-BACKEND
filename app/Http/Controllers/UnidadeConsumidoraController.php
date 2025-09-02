@@ -221,7 +221,7 @@ class UnidadeConsumidoraController extends Controller
                 'distribuidora' => $request->distribuidora ? trim($request->distribuidora) : 'CEMIG',
                 'ligacao' => $request->ligacao ?: 'MONOFÁSICA',
                 'tipo' => $isUG ? 'UG' : 'UC',
-                'gerador' => $isUG, // CORRIGIDO: usar 'gerador' ao invés de 'is_ug'
+                'gerador' => $isUG,
                 
                 // Modalidades
                 'nexus_clube' => $isUG ? true : $request->boolean('nexus_clube'), // CORRIGIDO: Se for UG, sempre true
@@ -239,8 +239,6 @@ class UnidadeConsumidoraController extends Controller
                     'capacidade_calculada' => 720 * $request->potencia_cc * ($request->fator_capacidade),
                     'localizacao' => $request->localizacao ? trim($request->localizacao) : null,
                     'observacoes_ug' => $request->observacoes_ug ? trim($request->observacoes_ug) : null,
-                    'ucs_atribuidas' => 0,
-                    'media_consumo_atribuido' => 0
                 ];
             }
 
@@ -705,8 +703,6 @@ class UnidadeConsumidoraController extends Controller
             'capacidade' => (float) $ug->capacidade_calculada,
             'localizacao' => $ug->localizacao,
             'observacoes' => $ug->observacoes_ug,
-            'ucsAtribuidas' => (int) $ug->ucs_atribuidas,
-            'mediaConsumoAtribuido' => (float) $ug->media_consumo_atribuido,
             'nexusClube' => (bool) $ug->nexus_clube,
             'nexusCativo' => (bool) $ug->nexus_cativo,
             'service' => (bool) $ug->service,

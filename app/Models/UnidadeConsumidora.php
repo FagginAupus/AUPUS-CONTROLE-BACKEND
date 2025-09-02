@@ -72,8 +72,6 @@ class UnidadeConsumidora extends Model
         'capacidade_calculada',
         'localizacao',
         'observacoes_ug',
-        'ucs_atribuidas',
-        'media_consumo_atribuido',
         'deleted_by' // ADICIONADO: para soft delete
     ];
 
@@ -103,13 +101,11 @@ class UnidadeConsumidora extends Model
         'potencia_cc' => 'decimal:2',
         'fator_capacidade' => 'decimal:2',
         'capacidade_calculada' => 'decimal:2',
-        'media_consumo_atribuido' => 'decimal:2',
         
         // Integers
         'numero_cliente' => 'integer',
         'numero_unidade' => 'integer',
         'tensao_nominal' => 'integer',
-        'ucs_atribuidas' => 'integer',
         
         // Dates
         'vencimento_contrato' => 'date',
@@ -120,32 +116,25 @@ class UnidadeConsumidora extends Model
 
     protected $attributes = [
         'mesmo_titular' => true,
-        'gerador' => false, // MANTIDO: valor padrão correto
+        'gerador' => false, 
         'service' => false,
         'project' => false,
-        'nexus_clube' => false, // ADICIONADO
-        'nexus_cativo' => false, // ADICIONADO
+        'nexus_clube' => false, 
+        'nexus_cativo' => false, 
         'proprietario' => true,
         'irrigante' => false,
-        // REMOVIDO: 'is_ug' => false, // Campo removido
         'tensao_nominal' => 220,
         'grupo' => 'B',
         'classe' => 'Residencial',
         'subclasse' => 'Residencial',
         'tipo_conexao' => 'Baixa Tensão',
         'estrutura_tarifaria' => 'Convencional',
-        'ucs_atribuidas' => 0,
-        'media_consumo_atribuido' => 0,
     ];
 
     protected $hidden = [
         'deleted_at',
         'deleted_by',
     ];
-
-    // ========================================
-    // RELACIONAMENTOS
-    // ========================================
 
     /**
      * Relacionamento com Usuario (dono da unidade)
@@ -365,8 +354,6 @@ class UnidadeConsumidora extends Model
             'potencia_cc' => $this->potencia_cc,
             'fator_capacidade' => $this->fator_capacidade,
             'capacidade_calculada' => $this->capacidade_calculada,
-            'ucs_atribuidas' => $this->ucs_atribuidas,
-            'media_consumo_atribuido' => $this->media_consumo_atribuido,
             'capacidade_formatada' => $this->capacidade_formatada,
             'potencia_formatada' => $this->potencia_formatada,
         ];
