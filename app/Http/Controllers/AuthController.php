@@ -183,6 +183,91 @@ class AuthController extends Controller
     }
 
     /**
+     * Verificar se usuário tem senha padrão
+     */
+    public function checkDefaultPassword(): JsonResponse
+    {
+        $usuario = JWTAuth::user();
+
+        if (!$usuario) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
+        }
+
+        // Verificar se a senha é 00000000
+        $hasDefaultPassword = Hash::check('00000000', $usuario->senha);
+
+        return response()->json([
+            'success' => true,
+            'has_default_password' => $hasDefaultPassword
+        ]);
+    }
+
+    /**
+     * Trocar senha padrão (sem verificar senha atual)
+     */
+    public function changeDefaultPassword(Request $request): JsonResponse
+    {
+        $usuario = JWTAuth::user();
+
+        if (!$usuario) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'new_password' => 'required|string|min:6|confirmed'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dados inválidos',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        // Verificar se realmente tem senha padrão
+        if (!Hash::check('00000000', $usuario->senha)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Esta ação é apenas para senhas padrão'
+            ], 403);
+        }
+
+        try {
+            $usuario->update([
+                'senha' => $request->new_password
+            ]);
+
+            Log::info('🔐 Senha padrão alterada', [
+                'user_id' => $usuario->id,
+                'email' => $usuario->email
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Senha alterada com sucesso'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao alterar senha padrão', [
+                'user_id' => $usuario->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao alterar senha'
+            ], 500);
+        }
+    }
+    
+    /**
      * Logout do usuário
      */
     public function logout(): JsonResponse
