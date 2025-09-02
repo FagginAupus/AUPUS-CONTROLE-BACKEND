@@ -85,7 +85,7 @@ class UGController extends Controller
 
             // Query simplificada sem as colunas redundantes
             $query = "
-                SELECT id, nome_usina, numero_unidade, potencia_cc, fator_capacidade, 
+                SELECT id, nome_usina, numero_unidade, potencia_cc, potencia_ca, fator_capacidade, 
                     capacidade_calculada, localizacao, observacoes_ug,
                     created_at, updated_at
                 FROM unidades_consumidoras 
@@ -122,6 +122,7 @@ class UGController extends Controller
                     'nomeUsina' => $ug->nome_usina, 
                     'numeroUnidade' => $ug->numero_unidade,
                     'potenciaCC' => (float) $ug->potencia_cc,
+                    'potenciaCA' => (float) ($ug->potencia_ca ?? 0),
                     'fatorCapacidade' => (float) ($ug->fator_capacidade * 100),
                     'capacidade' => (float) $ug->capacidade_calculada,
                     'localizacao' => $ug->localizacao,
@@ -321,6 +322,7 @@ class UGController extends Controller
                 'nomeUsina' => $ug->nome_usina,
                 'numeroUnidade' => $ug->numero_unidade,
                 'potenciaCC' => (float) $ug->potencia_cc,
+                'potenciaCA' => (float) ($ug->potencia_ca ?? 0),
                 'fatorCapacidade' => (float) ($ug->fator_capacidade * 100),
                 'capacidade' => (float) $ug->capacidade_calculada,
                 'localizacao' => $ug->localizacao,

@@ -701,6 +701,7 @@ class UnidadeConsumidoraController extends Controller
             'apelido' => $ug->apelido,
             'numeroUnidade' => $ug->numero_unidade,
             'potenciaCC' => (float) $ug->potencia_cc,
+            'potenciaCA' => (float) ($ug->potencia_ca ?? 0),
             'fatorCapacidade' => (float) $ug->fator_capacidade,
             'capacidade' => (float) $ug->capacidade_calculada,
             'localizacao' => $ug->localizacao,
