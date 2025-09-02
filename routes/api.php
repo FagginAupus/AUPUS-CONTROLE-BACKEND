@@ -56,6 +56,164 @@ Route::get('test-db', function () {
     }
 });
 
+// ✅ ADICIONE ESTA ROTA DE DEBUG AQUI:
+Route::get('debug-session', function (Request $request) {
+    \Log::info('=== DEBUG SESSION INICIADO ===');
+    
+    try {
+        // 1. Verificar cabeçalho Authorization
+        $authHeader = $request->header('Authorization');
+        \Log::info('Authorization header:', ['header' => $authHeader]);
+        
+        if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cabeçalho Authorization não encontrado ou inválido',
+                'debug' => [
+                    'auth_header' => $authHeader,
+                    'all_headers' => $request->headers->all()
+                ]
+            ], 401);
+        }
+        
+        $token = substr($authHeader, 7);
+        \Log::info('Token extraído:', [
+            'token_length' => strlen($token),
+            'token_start' => substr($token, 0, 20),
+            'token_end' => substr($token, -20)
+        ]);
+        
+        // 2. Verificar configurações JWT
+        \Log::info('Configurações JWT:', [
+            'JWT_TTL' => config('jwt.ttl'),
+            'JWT_REFRESH_TTL' => config('jwt.refresh_ttl'),
+            'JWT_ALGO' => config('jwt.algo'),
+            'JWT_BLACKLIST_ENABLED' => config('jwt.blacklist_enabled'),
+            'JWT_BLACKLIST_GRACE_PERIOD' => config('jwt.blacklist_grace_period'),
+            'JWT_SECRET' => substr(config('jwt.secret'), 0, 10) . '...'
+        ]);
+        
+        // 3. Tentar parsear token manualmente
+        try {
+            $payload = JWTAuth::getJWTProvider()->decode($token);
+            \Log::info('Token decodificado com sucesso:', [
+                'payload' => $payload->toArray()
+            ]);
+            
+            $exp = $payload->get('exp');
+            $iat = $payload->get('iat');
+            $now = time();
+            
+            \Log::info('Análise de tempo do token:', [
+                'issued_at' => $iat,
+                'expires_at' => $exp,
+                'current_time' => $now,
+                'token_age_seconds' => $now - $iat,
+                'time_until_expiry' => $exp - $now,
+                'is_expired' => $now >= $exp,
+                'issued_at_formatted' => date('Y-m-d H:i:s', $iat),
+                'expires_at_formatted' => date('Y-m-d H:i:s', $exp),
+                'current_time_formatted' => date('Y-m-d H:i:s', $now)
+            ]);
+            
+        } catch (\Exception $decodeError) {
+            \Log::error('Erro ao decodificar token:', [
+                'error' => $decodeError->getMessage(),
+                'token_valid' => false
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Token mal formado',
+                'debug' => [
+                    'decode_error' => $decodeError->getMessage(),
+                    'token_length' => strlen($token)
+                ]
+            ], 401);
+        }
+        
+        // 4. Tentar usar JWTAuth::getPayload()
+        try {
+            $jwtPayload = JWTAuth::getPayload();
+            \Log::info('JWTAuth::getPayload() funcionou:', [
+                'payload_data' => $jwtPayload->toArray()
+            ]);
+        } catch (\Tymon\JWTAuth\Exceptions\TokenExpiredException $e) {
+            \Log::warning('Token expirado via JWTAuth:', [
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Token expirado detectado pelo JWTAuth',
+                'error_type' => 'token_expired',
+                'requires_login' => true,
+                'debug' => [
+                    'exception' => $e->getMessage(),
+                    'jwt_method' => 'JWTAuth::getPayload()'
+                ]
+            ], 401);
+        } catch (\Tymon\JWTAuth\Exceptions\TokenInvalidException $e) {
+            \Log::warning('Token inválido via JWTAuth:', [
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Token inválido detectado pelo JWTAuth',
+                'error_type' => 'token_invalid',
+                'requires_login' => true,
+                'debug' => [
+                    'exception' => $e->getMessage(),
+                    'jwt_method' => 'JWTAuth::getPayload()'
+                ]
+            ], 401);
+        } catch (\Exception $jwtError) {
+            \Log::error('Erro genérico no JWTAuth:', [
+                'error' => $jwtError->getMessage(),
+                'class' => get_class($jwtError)
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro de JWT genérico',
+                'error_type' => 'jwt_error',
+                'requires_login' => true,
+                'debug' => [
+                    'exception' => $jwtError->getMessage(),
+                    'exception_class' => get_class($jwtError)
+                ]
+            ], 401);
+        }
+        
+        // 5. Se chegou até aqui, token está válido
+        return response()->json([
+            'success' => true,
+            'message' => 'Token está válido!',
+            'debug' => [
+                'token_age_seconds' => time() - $iat,
+                'time_until_expiry_seconds' => $exp - time(),
+                'time_until_expiry_minutes' => round(($exp - time()) / 60, 2),
+                'jwt_method_works' => true
+            ]
+        ]);
+        
+    } catch (\Exception $e) {
+        \Log::error('Erro geral no debug:', [
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Erro interno no debug',
+            'debug' => [
+                'error' => $e->getMessage()
+            ]
+        ], 500);
+    }
+});
+
 // ==========================================
 // ROTAS PÚBLICAS (SEM AUTENTICAÇÃO)
 // ==========================================

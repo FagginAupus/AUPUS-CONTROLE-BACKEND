@@ -465,22 +465,101 @@ class AuthController extends Controller
     public function sessionStatus(): JsonResponse
     {
         try {
+            \Log::info('=== Session Status Check INICIADO ===');
+            
+            // MÉTODO CORRETO: Usar JWTAuth::parseToken()->authenticate()
+            $user = JWTAuth::parseToken()->authenticate();
+            
+            if (!$user) {
+                \Log::warning('Usuário não encontrado após autenticação');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não encontrado',
+                    'error_type' => 'user_not_found',
+                    'requires_login' => true
+                ], 401);
+            }
+            
+            \Log::info('Usuário autenticado com sucesso:', [
+                'user_id' => $user->id,
+                'user_name' => $user->nome
+            ]);
+            
+            // Obter payload para informações de tempo
             $payload = JWTAuth::getPayload();
             $exp = $payload->get('exp');
+            $iat = $payload->get('iat');
             $now = time();
             $timeLeft = $exp - $now;
             
+            \Log::info('Análise de tempo do token:', [
+                'issued_at' => date('Y-m-d H:i:s', $iat),
+                'expires_at' => date('Y-m-d H:i:s', $exp),
+                'current_time' => date('Y-m-d H:i:s', $now),
+                'time_left_seconds' => $timeLeft,
+                'time_left_minutes' => round($timeLeft / 60, 2),
+                'is_warning_zone' => $timeLeft < 1800
+            ]);
+            
+            // Token válido
             return response()->json([
                 'success' => true,
                 'expires_in' => $timeLeft,
                 'expires_at' => date('Y-m-d H:i:s', $exp),
-                'warning' => $timeLeft < 1800 // Menos de 30 minutos
+                'warning' => $timeLeft < 1800, // Menos de 30 minutos
+                'user_id' => $user->id,
+                'time_left_minutes' => round($timeLeft / 60, 2)
             ]);
-        } catch (\Exception $e) {
+            
+        } catch (\Tymon\JWTAuth\Exceptions\TokenExpiredException $e) {
+            \Log::warning('Token expirado detectado:', [
+                'exception' => $e->getMessage()
+            ]);
+            
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao verificar sessão'
+                'message' => 'Token expirado',
+                'error_type' => 'token_expired',
+                'requires_login' => true
             ], 401);
+            
+        } catch (\Tymon\JWTAuth\Exceptions\TokenInvalidException $e) {
+            \Log::warning('Token inválido detectado:', [
+                'exception' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Token inválido',
+                'error_type' => 'token_invalid',
+                'requires_login' => true
+            ], 401);
+            
+        } catch (\Tymon\JWTAuth\Exceptions\JWTException $e) {
+            \Log::error('Erro JWT genérico:', [
+                'exception' => $e->getMessage(),
+                'class' => get_class($e)
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro de autenticação',
+                'error_type' => 'jwt_error',
+                'requires_login' => true
+            ], 401);
+            
+        } catch (\Exception $e) {
+            \Log::error('Erro inesperado na verificação de sessão:', [
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno na verificação de sessão',
+                'error_type' => 'internal_error',
+                'requires_login' => true
+            ], 500);
         }
     }
 }
