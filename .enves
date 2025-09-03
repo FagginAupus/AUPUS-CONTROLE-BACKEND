@@ -1,0 +1,17 @@
+APP_NAME="Aupus Energia API - STAGING"
+APP_ENV=staging
+APP_DEBUG=true
+APP_KEY=base64:XPoscvH6lFHPafCI5Kur5h8rw8z7agJY0JJ8vKwxW3Q=
+APP_URL=https://staging-api.aupusenergia.com.br
+
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_DATABASE=aupus_staging
+DB_USERNAME=aupus_staging
+DB_PASSWORD=AupusStaging2024
+
+CACHE_STORE=redis
+SESSION_DRIVER=redis
+QUEUE_CONNECTION=database
+
+JWT_SECRET=tueXe8vYPFFxP7Gp8QFzDQ9lOVEkgCezXbxlApSpKqcnzE6VzFCEe0R45DGuBT6Q
