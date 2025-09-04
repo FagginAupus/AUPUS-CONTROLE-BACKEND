@@ -264,7 +264,7 @@ class ControleController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'status_troca' => 'required|in:Aguardando,Em andamento,Finalizado',
+            'status_troca' => 'required|in:Esteira,Em andamento,Associado',
             'data_titularidade' => 'required|date|before_or_equal:today'
         ]);
 
@@ -295,12 +295,12 @@ class ControleController extends Controller
                 return response()->json(['success' => false, 'message' => 'Controle não encontrado'], 404);
             }
 
-            // Verificar se está tentando SAIR de "Finalizado" com UG atribuída
+            // Verificar se está tentando SAIR de "Associado" com UG atribuída
             $statusAnterior = $controle->status_troca;
             $novoStatus = $request->status_troca;
             $ugAtual = $controle->ug_id;
 
-            if ($statusAnterior === 'Finalizado' && $novoStatus !== 'Finalizado' && $ugAtual) {
+            if ($statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual) {
                 // Desatribuir UG automaticamente
                 Log::info('Desatribuindo UG por mudança de status', [
                     'controle_id' => $id,
@@ -330,7 +330,7 @@ class ControleController extends Controller
 
             DB::commit();
 
-            $mensagem = $statusAnterior === 'Finalizado' && $novoStatus !== 'Finalizado' && $ugAtual
+            $mensagem = $statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual
                 ? "Status atualizado e UG '{$controle->ug_nome}' foi desatribuída"
                 : 'Status de troca atualizado com sucesso';
 
@@ -340,7 +340,7 @@ class ControleController extends Controller
                 'data' => [
                     'status_troca' => $novoStatus,
                     'data_titularidade' => $request->data_titularidade,
-                    'ug_desatribuida' => $statusAnterior === 'Finalizado' && $novoStatus !== 'Finalizado' && $ugAtual
+                    'ug_desatribuida' => $statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual
                 ]
             ]);
 
@@ -516,10 +516,10 @@ class ControleController extends Controller
             }
 
             // Verificar se status permite atribuição
-            if ($controle->status_troca !== 'Finalizado') {
+            if ($controle->status_troca !== 'Associado') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Status deve ser "Finalizado" para atribuir UG'
+                    'message' => 'Status deve ser "Associado" para atribuir UG'
                 ], 400);
             }
 
