@@ -167,8 +167,238 @@ class PropostaController extends Controller
         }
     }
 
+    private function validarUcsDisponiveis(array $ucsArray): array
+    {
+        $ucsComPropostaAtiva = [];
+        
+        foreach ($ucsArray as $uc) {
+            $numeroUC = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
+            
+            if (empty($numeroUC)) {
+                continue; // Pular UCs sem número
+            }
+            
+            // ✅ VERSÃO POSTGRESQL - Usar jsonb_array_elements()
+            $propostasAtivas = DB::select("
+                SELECT DISTINCT 
+                    p.id, 
+                    p.numero_proposta, 
+                    p.nome_cliente,
+                    uc_data->>'status' as status_uc
+                FROM propostas p,
+                jsonb_array_elements(p.unidades_consumidoras::jsonb) as uc_data
+                WHERE p.deleted_at IS NULL
+                AND (
+                    uc_data->>'numero_unidade' = ? OR 
+                    uc_data->>'numeroUC' = ?
+                )
+                AND uc_data->>'status' NOT IN ('Cancelada', 'Perdida', 'Recusada')
+            ", [$numeroUC, $numeroUC]);
+            
+            if (!empty($propostasAtivas)) {
+                foreach ($propostasAtivas as $proposta) {
+                    $ucsComPropostaAtiva[] = [
+                        'numero_uc' => $numeroUC,
+                        'apelido' => $uc['apelido'] ?? "UC {$numeroUC}",
+                        'proposta_numero' => $proposta->numero_proposta,
+                        'proposta_cliente' => $proposta->nome_cliente,
+                        'status_atual' => $proposta->status_uc ?? 'Aguardando'
+                    ];
+                }
+            }
+        }
+        
+        return $ucsComPropostaAtiva;
+    }
+
+    private function validarUcsDisponiveisParaEdicao(array $ucsArray, string $propostaId): array
+    {
+        $ucsComPropostaAtiva = [];
+        
+        foreach ($ucsArray as $uc) {
+            $numeroUC = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
+            
+            if (empty($numeroUC)) {
+                continue;
+            }
+            
+            // ✅ VERSÃO POSTGRESQL - EXCLUIR PROPOSTA ATUAL
+            $propostasAtivas = DB::select("
+                SELECT DISTINCT 
+                    p.id, 
+                    p.numero_proposta, 
+                    p.nome_cliente,
+                    uc_data->>'status' as status_uc
+                FROM propostas p,
+                jsonb_array_elements(p.unidades_consumidoras::jsonb) as uc_data
+                WHERE p.deleted_at IS NULL
+                AND p.id != ?
+                AND (
+                    uc_data->>'numero_unidade' = ? OR 
+                    uc_data->>'numeroUC' = ?
+                )
+                AND uc_data->>'status' NOT IN ('Cancelada', 'Perdida', 'Recusada')
+            ", [$propostaId, $numeroUC, $numeroUC]);
+            
+            if (!empty($propostasAtivas)) {
+                foreach ($propostasAtivas as $proposta) {
+                    $ucsComPropostaAtiva[] = [
+                        'numero_uc' => $numeroUC,
+                        'apelido' => $uc['apelido'] ?? "UC {$numeroUC}",
+                        'proposta_numero' => $proposta->numero_proposta,
+                        'proposta_cliente' => $proposta->nome_cliente,
+                        'status_atual' => $proposta->status_uc ?? 'Aguardando'
+                    ];
+                }
+            }
+        }
+        
+        return $ucsComPropostaAtiva;
+    }
+
     /**
-     * ✅ CRIAR NOVA PROPOSTA
+     * ✅ ENDPOINT DE VERIFICAÇÃO INDIVIDUAL (PostgreSQL)
+     */
+    public function verificarDisponibilidadeUC(string $numero): JsonResponse
+    {
+        try {
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            // ✅ VERIFICAR SE A UC TEM PROPOSTAS ATIVAS (PostgreSQL)
+            $propostasAtivas = DB::select("
+                SELECT DISTINCT 
+                    p.id, 
+                    p.numero_proposta, 
+                    p.nome_cliente,
+                    uc_data->>'status' as status_uc
+                FROM propostas p,
+                jsonb_array_elements(p.unidades_consumidoras::jsonb) as uc_data
+                WHERE p.deleted_at IS NULL
+                AND (
+                    uc_data->>'numero_unidade' = ? OR 
+                    uc_data->>'numeroUC' = ?
+                )
+                AND uc_data->>'status' NOT IN ('Cancelada', 'Perdida', 'Recusada')
+            ", [$numero, $numero]);
+
+            $disponivel = empty($propostasAtivas);
+
+            return response()->json([
+                'success' => true,
+                'disponivel' => $disponivel,
+                'numero_uc' => $numero,
+                'propostas_ativas' => array_map(function($proposta) {
+                    return [
+                        'numero_proposta' => $proposta->numero_proposta,
+                        'nome_cliente' => $proposta->nome_cliente,
+                        'status' => $proposta->status_uc ?? 'Aguardando'
+                    ];
+                }, $propostasAtivas)
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao verificar disponibilidade da UC', [
+                'numero_uc' => $numero,
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id ?? 'desconhecido'
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ VERSÃO ALTERNATIVA MAIS SIMPLES (CASO A ANTERIOR DÊ ERRO)
+     * Use esta se a consulta jsonb_array_elements ainda der problemas
+     */
+    private function validarUcsDisponiveisSimples(array $ucsArray): array
+    {
+        $ucsComPropostaAtiva = [];
+        
+        foreach ($ucsArray as $uc) {
+            $numeroUC = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
+            
+            if (empty($numeroUC)) {
+                continue;
+            }
+            
+            // ✅ BUSCAR TODAS AS PROPOSTAS E FILTRAR NO PHP
+            $propostas = DB::select("
+                SELECT id, numero_proposta, nome_cliente, unidades_consumidoras
+                FROM propostas 
+                WHERE deleted_at IS NULL
+            ");
+            
+            foreach ($propostas as $proposta) {
+                $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras, true) ?? [];
+                
+                foreach ($unidadesConsumidoras as $ucProposta) {
+                    $numeroUCProposta = $ucProposta['numero_unidade'] ?? $ucProposta['numeroUC'] ?? null;
+                    $statusUC = $ucProposta['status'] ?? 'Aguardando';
+                    
+                    // Verificar se é a UC procurada e se não está cancelada
+                    if ($numeroUCProposta == $numeroUC && 
+                        !in_array($statusUC, ['Cancelada', 'Perdida', 'Recusada'])) {
+                        
+                        $ucsComPropostaAtiva[] = [
+                            'numero_uc' => $numeroUC,
+                            'apelido' => $uc['apelido'] ?? "UC {$numeroUC}",
+                            'proposta_numero' => $proposta->numero_proposta,
+                            'proposta_cliente' => $proposta->nome_cliente,
+                            'status_atual' => $statusUC
+                        ];
+                        
+                        break 2; // Sair dos dois loops - UC já encontrada
+                    }
+                }
+            }
+        }
+        
+        return $ucsComPropostaAtiva;
+    }
+
+    /**
+     * ✅ VERSÃO COM VERIFICAÇÃO DE COMPATIBILIDADE DO BANCO
+     * Use esta no método store() para detectar automaticamente o banco
+     */
+    private function validarUcsDisponiveisCompativel(array $ucsArray): array
+    {
+        try {
+            // Tentar verificar se é PostgreSQL
+            $isPostgreSQL = DB::connection()->getDriverName() === 'pgsql';
+            
+            if ($isPostgreSQL) {
+                // Tentar a versão PostgreSQL otimizada
+                return $this->validarUcsDisponiveis($ucsArray);
+            } else {
+                // Usar versão simples para outros bancos
+                return $this->validarUcsDisponiveisSimples($ucsArray);
+            }
+            
+        } catch (\Exception $e) {
+            Log::warning('Erro na validação otimizada, usando versão simples', [
+                'error' => $e->getMessage()
+            ]);
+            
+            // Fallback para versão simples
+            return $this->validarUcsDisponiveisSimples($ucsArray);
+        }
+    }
+
+
+    /**
+     * ✅ MODIFICAR O MÉTODO store() EXISTENTE
+     * Adicionar esta validação ANTES de inserir no banco
      */
     public function store(Request $request): JsonResponse
     {
@@ -233,7 +463,43 @@ class PropostaController extends Controller
             } elseif ($request->has('unidadesConsumidoras') && is_array($request->unidadesConsumidoras)) {
                 $ucArray = $request->unidadesConsumidoras;
             }
-
+            
+            if (!empty($ucArray)) {
+                // ✅ USAR VERSÃO COMPATÍVEL
+                $ucsComPropostaAtiva = $this->validarUcsDisponiveisCompativel($ucArray);
+                
+                if (!empty($ucsComPropostaAtiva)) {
+                    // Montar mensagem de erro detalhada
+                    $mensagemErro = "As seguintes unidades já possuem propostas ativas e não podem ser incluídas:\n\n";
+                    
+                    foreach ($ucsComPropostaAtiva as $uc) {
+                        $mensagemErro .= "• UC {$uc['numero_uc']} ({$uc['apelido']}) - ";
+                        $mensagemErro .= "Proposta {$uc['proposta_numero']} para {$uc['proposta_cliente']} ";
+                        $mensagemErro .= "com status '{$uc['status_atual']}'\n";
+                    }
+                    
+                    $mensagemErro .= "\nSomente unidades sem propostas ativas ou com propostas canceladas podem ser incluídas.";
+                    
+                    return response()->json([
+                        'success' => false,
+                        'message' => $mensagemErro,
+                        'error_type' => 'ucs_com_proposta_ativa',
+                        'ucs_bloqueadas' => $ucsComPropostaAtiva
+                    ], 422);
+                }
+                
+                // ✅ Se chegou aqui, todas as UCs estão disponíveis
+                $ucArray = array_map(function($uc) {
+                    $uc['status'] = $uc['status'] ?? 'Aguardando';
+                    return $uc;
+                }, $ucArray);
+                
+                $ucJson = json_encode($ucArray, JSON_UNESCAPED_UNICODE);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    throw new \Exception('Erro ao converter UCs para JSON: ' . json_last_error_msg());
+                }
+            }
+            
             if (!empty($ucArray)) {
                 $ucArray = array_map(function($uc) {
                     $uc['status'] = $uc['status'] ?? 'Aguardando';
