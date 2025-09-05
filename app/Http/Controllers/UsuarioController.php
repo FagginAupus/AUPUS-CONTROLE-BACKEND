@@ -576,6 +576,95 @@ class UsuarioController extends Controller implements HasMiddleware
         }
     }
 
+    public function getFamiliaConsultor(string $consultorId): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+
+        // Apenas admin pode acessar
+        if (!$currentUser->isAdmin()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Acesso negado'
+            ], 403);
+        }
+
+        try {
+            $consultor = Usuario::where('id', $consultorId)
+                            ->where('role', 'consultor')
+                            ->where('is_active', true)
+                            ->firstOrFail();
+
+            // Buscar subordinados diretos
+            $subordinadosDiretos = Usuario::where('manager_id', $consultor->id)
+                                    ->where('is_active', true)
+                                    ->with('subordinados')
+                                    ->get();
+
+            // Separar gerentes e vendedores diretos
+            $gerentes = $subordinadosDiretos->where('role', 'gerente');
+            $vendedoresDiretos = $subordinadosDiretos->where('role', 'vendedor');
+
+            // Buscar vendedores indiretos (dos gerentes)
+            $vendedoresIndiretos = collect();
+            foreach ($gerentes as $gerente) {
+                $vendedoresDoGerente = Usuario::where('manager_id', $gerente->id)
+                                            ->where('role', 'vendedor')
+                                            ->where('is_active', true)
+                                            ->get()
+                                            ->map(function($vendedor) use ($gerente) {
+                                                $data = $vendedor->toArray();
+                                                $data['manager_name'] = $gerente->nome;
+                                                $data['manager_role'] = $gerente->role;
+                                                return $data;
+                                            });
+                
+                $vendedoresIndiretos = $vendedoresIndiretos->merge($vendedoresDoGerente);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'consultor' => [
+                        'id' => $consultor->id,
+                        'name' => $consultor->nome,
+                        'email' => $consultor->email,
+                        'role' => $consultor->role,
+                        'created_at' => $consultor->created_at,
+                        'is_active' => $consultor->is_active,
+                        'telefone' => $consultor->telefone
+                    ],
+                    'gerentes' => $gerentes->map(function($gerente) {
+                        return [
+                            'id' => $gerente->id,
+                            'name' => $gerente->nome,
+                            'email' => $gerente->email,
+                            'role' => $gerente->role,
+                            'telefone' => $gerente->telefone,
+                            'manager_id' => $gerente->manager_id
+                        ];
+                    })->values(),
+                    'vendedores_diretos' => $vendedoresDiretos->map(function($vendedor) {
+                        return [
+                            'id' => $vendedor->id,
+                            'name' => $vendedor->nome,
+                            'email' => $vendedor->email,
+                            'role' => $vendedor->role,
+                            'telefone' => $vendedor->telefone,
+                            'manager_id' => $vendedor->manager_id
+                        ];
+                    })->values(),
+                    'vendedores_indiretos' => $vendedoresIndiretos->values()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao buscar família do consultor: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     // Métodos auxiliares para verificação de permissões
     private function canViewUser(Usuario $currentUser, Usuario $targetUser): bool
     {

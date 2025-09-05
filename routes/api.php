@@ -249,8 +249,9 @@ Route::middleware('auth:api')->group(function () {
     Route::prefix('usuarios')->group(function () {
         Route::get('/', [UsuarioController::class, 'index']);
         Route::post('/', [UsuarioController::class, 'store']);
-        Route::get('equipe', [UsuarioController::class, 'getTeam']); // ← MANTER
-        Route::get('team', [UsuarioController::class, 'getTeam']); // ← MANTER
+        Route::get('equipe', [UsuarioController::class, 'getTeam']); 
+        Route::get('team', [UsuarioController::class, 'getTeam']); 
+        Route::get('{id}/familia', [UsuarioController::class, 'getFamiliaConsultor']);
         Route::get('statistics', [UsuarioController::class, 'statistics']);
         Route::get('{id}', [UsuarioController::class, 'show']);
         Route::put('{id}', [UsuarioController::class, 'update']);
