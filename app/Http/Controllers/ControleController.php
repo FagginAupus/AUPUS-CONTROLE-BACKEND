@@ -76,7 +76,7 @@ class ControleController extends Controller
                     
                 FROM controle_clube cc
                 LEFT JOIN propostas p ON cc.proposta_id = p.id
-                LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
+                LEFT JOIN usuarios u_consultor ON (p.consultor_id = u_consultor.id OR p.usuario_id = u_consultor.id)
                 LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
                 LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
                 WHERE cc.deleted_at IS NULL
@@ -167,7 +167,7 @@ class ControleController extends Controller
                     // Dados da proposta
                     'numeroProposta' => $controle->numero_proposta ?? 'N/A',
                     'nomeCliente' => $controle->nome_cliente ?? 'N/A',
-                    'consultor' => $controle->consultor ?? 'N/A',
+                    'consultor' => $controle->consultor ?? 'Sem consultor',
                     'dataProposta' => $controle->data_proposta,
                     
                     // Dados da UC
