@@ -283,7 +283,7 @@ class UsuarioController extends Controller implements HasMiddleware
 
         try {
             $usuario = Usuario::with(['manager', 'subordinados', 'propostas', 'unidadesConsumidoras'])
-                             ->findOrFail($id);
+                            ->findOrFail($id);
 
             // Verificar se pode visualizar este usuário
             if (!$this->canViewUser($currentUser, $usuario)) {
@@ -293,30 +293,25 @@ class UsuarioController extends Controller implements HasMiddleware
                 ], 403);
             }
 
-            // Estatísticas do usuário
-            $estatisticas = [
-                'propostas_count' => $usuario->propostas()->count(),
-                'propostas_fechadas' => $usuario->propostas()->fechado()->count(),
-                'ucs_count' => $usuario->unidadesConsumidoras()->UCs()->count(),
-                'ugs_count' => $usuario->unidadesConsumidoras()->UGs()->count(),
-                'subordinados_count' => $usuario->subordinados()->count()
-            ];
+            // ✅ DEBUG: Verificar todos os campos disponíveis
+            Log::info('Dados completos do usuário:', $usuario->toArray());
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'id' => $usuario->id,
+                    'name' => $usuario->nome,
                     'nome' => $usuario->nome,
                     'email' => $usuario->email,
                     'role' => $usuario->role,
                     'is_active' => $usuario->is_active,
                     'telefone' => $usuario->telefone,
-                    'instagram' => $usuario->instagram,
-                    'cidade' => $usuario->cidade,
-                    'estado' => $usuario->estado,
-                    'cpf_cnpj' => $usuario->cpf_cnpj,
-                    'endereco' => $usuario->endereco,
-                    'cep' => $usuario->cep,
+                    'cpf_cnpj' => $usuario->cpf_cnpj,      // ← ADICIONAR
+                    'endereco' => $usuario->endereco,        // ← ADICIONAR  
+                    'cidade' => $usuario->cidade,            // ← ADICIONAR
+                    'estado' => $usuario->estado,            // ← ADICIONAR
+                    'cep' => $usuario->cep,                  // ← ADICIONAR
+                    'pix' => $usuario->pix,                  // ← ADICIONAR (se existir)
                     'created_at' => $usuario->created_at,
                     'updated_at' => $usuario->updated_at,
                     'manager' => $usuario->manager ? [
@@ -325,29 +320,15 @@ class UsuarioController extends Controller implements HasMiddleware
                         'email' => $usuario->manager->email,
                         'role' => $usuario->manager->role
                     ] : null,
-                    'subordinados' => $usuario->subordinados->map(function ($sub) {
-                        return [
-                            'id' => $sub->id,
-                            'nome' => $sub->nome,
-                            'email' => $sub->email,
-                            'role' => $sub->role,
-                            'is_active' => $sub->is_active
-                        ];
-                    }),
-                    'statistics' => $estatisticas,
-                    'permissions' => [
-                        'can_edit' => $this->canEditUser($currentUser, $usuario),
-                        'can_delete' => $this->canDeleteUser($currentUser, $usuario),
-                        'can_activate_deactivate' => $this->canActivateDeactivateUser($currentUser, $usuario)
-                    ]
+                    'subordinados_count' => $usuario->subordinados()->count()
                 ]
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Usuário não encontrado'
-            ], 404);
+                'message' => 'Erro ao buscar usuário: ' . $e->getMessage()
+            ], 500);
         }
     }
 
@@ -621,7 +602,7 @@ class UsuarioController extends Controller implements HasMiddleware
                 $vendedoresIndiretos = $vendedoresIndiretos->merge($vendedoresDoGerente);
             }
 
-            return response()->json([
+             return response()->json([
                 'success' => true,
                 'data' => [
                     'consultor' => [
@@ -631,7 +612,14 @@ class UsuarioController extends Controller implements HasMiddleware
                         'role' => $consultor->role,
                         'created_at' => $consultor->created_at,
                         'is_active' => $consultor->is_active,
-                        'telefone' => $consultor->telefone
+                        'telefone' => $consultor->telefone,
+                        // ✅ ADICIONAR OS CAMPOS AQUI TAMBÉM:
+                        'cpf_cnpj' => $consultor->cpf_cnpj,
+                        'endereco' => $consultor->endereco,
+                        'cidade' => $consultor->cidade,
+                        'estado' => $consultor->estado,
+                        'cep' => $consultor->cep,
+                        'pix' => $consultor->pix,
                     ],
                     'gerentes' => $gerentes->map(function($gerente) {
                         return [
