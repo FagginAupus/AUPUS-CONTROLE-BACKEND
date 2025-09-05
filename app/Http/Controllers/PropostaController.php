@@ -65,6 +65,8 @@ class PropostaController extends Controller
                     'status' => $this->obterStatusProposta($unidadesConsumidoras),
                     'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                     'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
+                    'inflacao' => floatval($proposta->inflacao ?? 2.00),
+                    'tarifaTributos' => floatval($proposta->tarifa_tributos ?? 0.98),
                     'recorrencia' => $proposta->recorrencia,
                     'observacoes' => $proposta->observacoes,
                     'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
@@ -662,7 +664,6 @@ class PropostaController extends Controller
             $primeiraUC = !empty($unidadesConsumidoras) ? $unidadesConsumidoras[0] : null;
 
             $propostaMapeada = [
-
                 'id' => $proposta->id,
                 'numero_proposta' => $proposta->numero_proposta,
                 'numeroProposta' => $proposta->numero_proposta, // Compatibilidade frontend
@@ -680,7 +681,8 @@ class PropostaController extends Controller
                 'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
                 'economia' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'bandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
-                
+                'inflacao' => floatval($proposta->inflacao ?? 2.00),
+                'tarifaTributos' => floatval($proposta->tarifa_tributos ?? 0.98),
                 // Dados da UC (para compatibilidade com frontend)
                 'apelido' => $primeiraUC['apelido'] ?? '',
                 'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
