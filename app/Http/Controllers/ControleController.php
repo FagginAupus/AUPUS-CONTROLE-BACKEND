@@ -59,7 +59,7 @@ class ControleController extends Controller
                     -- Dados da proposta
                     p.numero_proposta,
                     p.nome_cliente,
-                    u_consultor.nome as consultor,
+                    u_consultor.nome as consultor_nome,
                     p.data_proposta,
                     p.usuario_id,
                     
@@ -167,7 +167,7 @@ class ControleController extends Controller
                     // Dados da proposta
                     'numeroProposta' => $controle->numero_proposta ?? 'N/A',
                     'nomeCliente' => $controle->nome_cliente ?? 'N/A',
-                    'consultor' => $controle->consultor ?? 'Sem consultor',
+                    'consultor' => $controle->consultor_nome ?? 'Sem consultor',
                     'dataProposta' => $controle->data_proposta,
                     
                     // Dados da UC
