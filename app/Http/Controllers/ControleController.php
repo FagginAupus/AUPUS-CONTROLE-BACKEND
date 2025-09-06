@@ -38,7 +38,9 @@ class ControleController extends Controller
 
             // Parâmetros de paginação
             $page = max(1, (int)$request->get('page', 1));
-            $perPage = min(100, max(1, (int)$request->get('per_page', 50)));
+            $perPage = $request->get('per_page') === 'all' 
+                ? PHP_INT_MAX 
+                : min(1000, max(1, (int)$request->get('per_page', 50)));
 
             // ✅ QUERY COM NOVOS CAMPOS
             $query = "
