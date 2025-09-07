@@ -61,7 +61,7 @@ class ControleController extends Controller
                     -- Dados da proposta
                     p.numero_proposta,
                     p.nome_cliente,
-                    u_consultor.nome as consultor_nome,
+                    COALESCE(u_consultor.nome, u_usuario.nome, p.consultor) as consultor_nome,  -- ← AQUI CORRETO
                     p.data_proposta,
                     p.usuario_id,
                     
@@ -80,7 +80,6 @@ class ControleController extends Controller
                 LEFT JOIN propostas p ON cc.proposta_id = p.id
                 LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
                 LEFT JOIN usuarios u_usuario ON p.usuario_id = u_usuario.id
-                COALESCE(u_consultor.nome, u_usuario.nome, p.consultor) as consultor_nome
                 LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
                 LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
                 WHERE cc.deleted_at IS NULL
