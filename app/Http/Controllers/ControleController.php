@@ -61,7 +61,10 @@ class ControleController extends Controller
                     -- Dados da proposta
                     p.numero_proposta,
                     p.nome_cliente,
-                    COALESCE(u_consultor.nome, u_usuario.nome, p.consultor) as consultor_nome,  -- ← AQUI CORRETO
+                    CASE 
+                        WHEN p.consultor IS NOT NULL AND p.consultor != '' THEN p.consultor
+                        ELSE COALESCE(u_usuario.nome, 'Sem consultor')
+                    END as consultor_nome,
                     p.data_proposta,
                     p.usuario_id,
                     
@@ -78,7 +81,6 @@ class ControleController extends Controller
                     
                 FROM controle_clube cc
                 LEFT JOIN propostas p ON cc.proposta_id = p.id
-                LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
                 LEFT JOIN usuarios u_usuario ON p.usuario_id = u_usuario.id
                 LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
                 LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
