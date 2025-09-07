@@ -78,7 +78,9 @@ class ControleController extends Controller
                     
                 FROM controle_clube cc
                 LEFT JOIN propostas p ON cc.proposta_id = p.id
-                LEFT JOIN usuarios u_consultor ON (p.consultor_id = u_consultor.id OR p.usuario_id = u_consultor.id)
+                LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
+                LEFT JOIN usuarios u_usuario ON p.usuario_id = u_usuario.id
+                COALESCE(u_consultor.nome, u_usuario.nome, p.consultor) as consultor_nome
                 LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
                 LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
                 WHERE cc.deleted_at IS NULL
