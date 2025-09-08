@@ -1915,7 +1915,7 @@ class PropostaController extends Controller
             
             $arquivos = [];
             
-            // ✅ FATURAS DAS UCs
+            // Faturas das UCs
             if (isset($documentacao['faturas_ucs']) && is_array($documentacao['faturas_ucs'])) {
                 foreach ($documentacao['faturas_ucs'] as $numeroUC => $nomeArquivo) {
                     $arquivos[] = [
@@ -1928,7 +1928,7 @@ class PropostaController extends Controller
                 }
             }
             
-            // ✅ DOCUMENTOS GERAIS
+            // Documentos gerais
             $tiposDocumentos = [
                 'documentoPessoal' => 'Documento Pessoal',
                 'contratoSocial' => 'Contrato Social',
