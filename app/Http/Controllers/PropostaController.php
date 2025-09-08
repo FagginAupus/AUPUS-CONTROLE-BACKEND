@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
+use App\Services\AuditoriaService;
 
 class PropostaController extends Controller
 {
@@ -957,21 +958,50 @@ class PropostaController extends Controller
 
             $propostaAtualizada = DB::selectOne("SELECT * FROM propostas WHERE id = ?", [$id]);
 
-            if ($request->has('status') && $request->status === 'Fechada') {
-                Log::info('Status alterado para Fechada - populando controle', [
+            $numeroUC = $request->get('numeroUC') ?? $request->get('numero_unidade');
+
+            if ($numeroUC && $request->has('status')) {
+                $statusNovo = $request->status;
+                $statusAnterior = null;
+                
+                // Buscar status anterior da UC específica
+                $unidadesAtuais = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                
+                foreach ($unidadesAtuais as $uc) {
+                    if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
+                        $statusAnterior = $uc['status'] ?? null;
+                        break;
+                    }
+                }
+                
+                Log::info('Verificação de mudança de status UC', [
                     'proposta_id' => $id,
-                    'status_anterior' => $proposta->status ?? 'desconhecido',
-                    'status_novo' => $request->status,
-                    'uc_especifica' => $numeroUC ?? null
+                    'numero_uc' => $numeroUC,
+                    'status_anterior' => $statusAnterior,
+                    'status_novo' => $statusNovo
                 ]);
                 
-                // Se há numeroUC, significa que é uma atualização de UC específica
-                if ($numeroUC) {
-                    $this->popularControleAutomaticoParaUC($id, $numeroUC);
-                } else {
-                    // Se não há numeroUC, é uma atualização geral da proposta
-                    $this->popularControleAutomatico($id);
+                // REMOVER do controle se saiu de "Fechada"
+                if ($statusAnterior === 'Fechada' && $statusNovo !== 'Fechada') {
+                    $this->removerDoControle($id, $numeroUC, $statusAnterior, $statusNovo);
                 }
+                
+                // ADICIONAR ao controle se entrou em "Fechada"
+                if ($statusNovo === 'Fechada' && $statusAnterior !== 'Fechada') {
+                    Log::info('Status alterado para Fechada - populando controle', [
+                        'proposta_id' => $id,
+                        'status_anterior' => $statusAnterior,
+                        'status_novo' => $statusNovo,
+                        'uc_especifica' => $numeroUC
+                    ]);
+                    
+                    $this->popularControleAutomaticoParaUC($id, $numeroUC);
+                }
+            }
+
+            // Verificação para status geral da proposta (manter código existente)
+            if ($request->has('status') && !$numeroUC && $request->status === 'Fechada') {
+                $this->popularControleAutomatico($id);
             }
 
             DB::commit();
@@ -1135,9 +1165,8 @@ class PropostaController extends Controller
                     ]);
                 }
 
-                // ✅ VERIFICAR SE JÁ EXISTE CONTROLE
                 $controleExistente = DB::selectOne(
-                    "SELECT id FROM controle_clube WHERE proposta_id = ? AND uc_id = ?", 
+                    "SELECT id, deleted_at FROM controle_clube WHERE proposta_id = ? AND uc_id = ?", 
                     [$proposta_id, $ucIdFinal]
                 );
 
@@ -1158,14 +1187,50 @@ class PropostaController extends Controller
                         0.00
                     ]);
 
+                    // ADICIONAR AQUI A AUDITORIA:
+                    AuditoriaService::registrar('controle_clube', $controleId, 'CRIADO', [
+                        'entidade_relacionada' => 'propostas',
+                        'entidade_relacionada_id' => $proposta_id,
+                        'sub_acao' => 'CRIACAO_POR_STATUS_FECHADA',
+                        'metadados' => [
+                            'proposta_id' => $proposta_id,
+                            'uc_id' => $ucIdFinal,
+                            'numero_uc' => $numeroUC,
+                            'motivo' => 'Status alterado para Fechada - population geral'
+                        ]
+                    ]);
+
                     Log::info('Controle criado com sucesso', [
                         'controle_id' => $controleId,
                         'proposta_id' => $proposta_id,
                         'uc_id' => $ucIdFinal,
                         'numero_uc' => $numeroUC
                     ]);
+                } elseif ($controleExistente->deleted_at !== null) {
+                    // ✅ REATIVAR CONTROLE SOFT DELETED
+                    DB::update("
+                        UPDATE controle_clube 
+                        SET deleted_at = NULL, updated_at = NOW() 
+                        WHERE id = ?
+                    ", [$controleExistente->id]);
+                    
+                    // ADICIONAR AQUI:
+                    AuditoriaService::registrarReativacaoControle(
+                        $proposta_id,
+                        $ucIdFinal,
+                        $controleExistente->id,
+                        'Aguardando', // status anterior
+                        'Fechada'     // status novo
+                    );
+                    
+                    Log::info('Controle reativado (removido soft delete)', [
+                        'controle_id' => $controleExistente->id,
+                        'proposta_id' => $proposta_id,
+                        'uc_id' => $ucIdFinal,
+                        'numero_uc' => $numeroUC
+                    ]);
                 } else {
-                    Log::info('Controle já existia', [
+                    Log::info('Controle já existia ativo', [
                         'controle_existente_id' => $controleExistente->id,
                         'proposta_id' => $proposta_id,
                         'uc_id' => $ucIdFinal
@@ -1297,7 +1362,7 @@ class PropostaController extends Controller
 
             // ✅ VERIFICAR SE JÁ EXISTE CONTROLE PARA ESTA UC
             $controleExistente = DB::selectOne("
-                SELECT id FROM controle_clube 
+                SELECT id, deleted_at FROM controle_clube 
                 WHERE proposta_id = ? AND uc_id = ?", 
                 [$proposta_id, $ucIdFinal]
             );
@@ -1319,14 +1384,51 @@ class PropostaController extends Controller
                     0.00
                 ]);
 
+                // ADICIONAR AQUI:
+                AuditoriaService::registrar('controle_clube', $controleId, 'CRIADO', [
+                    'entidade_relacionada' => 'propostas',
+                    'entidade_relacionada_id' => $proposta_id,
+                    'sub_acao' => 'CRIACAO_POR_STATUS_FECHADA',
+                    'metadados' => [
+                        'proposta_id' => $proposta_id,
+                        'uc_id' => $ucIdFinal,
+                        'numero_uc' => $numeroUC,
+                        'motivo' => 'Status alterado para Fechada'
+                    ]
+                ]);
+
                 Log::info('Controle criado com sucesso para UC específica', [
                     'controle_id' => $controleId,
                     'proposta_id' => $proposta_id,
                     'uc_id' => $ucIdFinal,
                     'numero_uc' => $numeroUC
                 ]);
-            } else {
-                Log::info('Controle já existia para esta UC', [
+            } elseif ($controleExistente->deleted_at !== null) {
+                // ✅ REATIVAR CONTROLE SOFT DELETED
+                DB::update("
+                    UPDATE controle_clube 
+                    SET deleted_at = NULL, updated_at = NOW() 
+                    WHERE id = ?
+                ", [$controleExistente->id]);
+                
+                // ✅ REGISTRAR AUDITORIA DA REATIVAÇÃO
+                AuditoriaService::registrarReativacaoControle(
+                    $proposta_id,
+                    $ucIdFinal,
+                    $controleExistente->id,
+                    $statusAnterior ?? 'Aguardando',  // Para popularControleAutomatico use um valor padrão
+                    'Fechada'
+                );
+                
+                Log::info('Controle reativado (removido soft delete)', [
+                    'controle_id' => $controleExistente->id,
+                    'proposta_id' => $proposta_id,
+                    'uc_id' => $ucIdFinal,
+                    'numero_uc' => $numeroUC
+                ]);
+            }
+            else {
+                Log::info('Controle já existia ativo para esta UC', [
                     'controle_existente_id' => $controleExistente->id,
                     'proposta_id' => $proposta_id,
                     'uc_id' => $ucIdFinal,
@@ -1680,5 +1782,99 @@ class PropostaController extends Controller
         }
         
         return 'Aguardando';
+    }
+
+    /**
+     * ✅ REMOVER CONTROLE QUANDO STATUS SAI DE "FECHADA"
+     */
+    private function removerDoControle($proposta_id, $numero_uc, $status_anterior, $status_novo)
+    {
+        try {
+            Log::info('Iniciando remoção do controle', [
+                'proposta_id' => $proposta_id,
+                'numero_uc' => $numero_uc,
+                'status_anterior' => $status_anterior,
+                'status_novo' => $status_novo
+            ]);
+
+            // ✅ BUSCAR A UC DIRETAMENTE NA TABELA unidades_consumidoras
+            $ucEncontrada = DB::selectOne("
+                SELECT id FROM unidades_consumidoras 
+                WHERE numero_unidade = ? AND proposta_id = ? AND deleted_at IS NULL
+            ", [$numero_uc, $proposta_id]);
+
+            if (!$ucEncontrada) {
+                Log::warning('UC não encontrada na tabela unidades_consumidoras', [
+                    'proposta_id' => $proposta_id,
+                    'numero_uc' => $numero_uc
+                ]);
+                return false;
+            }
+
+            $ucIdParaRemover = $ucEncontrada->id;
+
+            Log::info('UC encontrada na tabela', [
+                'uc_id' => $ucIdParaRemover,
+                'numero_uc' => $numero_uc,
+                'proposta_id' => $proposta_id
+            ]);
+
+            // ✅ VERIFICAR SE EXISTE CONTROLE PARA ESTA PROPOSTA E UC
+            $controleExistente = DB::selectOne("
+                SELECT id FROM controle_clube 
+                WHERE proposta_id = ? AND uc_id = ? AND deleted_at IS NULL
+            ", [$proposta_id, $ucIdParaRemover]);
+
+            if ($controleExistente) {
+                // ✅ FAZER SOFT DELETE DO CONTROLE
+                $resultado = DB::update("
+                    UPDATE controle_clube 
+                    SET deleted_at = NOW(), updated_at = NOW() 
+                    WHERE id = ?
+                ", [$controleExistente->id]);
+
+                if ($resultado > 0) {
+                    AuditoriaService::registrarRemocaoControle(
+                        $proposta_id,
+                        $ucIdParaRemover, 
+                        $controleExistente->id,
+                        $status_anterior,
+                        $status_novo
+                    );
+
+                    Log::info('✅ Controle removido com sucesso (soft delete)', [
+                        'controle_id' => $controleExistente->id,
+                        'proposta_id' => $proposta_id,
+                        'uc_id' => $ucIdParaRemover,
+                        'numero_uc' => $numero_uc,
+                        'status_anterior' => $status_anterior,
+                        'status_novo' => $status_novo
+                    ]);
+                    return true;
+                } else {
+                    Log::warning('Falha ao executar soft delete', [
+                        'controle_id' => $controleExistente->id
+                    ]);
+                    return false;
+                }
+            } else {
+                Log::info('Nenhum controle encontrado para remover', [
+                    'proposta_id' => $proposta_id,
+                    'uc_id' => $ucIdParaRemover,
+                    'numero_uc' => $numero_uc
+                ]);
+                return true; // Não é erro, apenas não havia controle para remover
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao remover controle', [
+                'proposta_id' => $proposta_id,
+                'numero_uc' => $numero_uc,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => basename($e->getFile())
+            ]);
+            return false;
+        }
     }
 } 
