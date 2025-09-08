@@ -213,6 +213,11 @@ class Proposta extends Model
      * ===================================
      */
 
+    public function consultorUsuario()
+    {
+        return $this->belongsTo(Usuario::class, 'consultor_id', 'id');
+    }
+    
     public function esteFechada(): bool
     {
         foreach ($this->unidades_consumidoras as $uc) {

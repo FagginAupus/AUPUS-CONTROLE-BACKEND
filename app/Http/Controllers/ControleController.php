@@ -61,7 +61,7 @@ class ControleController extends Controller
                     -- Dados da proposta
                     p.numero_proposta,
                     p.nome_cliente,
-                    COALESCE(u_consultor.nome, u_usuario.nome, p.consultor) as consultor_nome,  -- ← AQUI CORRETO
+                    COALESCE(u_consultor.nome, 'Sem consultor') as consultor_nome,
                     p.data_proposta,
                     p.usuario_id,
                     
