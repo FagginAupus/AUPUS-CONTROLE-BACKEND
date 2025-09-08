@@ -1458,21 +1458,18 @@ class PropostaController extends Controller
     /**
      * ✅ UPLOAD DE DOCUMENTO ESPECÍFICO
      */
-    public function uploadDocumento(Request $request, string $id): JsonResponse
+    
+    public function uploadDocumento(Request $request, $id)
     {
         try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
-            }
-
+            // Validação expandida para incluir faturas de UCs
             $validator = Validator::make($request->all(), [
-                'arquivo' => 'required|file|max:10240|mimes:pdf,jpg,jpeg,png,doc,docx',
-                'numeroUC' => 'required|string',
-                'tipoDocumento' => 'required|string'
+                'arquivo' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240', // 10MB
+                'numeroUC' => 'required|string|max:50',
+                'tipoDocumento' => 'required|string|in:documentoPessoal,contratoSocial,documentoPessoalRepresentante,contratoLocacao,termoAdesao,faturaUC'
             ]);
 
+            // Validações específicas por tipo de documento
             if ($request->has('inflacao')) {
                 $validatorInflacao = Validator::make($request->all(), [
                     'inflacao' => 'numeric|min:0|max:100'
@@ -1517,32 +1514,60 @@ class PropostaController extends Controller
             $numeroUC = $request->numeroUC;
             $tipoDocumento = $request->tipoDocumento;
             
-            // Gerar nome único
+            // Gerar nome único baseado no tipo de documento
             $ano = date('Y');
             $mes = date('m');
             $timestamp = time();
             $extensao = $arquivo->getClientOriginalExtension();
             $numeroProposta = str_replace('/', '', $proposta->numero_proposta);
             
-            $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_{$tipoDocumento}_{$timestamp}.{$extensao}";
+            // ✅ NOME DO ARQUIVO ADAPTADO PARA FATURAS DE UCs
+            if ($tipoDocumento === 'faturaUC') {
+                $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_faturaUC_{$timestamp}.{$extensao}";
+                $diretorio = 'public/propostas/faturas';
+            } else {
+                $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_{$tipoDocumento}_{$timestamp}.{$extensao}";
+                $diretorio = 'public/propostas/documentos';
+            }
             
-            // Salvar arquivo
-            $caminhoArquivo = $arquivo->storeAs('public/propostas/documentos', $nomeArquivo);
+            // Salvar arquivo no diretório apropriado
+            $caminhoArquivo = $arquivo->storeAs($diretorio, $nomeArquivo);
 
             if (!$caminhoArquivo) {
                 throw new \Exception('Erro ao salvar arquivo');
             }
 
+            // ✅ ATUALIZAR DOCUMENTAÇÃO JSON NA PROPOSTA
+            $this->atualizarDocumentacaoProposta($id, $numeroUC, $tipoDocumento, $nomeArquivo);
+
+            // Log da atividade
+            Log::info('Upload de documento realizado', [
+                'proposta_id' => $id,
+                'numero_proposta' => $proposta->numero_proposta,
+                'numero_uc' => $numeroUC,
+                'tipo_documento' => $tipoDocumento,
+                'nome_arquivo' => $nomeArquivo,
+                'tamanho' => $arquivo->getSize(),
+                'usuario' => auth()->user()->nome ?? 'Sistema'
+            ]);
+
             return response()->json([
                 'success' => true,
                 'nomeArquivo' => $nomeArquivo,
-                'message' => 'Documento enviado com sucesso'
+                'caminhoCompleto' => $caminhoArquivo,
+                'tipoDocumento' => $tipoDocumento,
+                'numeroUC' => $numeroUC,
+                'message' => $tipoDocumento === 'faturaUC' 
+                    ? 'Fatura da UC enviada com sucesso' 
+                    : 'Documento enviado com sucesso'
             ]);
 
         } catch (\Exception $e) {
             Log::error('Erro no upload de documento', [
                 'error' => $e->getMessage(),
-                'proposta_id' => $id
+                'proposta_id' => $id,
+                'tipo_documento' => $request->tipoDocumento ?? 'N/A',
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
@@ -1552,6 +1577,397 @@ class PropostaController extends Controller
         }
     }
 
+    /**
+     * ✅ MÉTODO AUXILIAR: Atualizar documentação JSON da proposta
+     */
+    private function atualizarDocumentacaoProposta($propostaId, $numeroUC, $tipoDocumento, $nomeArquivo)
+    {
+        try {
+            // Buscar documentação atual
+            $proposta = DB::selectOne("SELECT documentacao FROM propostas WHERE id = ?", [$propostaId]);
+            
+            $documentacaoAtual = [];
+            if ($proposta && $proposta->documentacao) {
+                $documentacaoAtual = json_decode($proposta->documentacao, true) ?? [];
+            }
+
+            // ✅ ESTRUTURA ESPECÍFICA PARA FATURAS DAS UCs
+            if ($tipoDocumento === 'faturaUC') {
+                // Inicializar estrutura de faturas se não existir
+                if (!isset($documentacaoAtual['faturas_ucs'])) {
+                    $documentacaoAtual['faturas_ucs'] = [];
+                }
+                
+                // Adicionar/atualizar fatura da UC específica
+                $documentacaoAtual['faturas_ucs'][$numeroUC] = $nomeArquivo;
+                $documentacaoAtual['data_upload_faturas'] = date('Y-m-d H:i:s');
+                
+                Log::info('Fatura de UC adicionada à documentação', [
+                    'proposta_id' => $propostaId,
+                    'numero_uc' => $numeroUC,
+                    'arquivo' => $nomeArquivo
+                ]);
+            } else {
+                // ✅ DOCUMENTOS GERAIS DA PROPOSTA
+                $documentacaoAtual[$tipoDocumento] = $nomeArquivo;
+                
+                Log::info('Documento geral adicionado à documentação', [
+                    'proposta_id' => $propostaId,
+                    'tipo' => $tipoDocumento,
+                    'arquivo' => $nomeArquivo
+                ]);
+            }
+
+            // Atualizar no banco de dados
+            DB::update(
+                "UPDATE propostas SET documentacao = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [json_encode($documentacaoAtual), $propostaId]
+            );
+
+            Log::info('Documentação atualizada com sucesso', [
+                'proposta_id' => $propostaId,
+                'total_documentos' => count($documentacaoAtual),
+                'faturas_ucs' => count($documentacaoAtual['faturas_ucs'] ?? [])
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao atualizar documentação da proposta', [
+                'proposta_id' => $propostaId,
+                'erro' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            throw $e;
+        }
+    }
+
+    /**
+     * ✅ NOVO MÉTODO: Atualizar documentação completa da proposta (usado pelo frontend)
+     */
+    public function atualizarDocumentacao(Request $request, $id)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'documentacao' => 'required|array',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados de documentação inválidos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Verificar se a proposta existe
+            $proposta = DB::selectOne("SELECT * FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
+            if (!$proposta) {
+                return response()->json(['success' => false, 'message' => 'Proposta não encontrada'], 404);
+            }
+
+            // Atualizar documentação
+            $documentacaoNova = $request->documentacao;
+            
+            DB::update(
+                "UPDATE propostas SET documentacao = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [json_encode($documentacaoNova), $id]
+            );
+
+            Log::info('Documentação completa atualizada', [
+                'proposta_id' => $id,
+                'numero_proposta' => $proposta->numero_proposta,
+                'documentacao' => $documentacaoNova,
+                'usuario' => auth()->user()->nome ?? 'Sistema'
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Documentação atualizada com sucesso',
+                'documentacao' => $documentacaoNova
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao atualizar documentação completa', [
+                'proposta_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao atualizar documentação: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ NOVO MÉTODO: Remover arquivo específico da proposta
+     */
+    public function removerArquivo(Request $request, $id, $tipo, $numeroUC = null)
+    {
+        try {
+            // Verificar se a proposta existe
+            $proposta = DB::selectOne("SELECT numero_proposta, documentacao FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
+            
+            if (!$proposta) {
+                return response()->json(['success' => false, 'message' => 'Proposta não encontrada'], 404);
+            }
+
+            // Decodificar documentação atual
+            $documentacao = json_decode($proposta->documentacao ?? '{}', true);
+            
+            $arquivoRemovido = null;
+            $caminhoArquivo = null;
+
+            // ✅ REMOVER FATURA DE UC ESPECÍFICA
+            if ($tipo === 'faturaUC') {
+                if (!$numeroUC) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Número da UC é obrigatório para remover fatura'
+                    ], 400);
+                }
+
+                if (isset($documentacao['faturas_ucs'][$numeroUC])) {
+                    $arquivoRemovido = $documentacao['faturas_ucs'][$numeroUC];
+                    $caminhoArquivo = "public/propostas/faturas/{$arquivoRemovido}";
+                    
+                    // Remover da documentação
+                    unset($documentacao['faturas_ucs'][$numeroUC]);
+                    
+                    // Se não há mais faturas, remover a chave completamente
+                    if (empty($documentacao['faturas_ucs'])) {
+                        unset($documentacao['faturas_ucs']);
+                        unset($documentacao['data_upload_faturas']);
+                    } else {
+                        // Atualizar timestamp
+                        $documentacao['data_upload_faturas'] = date('Y-m-d H:i:s');
+                    }
+                    
+                    Log::info('Fatura de UC removida da documentação', [
+                        'proposta_id' => $id,
+                        'numero_uc' => $numeroUC,
+                        'arquivo_removido' => $arquivoRemovido
+                    ]);
+                } else {
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Fatura da UC {$numeroUC} não encontrada"
+                    ], 404);
+                }
+            } 
+            // ✅ REMOVER DOCUMENTO GERAL
+            else {
+                $tiposPermitidos = [
+                    'documentoPessoal',
+                    'contratoSocial', 
+                    'documentoPessoalRepresentante',
+                    'contratoLocacao',
+                    'termoAdesao'
+                ];
+
+                if (!in_array($tipo, $tiposPermitidos)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Tipo de documento inválido'
+                    ], 400);
+                }
+
+                if (isset($documentacao[$tipo])) {
+                    $arquivoRemovido = $documentacao[$tipo];
+                    $caminhoArquivo = "public/propostas/documentos/{$arquivoRemovido}";
+                    
+                    // Remover da documentação
+                    unset($documentacao[$tipo]);
+                    
+                    Log::info('Documento geral removido da documentação', [
+                        'proposta_id' => $id,
+                        'tipo_documento' => $tipo,
+                        'arquivo_removido' => $arquivoRemovido
+                    ]);
+                } else {
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Documento do tipo {$tipo} não encontrado"
+                    ], 404);
+                }
+            }
+
+            // ✅ ATUALIZAR DOCUMENTAÇÃO NO BANCO
+            DB::update(
+                "UPDATE propostas SET documentacao = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [json_encode($documentacao), $id]
+            );
+
+            // ✅ REMOVER ARQUIVO FÍSICO DO STORAGE
+            if ($caminhoArquivo && Storage::exists($caminhoArquivo)) {
+                $arquivoDeletado = Storage::delete($caminhoArquivo);
+                
+                Log::info('Arquivo físico removido do storage', [
+                    'caminho' => $caminhoArquivo,
+                    'sucesso' => $arquivoDeletado
+                ]);
+            } else {
+                Log::warning('Arquivo físico não encontrado no storage', [
+                    'caminho' => $caminhoArquivo ?? 'N/A'
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $tipo === 'faturaUC' 
+                    ? "Fatura da UC {$numeroUC} removida com sucesso"
+                    : "Documento {$tipo} removido com sucesso",
+                'arquivo_removido' => $arquivoRemovido,
+                'documentacao_atualizada' => $documentacao
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao remover arquivo da proposta', [
+                'proposta_id' => $id,
+                'tipo' => $tipo,
+                'numero_uc' => $numeroUC,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao remover arquivo: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ MÉTODO AUXILIAR: Listar diretórios de arquivos da proposta
+     */
+    public function listarDiretoriosArquivos($id)
+    {
+        try {
+            $proposta = DB::selectOne("SELECT numero_proposta FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
+            
+            if (!$proposta) {
+                return response()->json(['success' => false, 'message' => 'Proposta não encontrada'], 404);
+            }
+
+            $diretorios = [
+                'documentos' => storage_path('app/public/propostas/documentos'),
+                'faturas' => storage_path('app/public/propostas/faturas')
+            ];
+
+            $info = [];
+            foreach ($diretorios as $tipo => $caminho) {
+                $arquivos = [];
+                
+                if (is_dir($caminho)) {
+                    $pattern = "*{$proposta->numero_proposta}*";
+                    $arquivosEncontrados = glob($caminho . '/' . str_replace('/', '', $pattern));
+                    
+                    foreach ($arquivosEncontrados as $arquivo) {
+                        $arquivos[] = [
+                            'nome' => basename($arquivo),
+                            'tamanho' => filesize($arquivo),
+                            'data_modificacao' => date('Y-m-d H:i:s', filemtime($arquivo))
+                        ];
+                    }
+                }
+
+                $info[$tipo] = [
+                    'diretorio' => $caminho,
+                    'existe' => is_dir($caminho),
+                    'arquivos' => $arquivos,
+                    'total' => count($arquivos)
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'proposta' => $proposta->numero_proposta,
+                'diretorios' => $info
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao listar diretórios de arquivos', [
+                'proposta_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao listar diretórios: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ NOVO MÉTODO: Listar arquivos de uma proposta
+     */
+    public function listarArquivos($id)
+    {
+        try {
+            $proposta = DB::selectOne("SELECT numero_proposta, documentacao FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
+            
+            if (!$proposta) {
+                return response()->json(['success' => false, 'message' => 'Proposta não encontrada'], 404);
+            }
+
+            $documentacao = json_decode($proposta->documentacao ?? '{}', true);
+            
+            $arquivos = [];
+            
+            // ✅ FATURAS DAS UCs
+            if (isset($documentacao['faturas_ucs']) && is_array($documentacao['faturas_ucs'])) {
+                foreach ($documentacao['faturas_ucs'] as $numeroUC => $nomeArquivo) {
+                    $arquivos[] = [
+                        'tipo' => 'faturaUC',
+                        'numero_uc' => $numeroUC,
+                        'nome_arquivo' => $nomeArquivo,
+                        'url' => asset("storage/propostas/faturas/{$nomeArquivo}"),
+                        'descricao' => "Fatura da UC {$numeroUC}"
+                    ];
+                }
+            }
+            
+            // ✅ DOCUMENTOS GERAIS
+            $tiposDocumentos = [
+                'documentoPessoal' => 'Documento Pessoal',
+                'contratoSocial' => 'Contrato Social',
+                'documentoPessoalRepresentante' => 'Documento do Representante',
+                'contratoLocacao' => 'Contrato de Locação',
+                'termoAdesao' => 'Termo de Adesão'
+            ];
+            
+            foreach ($tiposDocumentos as $tipo => $descricao) {
+                if (isset($documentacao[$tipo]) && !empty($documentacao[$tipo])) {
+                    $arquivos[] = [
+                        'tipo' => $tipo,
+                        'numero_uc' => null,
+                        'nome_arquivo' => $documentacao[$tipo],
+                        'url' => asset("storage/propostas/documentos/{$documentacao[$tipo]}"),
+                        'descricao' => $descricao
+                    ];
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'proposta' => $proposta->numero_proposta,
+                'arquivos' => $arquivos,
+                'total' => count($arquivos)
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao listar arquivos da proposta', [
+                'proposta_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao listar arquivos: ' . $e->getMessage()
+            ], 500);
+        }
+    }
     /**
      * ✅ EXCLUIR PROPOSTA (SOFT DELETE)
      */

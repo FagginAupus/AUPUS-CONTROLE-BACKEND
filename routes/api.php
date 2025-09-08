@@ -279,6 +279,9 @@ Route::middleware('auth:api')->group(function () {
         // ✅ ROTAS ESPECÍFICAS PRIMEIRO (antes das genéricas com {id})
         Route::post('bulk-update-status', [PropostaController::class, 'bulkUpdateStatus']);
         Route::post('{id}/upload-documento', [PropostaController::class, 'uploadDocumento']);
+        Route::put('{id}/documentacao', [PropostaController::class, 'atualizarDocumentacao']);
+        Route::get('{id}/arquivos', [PropostaController::class, 'listarArquivos']);   
+        Route::delete('{id}/arquivo/{tipo}/{numeroUC?}', [PropostaController::class, 'removerArquivo']);
         Route::delete('{id}/documento/{tipo}', [PropostaController::class, 'removeDocumento']);
         Route::post('{id}/duplicate', [PropostaController::class, 'duplicate']);
         Route::post('{id}/convert-to-controle', [PropostaController::class, 'convertToControle']);
