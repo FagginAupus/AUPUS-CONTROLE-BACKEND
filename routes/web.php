@@ -116,3 +116,30 @@ Route::get('/info', function () {
         ]
     ]);
 });
+
+Route::get('/download/propostas/{tipo}/{filename}', function ($tipo, $filename) {
+    $path = "propostas/{$tipo}/{$filename}";
+    
+    // Verificar se arquivo existe no disco público
+    if (!Storage::disk('public')->exists($path)) {
+        Log::warning('Arquivo não encontrado para download', [
+            'path' => $path,
+            'tipo' => $tipo,
+            'filename' => $filename
+        ]);
+        abort(404, 'Arquivo não encontrado');
+    }
+    
+    // Obter caminho completo do arquivo
+    $caminhoCompleto = Storage::disk('public')->path($path);
+    
+    // ✅ FORÇAR DOWNLOAD com headers apropriados
+    return response()->download($caminhoCompleto, $filename, [
+        'Content-Type' => Storage::disk('public')->mimeType($path),
+        'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        'Access-Control-Allow-Origin' => '*',
+        'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+        'Access-Control-Allow-Headers' => 'Origin, Content-Type, Accept, Authorization'
+    ]);
+    
+})->where(['tipo' => '(documentos|faturas)', 'filename' => '.*']);

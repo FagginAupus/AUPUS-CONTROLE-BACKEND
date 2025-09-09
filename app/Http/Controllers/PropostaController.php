@@ -11,6 +11,7 @@ use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
 use App\Services\AuditoriaService;
+use Illuminate\Support\Facades\Storage;
 
 class PropostaController extends Controller
 {
@@ -1508,12 +1509,12 @@ class PropostaController extends Controller
             // Determinar diretório e nome do arquivo
             if ($tipoDocumento === 'faturaUC') {
                 $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_fatura_{$timestamp}.{$extensao}";
-                $diretorio = 'propostas/faturas';  // ✅ SEM 'public/' no início
+                $diretorio = 'propostas/faturas';  // ✅ SEM 'public/'
             } else {
                 $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_{$tipoDocumento}_{$timestamp}.{$extensao}";
-                $diretorio = 'propostas/documentos';  // ✅ SEM 'public/' no início
+                $diretorio = 'propostas/documentos';  // ✅ SEM 'public/'
             }
-            
+
             // ✅ CORREÇÃO PRINCIPAL: Especificar o disco 'public' explicitamente
             $caminhoArquivo = $arquivo->storeAs($diretorio, $nomeArquivo, 'public');
 
@@ -1798,18 +1799,18 @@ class PropostaController extends Controller
                 [json_encode($documentacao), $id]
             );
 
-            // ✅ REMOVER ARQUIVO FÍSICO DO STORAGE
+            // ✅ REMOVER ARQUIVO FÍSICO DO Storage
 
             if ($caminhoArquivo && Storage::disk('public')->exists($caminhoArquivo)) {
                 $arquivoDeletado = Storage::disk('public')->delete($caminhoArquivo);
                 
-                Log::info('Arquivo físico removido do storage', [
+                Log::info('Arquivo físico removido do Storage', [
                         'caminho' => $caminhoArquivo,
                         'disco' => 'public',
                         'sucesso' => $arquivoDeletado
                     ]);
                 } else {
-                    Log::warning('Arquivo físico não encontrado no storage público', [
+                    Log::warning('Arquivo físico não encontrado no Storage público', [
                         'caminho' => $caminhoArquivo ?? 'N/A',
                         'disco' => 'public'
                     ]);
@@ -1853,8 +1854,8 @@ class PropostaController extends Controller
             }
 
             $diretorios = [
-                'documentos' => storage_path('app/public/propostas/documentos'),
-                'faturas' => storage_path('app/public/propostas/faturas')
+                'documentos' => Storage_path('app/public/propostas/documentos'),
+                'faturas' => Storage_path('app/public/propostas/faturas')
             ];
 
             $info = [];
@@ -1924,7 +1925,7 @@ class PropostaController extends Controller
                         'tipo' => 'faturaUC',
                         'numero_uc' => $numeroUC,
                         'nome_arquivo' => $nomeArquivo,
-                        'url' => asset("storage/propostas/faturas/{$nomeArquivo}"),
+                        'url' => asset("Storage/propostas/faturas/{$nomeArquivo}"),
                         'descricao' => "Fatura da UC {$numeroUC}"
                     ];
                 }
@@ -1945,7 +1946,7 @@ class PropostaController extends Controller
                         'tipo' => $tipo,
                         'numero_uc' => null,
                         'nome_arquivo' => $documentacao[$tipo],
-                        'url' => asset("storage/propostas/documentos/{$documentacao[$tipo]}"),
+                        'url' => asset("Storage/propostas/documentos/{$documentacao[$tipo]}"),
                         'descricao' => $descricao
                     ];
                 }
