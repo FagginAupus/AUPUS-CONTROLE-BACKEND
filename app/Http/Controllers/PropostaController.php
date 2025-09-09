@@ -1607,12 +1607,21 @@ class PropostaController extends Controller
                     'numero_uc' => $numeroUC,
                     'arquivo' => $nomeArquivo
                 ]);
-            } else {
-                // ✅ DOCUMENTOS GERAIS DA PROPOSTA
+            } 
+            // ✅ DOCUMENTOS GERAIS DA PROPOSTA (mantém comportamento atual)
+            else {
+                // Para documentos gerais, salvar no nível raiz
                 $documentacaoAtual[$tipoDocumento] = $nomeArquivo;
+                
+                // ✅ TAMBÉM SALVAR NA ESTRUTURA DA UC ESPECÍFICA
+                if (!isset($documentacaoAtual[$numeroUC])) {
+                    $documentacaoAtual[$numeroUC] = [];
+                }
+                $documentacaoAtual[$numeroUC][$tipoDocumento] = $nomeArquivo;
                 
                 Log::info('Documento geral adicionado à documentação', [
                     'proposta_id' => $propostaId,
+                    'numero_uc' => $numeroUC,
                     'tipo' => $tipoDocumento,
                     'arquivo' => $nomeArquivo
                 ]);
@@ -1627,12 +1636,15 @@ class PropostaController extends Controller
             Log::info('Documentação atualizada com sucesso', [
                 'proposta_id' => $propostaId,
                 'total_documentos' => count($documentacaoAtual),
-                'faturas_ucs' => count($documentacaoAtual['faturas_ucs'] ?? [])
+                'faturas_ucs' => count($documentacaoAtual['faturas_ucs'] ?? []),
+                'estrutura_final' => array_keys($documentacaoAtual)
             ]);
 
         } catch (\Exception $e) {
             Log::error('Erro ao atualizar documentação da proposta', [
                 'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'tipo_documento' => $tipoDocumento,
                 'erro' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
@@ -1665,25 +1677,32 @@ class PropostaController extends Controller
                 return response()->json(['success' => false, 'message' => 'Proposta não encontrada'], 404);
             }
 
-            // Atualizar documentação
+            // ✅ MESCLAR documentação existente com nova
+            $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
             $documentacaoNova = $request->documentacao;
             
+            // Mesclar preservando dados existentes
+            $documentacaoFinal = array_merge($documentacaoAtual, $documentacaoNova);
+            
+            // Atualizar documentação
             DB::update(
                 "UPDATE propostas SET documentacao = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [json_encode($documentacaoNova), $id]
+                [json_encode($documentacaoFinal), $id]
             );
 
             Log::info('Documentação completa atualizada', [
                 'proposta_id' => $id,
                 'numero_proposta' => $proposta->numero_proposta,
-                'documentacao' => $documentacaoNova,
+                'documentacao_anterior' => array_keys($documentacaoAtual),
+                'documentacao_nova' => array_keys($documentacaoNova),
+                'documentacao_final' => array_keys($documentacaoFinal),
                 'usuario' => auth()->user()->nome ?? 'Sistema'
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Documentação atualizada com sucesso',
-                'documentacao' => $documentacaoNova
+                'documentacao' => $documentacaoFinal
             ]);
 
         } catch (\Exception $e) {
