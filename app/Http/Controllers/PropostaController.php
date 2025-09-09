@@ -1462,82 +1462,76 @@ class PropostaController extends Controller
     public function uploadDocumento(Request $request, $id)
     {
         try {
-            // Validação expandida para incluir faturas de UCs
-            $validator = Validator::make($request->all(), [
-                'arquivo' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240', // 10MB
-                'numeroUC' => 'required|string|max:50',
-                'tipoDocumento' => 'required|string|in:documentoPessoal,contratoSocial,documentoPessoalRepresentante,contratoLocacao,termoAdesao,faturaUC'
+            Log::info('Iniciando upload de documento', [
+                'proposta_id' => $id,
+                'files' => $request->allFiles(),
+                'data' => $request->all()
             ]);
 
-            // Validações específicas por tipo de documento
-            if ($request->has('inflacao')) {
-                $validatorInflacao = Validator::make($request->all(), [
-                    'inflacao' => 'numeric|min:0|max:100'
-                ]);
-                if ($validatorInflacao->fails()) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Inflação deve ser um número entre 0 e 100',
-                        'errors' => $validatorInflacao->errors()
-                    ], 422);
-                }
-            }
-
-            if ($request->has('tarifa_tributos')) {
-                $validatorTarifa = Validator::make($request->all(), [
-                    'tarifa_tributos' => 'numeric|min:0'
-                ]);
-                if ($validatorTarifa->fails()) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Tarifa com tributos deve ser um número positivo',
-                        'errors' => $validatorTarifa->errors()
-                    ], 422);
-                }
-            }
-
-            if ($validator->fails()) {
+            // Validação da proposta
+            $proposta = DB::selectOne("SELECT numero_proposta FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
+            
+            if (!$proposta) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Arquivo inválido',
-                    'errors' => $validator->errors()
-                ], 422);
+                    'message' => 'Proposta não encontrada'
+                ], 404);
             }
 
-            // Buscar proposta
-            $proposta = DB::selectOne("SELECT * FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
-            if (!$proposta) {
-                return response()->json(['success' => false, 'message' => 'Proposta não encontrada'], 404);
-            }
-
+            // Validação do arquivo
             $arquivo = $request->file('arquivo');
-            $numeroUC = $request->numeroUC;
-            $tipoDocumento = $request->tipoDocumento;
+            if (!$arquivo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum arquivo foi enviado'
+                ], 400);
+            }
+
+            // Validação dos parâmetros
+            $numeroUC = $request->input('numeroUC');
+            $tipoDocumento = $request->input('tipoDocumento');
             
-            // Gerar nome único baseado no tipo de documento
+            if (!$tipoDocumento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Tipo de documento não informado'
+                ], 400);
+            }
+
+            // Gerar nome único para o arquivo
+            $extensao = $arquivo->getClientOriginalExtension();
+            $timestamp = time();
             $ano = date('Y');
             $mes = date('m');
-            $timestamp = time();
-            $extensao = $arquivo->getClientOriginalExtension();
-            $numeroProposta = str_replace('/', '', $proposta->numero_proposta);
+            $numeroProposta = $proposta->numero_proposta;
             
-            // ✅ NOME DO ARQUIVO ADAPTADO PARA FATURAS DE UCs
+            // Determinar diretório e nome do arquivo
             if ($tipoDocumento === 'faturaUC') {
-                $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_faturaUC_{$timestamp}.{$extensao}";
-                $diretorio = 'public/propostas/faturas';
+                $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_fatura_{$timestamp}.{$extensao}";
+                $diretorio = 'propostas/faturas';  // ✅ SEM 'public/' no início
             } else {
                 $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_{$tipoDocumento}_{$timestamp}.{$extensao}";
-                $diretorio = 'public/propostas/documentos';
+                $diretorio = 'propostas/documentos';  // ✅ SEM 'public/' no início
             }
             
-            // Salvar arquivo no diretório apropriado
-            $caminhoArquivo = $arquivo->storeAs($diretorio, $nomeArquivo);
+            // ✅ CORREÇÃO PRINCIPAL: Especificar o disco 'public' explicitamente
+            $caminhoArquivo = $arquivo->storeAs($diretorio, $nomeArquivo, 'public');
 
             if (!$caminhoArquivo) {
                 throw new \Exception('Erro ao salvar arquivo');
             }
 
-            // ✅ ATUALIZAR DOCUMENTAÇÃO JSON NA PROPOSTA
+            // ✅ LOG PARA DEBUG
+            Log::info('Arquivo salvo com sucesso', [
+                'proposta_id' => $id,
+                'nome_arquivo' => $nomeArquivo,
+                'caminho_relativo' => $caminhoArquivo,
+                'caminho_absoluto' => Storage::disk('public')->path($caminhoArquivo),
+                'disco_usado' => 'public',
+                'diretorio' => $diretorio
+            ]);
+
+            // Atualizar documentação JSON na proposta
             $this->atualizarDocumentacaoProposta($id, $numeroUC, $tipoDocumento, $nomeArquivo);
 
             // Log da atividade
@@ -1548,7 +1542,8 @@ class PropostaController extends Controller
                 'tipo_documento' => $tipoDocumento,
                 'nome_arquivo' => $nomeArquivo,
                 'tamanho' => $arquivo->getSize(),
-                'usuario' => auth()->user()->nome ?? 'Sistema'
+                'usuario' => auth()->user()->nome ?? 'Sistema',
+                'caminho_final' => Storage::disk('public')->path($caminhoArquivo)
             ]);
 
             return response()->json([
@@ -1557,6 +1552,7 @@ class PropostaController extends Controller
                 'caminhoCompleto' => $caminhoArquivo,
                 'tipoDocumento' => $tipoDocumento,
                 'numeroUC' => $numeroUC,
+                'url' => Storage::disk('public')->url($caminhoArquivo),  // ✅ URL pública
                 'message' => $tipoDocumento === 'faturaUC' 
                     ? 'Fatura da UC enviada com sucesso' 
                     : 'Documento enviado com sucesso'
@@ -1567,7 +1563,8 @@ class PropostaController extends Controller
                 'error' => $e->getMessage(),
                 'proposta_id' => $id,
                 'tipo_documento' => $request->tipoDocumento ?? 'N/A',
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->all()
             ]);
 
             return response()->json([
@@ -1576,6 +1573,8 @@ class PropostaController extends Controller
             ], 500);
         }
     }
+
+
 
     /**
      * ✅ MÉTODO AUXILIAR: Atualizar documentação JSON da proposta
@@ -1800,18 +1799,21 @@ class PropostaController extends Controller
             );
 
             // ✅ REMOVER ARQUIVO FÍSICO DO STORAGE
-            if ($caminhoArquivo && Storage::exists($caminhoArquivo)) {
-                $arquivoDeletado = Storage::delete($caminhoArquivo);
+
+            if ($caminhoArquivo && Storage::disk('public')->exists($caminhoArquivo)) {
+                $arquivoDeletado = Storage::disk('public')->delete($caminhoArquivo);
                 
                 Log::info('Arquivo físico removido do storage', [
-                    'caminho' => $caminhoArquivo,
-                    'sucesso' => $arquivoDeletado
-                ]);
-            } else {
-                Log::warning('Arquivo físico não encontrado no storage', [
-                    'caminho' => $caminhoArquivo ?? 'N/A'
-                ]);
-            }
+                        'caminho' => $caminhoArquivo,
+                        'disco' => 'public',
+                        'sucesso' => $arquivoDeletado
+                    ]);
+                } else {
+                    Log::warning('Arquivo físico não encontrado no storage público', [
+                        'caminho' => $caminhoArquivo ?? 'N/A',
+                        'disco' => 'public'
+                    ]);
+                }
 
             return response()->json([
                 'success' => true,
