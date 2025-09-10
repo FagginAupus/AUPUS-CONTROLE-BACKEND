@@ -39,8 +39,47 @@ class PropostaController extends Controller
             $params = [];
 
             if ($currentUser->role !== 'admin') {
-                $query .= " AND p.usuario_id = ?";
-                $params[] = $currentUser->id;
+                if ($currentUser->role === 'consultor') {
+                    // Consultor vê:
+                    // 1. Propostas que ele criou (usuario_id)
+                    // 2. Propostas atribuídas a ele (consultor_id)
+                    // 3. Propostas dos subordinados (se houver)
+                    
+                    $subordinados = $currentUser->getAllSubordinates(); // Método já existe no model
+                    $subordinadosIds = array_column($subordinados, 'id');
+                    
+                    if (!empty($subordinadosIds)) {
+                        $placeholders = str_repeat('?,', count($subordinadosIds) - 1) . '?';
+                        $query .= " AND (p.usuario_id = ? OR p.consultor_id = ? OR p.usuario_id IN ({$placeholders}))";
+                        $params[] = $currentUser->id;
+                        $params[] = $currentUser->id;
+                        $params = array_merge($params, $subordinadosIds);
+                    } else {
+                        $query .= " AND (p.usuario_id = ? OR p.consultor_id = ?)";
+                        $params[] = $currentUser->id;
+                        $params[] = $currentUser->id;
+                    }
+                    
+                } elseif ($currentUser->role === 'gerente') {
+                    // Gerente vê suas propostas + propostas dos vendedores subordinados
+                    $subordinados = $currentUser->getAllSubordinates();
+                    $subordinadosIds = array_column($subordinados, 'id');
+                    $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
+                    
+                    if (!empty($usuariosPermitidos)) {
+                        $placeholders = str_repeat('?,', count($usuariosPermitidos) - 1) . '?';
+                        $query .= " AND p.usuario_id IN ({$placeholders})";
+                        $params = array_merge($params, $usuariosPermitidos);
+                    } else {
+                        $query .= " AND p.usuario_id = ?";
+                        $params[] = $currentUser->id;
+                    }
+                    
+                } else {
+                    // Vendedor vê apenas suas propostas
+                    $query .= " AND p.usuario_id = ?";
+                    $params[] = $currentUser->id;
+                }
             }
             $query .= " ORDER BY p.created_at DESC";
             
@@ -646,8 +685,40 @@ class PropostaController extends Controller
 
             // Se não for admin, verificar se é proposta do usuário
             if ($currentUser->role !== 'admin') {
-                $query .= " AND p.usuario_id = ?";
-                $params[] = $currentUser->id;
+                if ($currentUser->role === 'consultor') {
+                    $subordinados = $currentUser->getAllSubordinates();
+                    $subordinadosIds = array_column($subordinados, 'id');
+                    
+                    if (!empty($subordinadosIds)) {
+                        $placeholders = str_repeat('?,', count($subordinadosIds) - 1) . '?';
+                        $query .= " AND (p.usuario_id = ? OR p.consultor_id = ? OR p.usuario_id IN ({$placeholders}))";
+                        $params[] = $currentUser->id;
+                        $params[] = $currentUser->id;
+                        $params = array_merge($params, $subordinadosIds);
+                    } else {
+                        $query .= " AND (p.usuario_id = ? OR p.consultor_id = ?)";
+                        $params[] = $currentUser->id;
+                        $params[] = $currentUser->id;
+                    }
+                    
+                } elseif ($currentUser->role === 'gerente') {
+                    $subordinados = $currentUser->getAllSubordinates();
+                    $subordinadosIds = array_column($subordinados, 'id');
+                    $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
+                    
+                    if (!empty($usuariosPermitidos)) {
+                        $placeholders = str_repeat('?,', count($usuariosPermitidos) - 1) . '?';
+                        $query .= " AND p.usuario_id IN ({$placeholders})";
+                        $params = array_merge($params, $usuariosPermitidos);
+                    } else {
+                        $query .= " AND p.usuario_id = ?";
+                        $params[] = $currentUser->id;
+                    }
+                    
+                } else {
+                    $query .= " AND p.usuario_id = ?";
+                    $params[] = $currentUser->id;
+                }
             }
 
             $proposta = DB::selectOne($query, $params);
