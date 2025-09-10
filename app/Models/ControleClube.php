@@ -318,4 +318,17 @@ class ControleClube extends Model
         $this->calibragem_individual = $calibragem;
         $this->save();
     }
+
+    public function uc()
+    {
+        return $this->belongsTo(UnidadeConsumidora::class, 'uc_id', 'id');
+    }
+
+    /**
+     * Relacionamento com UG (alias para unidadeGeradora) 
+     */
+    public function ug()
+    {
+        return $this->belongsTo(UnidadeConsumidora::class, 'ug_id', 'id');
+    }
 }

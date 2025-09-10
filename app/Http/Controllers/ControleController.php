@@ -43,47 +43,36 @@ class ControleController extends Controller
                 : min(1000, max(1, (int)$request->get('per_page', 50)));
 
             // ✅ QUERY COM NOVOS CAMPOS
-            $query = "
-                SELECT 
-                    cc.id,
-                    cc.proposta_id,
-                    cc.uc_id,
-                    cc.ug_id,
-                    cc.calibragem,
-                    cc.valor_calibrado,
-                    cc.observacoes,
-                    cc.status_troca,
-                    cc.data_titularidade,
-                    cc.data_entrada_controle,
-                    cc.created_at,
-                    cc.updated_at,
-                    
-                    -- Dados da proposta
-                    p.numero_proposta,
-                    p.nome_cliente,
-                    COALESCE(u_consultor.nome, 'Sem consultor') as consultor_nome,
-                    p.data_proposta,
-                    p.usuario_id,
-                    
-                    -- Dados da UC
-                    uc.numero_unidade,
-                    uc.apelido,
-                    uc.consumo_medio,
-                    uc.ligacao,
-                    
-                    -- Dados da UG (se atribuída)
-                    ug.nome_usina as ug_nome,
-                    ug.potencia_cc as ug_potencia_cc,
-                    ug.capacidade_calculada as ug_capacidade
-                    
-                FROM controle_clube cc
-                LEFT JOIN propostas p ON cc.proposta_id = p.id
-                LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
-                LEFT JOIN usuarios u_usuario ON p.usuario_id = u_usuario.id
-                LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
-                LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
-                WHERE cc.deleted_at IS NULL
-            ";
+            $query = "SELECT 
+                cc.id, 
+                cc.proposta_id, 
+                cc.uc_id, 
+                cc.ug_id, 
+                cc.calibragem_individual,
+                cc.observacoes, 
+                cc.status_troca, 
+                cc.data_titularidade, 
+                cc.data_entrada_controle, 
+                cc.created_at, 
+                cc.updated_at, 
+                p.numero_proposta, 
+                p.nome_cliente, 
+                u_consultor.nome as consultor_nome,
+                p.data_proposta, 
+                p.usuario_id, 
+                uc.numero_unidade, 
+                uc.apelido, 
+                uc.consumo_medio, 
+                uc.ligacao, 
+                ug.nome_usina as ug_nome, 
+                ug.potencia_cc as ug_potencia_cc, 
+                ug.capacidade_calculada as ug_capacidade
+            FROM controle_clube cc
+            LEFT JOIN propostas p ON cc.proposta_id = p.id
+            LEFT JOIN usuarios u_consultor ON p.usuario_id = u_consultor.id
+            LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+            LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id
+            WHERE cc.deleted_at IS NULL";
 
             $params = [];
 
@@ -221,7 +210,7 @@ class ControleController extends Controller
                             ? (float) $controle->calibragem_individual 
                             : \App\Models\Configuracao::getCalibragemGlobal()
                     ),
-                         
+
                     // Metadados
                     'observacoes' => $controle->observacoes,
                     'dataEntradaControle' => $controle->data_entrada_controle,

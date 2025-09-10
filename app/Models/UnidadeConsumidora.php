@@ -382,4 +382,5 @@ class UnidadeConsumidora extends Model
             }
         });
     }
+
 }
