@@ -891,12 +891,23 @@ class PropostaController extends Controller
             }
 
             // 3️⃣ DOCUMENTAÇÃO DA UC (específica para a UC sendo editada)
-            if ($numeroUC && $request->has('documentacao')) {
+            if ($numeroUC && ($request->has('whatsappRepresentante') || $request->has('emailRepresentante'))) {
                 $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
-                $novaDocumentacao = $request->get('documentacao');
                 
-                // Se houver campos de arquivo, eles já devem ter os nomes dos arquivos salvos
-                $documentacaoAtual[$numeroUC] = $novaDocumentacao;
+                // Garantir que existe a estrutura da UC
+                if (!isset($documentacaoAtual[$numeroUC])) {
+                    $documentacaoAtual[$numeroUC] = [];
+                }
+                
+                // Adicionar WhatsApp se fornecido
+                if ($request->has('whatsappRepresentante')) {
+                    $documentacaoAtual[$numeroUC]['whatsappRepresentante'] = $request->input('whatsappRepresentante');
+                }
+                
+                // Adicionar Email se fornecido
+                if ($request->has('emailRepresentante')) {
+                    $documentacaoAtual[$numeroUC]['emailRepresentante'] = $request->input('emailRepresentante');
+                }
                 
                 $updateFields[] = 'documentacao = ?';
                 $updateParams[] = json_encode($documentacaoAtual, JSON_UNESCAPED_UNICODE);
@@ -1463,80 +1474,153 @@ class PropostaController extends Controller
     public function uploadDocumento(Request $request, $id)
     {
         try {
+            // ✅ LOG INICIAL PARA DEBUG
             Log::info('Iniciando upload de documento', [
                 'proposta_id' => $id,
-                'files' => $request->allFiles(),
-                'data' => $request->all()
+                'request_data' => [
+                    'numeroUC' => $request->input('numeroUC'),
+                    'tipoDocumento' => $request->input('tipoDocumento'),
+                    'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
+                    'arquivo_tamanho' => $request->file('arquivo')?->getSize(),
+                    'arquivo_tipo' => $request->file('arquivo')?->getMimeType(),
+                ],
+                'user_id' => auth()->id(),
+                'user_nome' => auth()->user()->nome ?? 'Sistema'
             ]);
 
-            // Validação da proposta
-            $proposta = DB::selectOne("SELECT numero_proposta FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
+            // ✅ VERIFICAR SE A PROPOSTA EXISTE
+            $proposta = DB::selectOne(
+                "SELECT id, numero_proposta, documentacao FROM propostas WHERE id = ? AND deleted_at IS NULL", 
+                [$id]
+            );
             
             if (!$proposta) {
+                Log::error('Proposta não encontrada para upload', ['proposta_id' => $id]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Proposta não encontrada'
                 ], 404);
             }
 
-            // Validação do arquivo
+            // ✅ VALIDAR ARQUIVO
             $arquivo = $request->file('arquivo');
-            if (!$arquivo) {
+            if (!$arquivo || !$arquivo->isValid()) {
+                Log::error('Arquivo inválido ou não enviado', [
+                    'proposta_id' => $id,
+                    'arquivo_presente' => !!$arquivo,
+                    'arquivo_valido' => $arquivo?->isValid()
+                ]);
+                
                 return response()->json([
                     'success' => false,
-                    'message' => 'Nenhum arquivo foi enviado'
+                    'message' => 'Nenhum arquivo válido foi enviado'
                 ], 400);
             }
 
-            // Validação dos parâmetros
+            // ✅ VALIDAR PARÂMETROS
             $numeroUC = $request->input('numeroUC');
             $tipoDocumento = $request->input('tipoDocumento');
             
             if (!$tipoDocumento) {
+                Log::error('Tipo de documento não informado', ['proposta_id' => $id]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Tipo de documento não informado'
+                    'message' => 'Tipo de documento é obrigatório'
                 ], 400);
             }
 
-            // Gerar nome único para o arquivo
-            $extensao = $arquivo->getClientOriginalExtension();
+            if ($tipoDocumento === 'faturaUC' && !$numeroUC) {
+                Log::error('Número UC não informado para fatura', ['proposta_id' => $id]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Número da UC é obrigatório para faturas'
+                ], 400);
+            }
+
+            // ✅ VALIDAR TIPO E TAMANHO DO ARQUIVO
+            $extensao = strtolower($arquivo->getClientOriginalExtension());
+            $tamanhoMaximo = 10 * 1024 * 1024; // 10MB
+            
+            if (!in_array($extensao, ['pdf', 'jpg', 'jpeg', 'png'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Apenas arquivos PDF, JPG e PNG são permitidos'
+                ], 400);
+            }
+            
+            if ($arquivo->getSize() > $tamanhoMaximo) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Arquivo muito grande. Tamanho máximo: 10MB'
+                ], 400);
+            }
+
+            // ✅ GERAR NOME ÚNICO DO ARQUIVO
             $timestamp = time();
             $ano = date('Y');
             $mes = date('m');
             $numeroProposta = $proposta->numero_proposta;
             
-            // Determinar diretório e nome do arquivo
+            // Determinar diretório e nome baseado no tipo
             if ($tipoDocumento === 'faturaUC') {
                 $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_fatura_{$timestamp}.{$extensao}";
-                $diretorio = 'propostas/faturas';  // ✅ SEM 'public/'
+                $diretorio = 'propostas/faturas';
             } else {
                 $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_{$tipoDocumento}_{$timestamp}.{$extensao}";
-                $diretorio = 'propostas/documentos';  // ✅ SEM 'public/'
+                $diretorio = 'propostas/documentos';
             }
 
-            // ✅ CORREÇÃO PRINCIPAL: Especificar o disco 'public' explicitamente
+            Log::info('Preparando para salvar arquivo', [
+                'nome_arquivo' => $nomeArquivo,
+                'diretorio' => $diretorio,
+                'disco' => 'public'
+            ]);
+
+            // ✅ GARANTIR QUE O DIRETÓRIO EXISTE
+            $caminhoCompleto = storage_path("app/public/{$diretorio}");
+            if (!is_dir($caminhoCompleto)) {
+                Log::info('Criando diretório', ['caminho' => $caminhoCompleto]);
+                if (!mkdir($caminhoCompleto, 0755, true)) {
+                    throw new \Exception("Não foi possível criar o diretório: {$caminhoCompleto}");
+                }
+            }
+
+            // ✅ SALVAR O ARQUIVO
             $caminhoArquivo = $arquivo->storeAs($diretorio, $nomeArquivo, 'public');
 
             if (!$caminhoArquivo) {
-                throw new \Exception('Erro ao salvar arquivo');
+                throw new \Exception('Falha ao salvar arquivo no storage');
             }
 
-            // ✅ LOG PARA DEBUG
+            // ✅ VERIFICAR SE O ARQUIVO FOI REALMENTE SALVO
+            $caminhoFisicoCompleto = Storage::disk('public')->path($caminhoArquivo);
+            if (!file_exists($caminhoFisicoCompleto)) {
+                throw new \Exception('Arquivo não encontrado após salvamento');
+            }
+
             Log::info('Arquivo salvo com sucesso', [
                 'proposta_id' => $id,
                 'nome_arquivo' => $nomeArquivo,
                 'caminho_relativo' => $caminhoArquivo,
-                'caminho_absoluto' => Storage::disk('public')->path($caminhoArquivo),
+                'caminho_absoluto' => $caminhoFisicoCompleto,
+                'tamanho_final' => filesize($caminhoFisicoCompleto),
                 'disco_usado' => 'public',
                 'diretorio' => $diretorio
             ]);
 
-            // Atualizar documentação JSON na proposta
-            $this->atualizarDocumentacaoProposta($id, $numeroUC, $tipoDocumento, $nomeArquivo);
+            // ✅ ATUALIZAR DOCUMENTAÇÃO JSON NA PROPOSTA
+            $resultado = $this->atualizarDocumentacaoProposta($id, $numeroUC, $tipoDocumento, $nomeArquivo);
+            
+            if (!$resultado) {
+                Log::error('Falha ao atualizar documentação da proposta', [
+                    'proposta_id' => $id,
+                    'arquivo_salvo' => $nomeArquivo
+                ]);
+                // Não falhar aqui, arquivo já foi salvo
+            }
 
-            // Log da atividade
-            Log::info('Upload de documento realizado', [
+            // ✅ LOG FINAL
+            Log::info('Upload de documento concluído com sucesso', [
                 'proposta_id' => $id,
                 'numero_proposta' => $proposta->numero_proposta,
                 'numero_uc' => $numeroUC,
@@ -1544,52 +1628,81 @@ class PropostaController extends Controller
                 'nome_arquivo' => $nomeArquivo,
                 'tamanho' => $arquivo->getSize(),
                 'usuario' => auth()->user()->nome ?? 'Sistema',
-                'caminho_final' => Storage::disk('public')->path($caminhoArquivo)
+                'caminho_final' => $caminhoFisicoCompleto
             ]);
 
+            // ✅ RESPOSTA DE SUCESSO
             return response()->json([
                 'success' => true,
                 'nomeArquivo' => $nomeArquivo,
                 'caminhoCompleto' => $caminhoArquivo,
                 'tipoDocumento' => $tipoDocumento,
                 'numeroUC' => $numeroUC,
-                'url' => Storage::disk('public')->url($caminhoArquivo),  // ✅ URL pública
+                'url' => Storage::disk('public')->url($caminhoArquivo),
+                'tamanho' => filesize($caminhoFisicoCompleto),
                 'message' => $tipoDocumento === 'faturaUC' 
                     ? 'Fatura da UC enviada com sucesso' 
                     : 'Documento enviado com sucesso'
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro no upload de documento', [
+            Log::error('Erro crítico no upload de documento', [
                 'error' => $e->getMessage(),
                 'proposta_id' => $id,
-                'tipo_documento' => $request->tipoDocumento ?? 'N/A',
+                'tipo_documento' => $request->input('tipoDocumento') ?? 'N/A',
+                'numero_uc' => $request->input('numeroUC') ?? 'N/A',
                 'trace' => $e->getTraceAsString(),
-                'request_data' => $request->all()
+                'request_data' => $request->all(),
+                'arquivo_info' => $request->file('arquivo') ? [
+                    'nome' => $request->file('arquivo')->getClientOriginalName(),
+                    'tamanho' => $request->file('arquivo')->getSize(),
+                    'tipo' => $request->file('arquivo')->getMimeType(),
+                    'valido' => $request->file('arquivo')->isValid()
+                ] : 'Nenhum arquivo'
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao fazer upload: ' . $e->getMessage()
+                'message' => 'Erro interno no upload: ' . $e->getMessage(),
+                'error_type' => 'upload_error'
             ], 500);
         }
     }
 
-
-
     /**
-     * ✅ MÉTODO AUXILIAR: Atualizar documentação JSON da proposta
+     * ✅ MÉTODO AUXILIAR CORRIGIDO: Atualizar documentação JSON da proposta
      */
     private function atualizarDocumentacaoProposta($propostaId, $numeroUC, $tipoDocumento, $nomeArquivo)
     {
         try {
+            Log::info('Iniciando atualização da documentação', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'tipo_documento' => $tipoDocumento,
+                'nome_arquivo' => $nomeArquivo
+            ]);
+
             // Buscar documentação atual
             $proposta = DB::selectOne("SELECT documentacao FROM propostas WHERE id = ?", [$propostaId]);
             
             $documentacaoAtual = [];
             if ($proposta && $proposta->documentacao) {
-                $documentacaoAtual = json_decode($proposta->documentacao, true) ?? [];
+                $decodificada = json_decode($proposta->documentacao, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $documentacaoAtual = $decodificada;
+                } else {
+                    Log::warning('JSON inválido na documentação atual', [
+                        'proposta_id' => $propostaId,
+                        'json_error' => json_last_error_msg()
+                    ]);
+                }
             }
+
+            Log::info('Documentação atual carregada', [
+                'proposta_id' => $propostaId,
+                'documentacao_keys' => array_keys($documentacaoAtual),
+                'tem_faturas_ucs' => isset($documentacaoAtual['faturas_ucs'])
+            ]);
 
             // ✅ ESTRUTURA ESPECÍFICA PARA FATURAS DAS UCs
             if ($tipoDocumento === 'faturaUC') {
@@ -1605,19 +1718,22 @@ class PropostaController extends Controller
                 Log::info('Fatura de UC adicionada à documentação', [
                     'proposta_id' => $propostaId,
                     'numero_uc' => $numeroUC,
-                    'arquivo' => $nomeArquivo
+                    'arquivo' => $nomeArquivo,
+                    'total_faturas' => count($documentacaoAtual['faturas_ucs'])
                 ]);
             } 
-            // ✅ DOCUMENTOS GERAIS DA PROPOSTA (mantém comportamento atual)
+            // ✅ DOCUMENTOS GERAIS DA PROPOSTA
             else {
                 // Para documentos gerais, salvar no nível raiz
                 $documentacaoAtual[$tipoDocumento] = $nomeArquivo;
                 
-                // ✅ TAMBÉM SALVAR NA ESTRUTURA DA UC ESPECÍFICA
-                if (!isset($documentacaoAtual[$numeroUC])) {
-                    $documentacaoAtual[$numeroUC] = [];
+                // Também manter estrutura por UC se numeroUC foi fornecido
+                if ($numeroUC) {
+                    if (!isset($documentacaoAtual[$numeroUC])) {
+                        $documentacaoAtual[$numeroUC] = [];
+                    }
+                    $documentacaoAtual[$numeroUC][$tipoDocumento] = $nomeArquivo;
                 }
-                $documentacaoAtual[$numeroUC][$tipoDocumento] = $nomeArquivo;
                 
                 Log::info('Documento geral adicionado à documentação', [
                     'proposta_id' => $propostaId,
@@ -1627,29 +1743,85 @@ class PropostaController extends Controller
                 ]);
             }
 
-            // Atualizar no banco de dados
-            DB::update(
+            // ✅ CONVERTER PARA JSON E ATUALIZAR
+            $documentacaoJson = json_encode($documentacaoAtual, JSON_UNESCAPED_UNICODE);
+            
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \Exception('Erro ao codificar documentação para JSON: ' . json_last_error_msg());
+            }
+
+            $result = DB::update(
                 "UPDATE propostas SET documentacao = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                [json_encode($documentacaoAtual), $propostaId]
+                [$documentacaoJson, $propostaId]
             );
 
-            Log::info('Documentação atualizada com sucesso', [
+            if ($result !== 1) {
+                throw new \Exception('Falha ao atualizar registro no banco de dados');
+            }
+
+            Log::info('Documentação atualizada com sucesso no banco', [
                 'proposta_id' => $propostaId,
                 'total_documentos' => count($documentacaoAtual),
                 'faturas_ucs' => count($documentacaoAtual['faturas_ucs'] ?? []),
-                'estrutura_final' => array_keys($documentacaoAtual)
+                'documentacao_tamanho' => strlen($documentacaoJson)
             ]);
+
+            return true;
 
         } catch (\Exception $e) {
             Log::error('Erro ao atualizar documentação da proposta', [
                 'proposta_id' => $propostaId,
                 'numero_uc' => $numeroUC,
                 'tipo_documento' => $tipoDocumento,
-                'erro' => $e->getMessage(),
+                'nome_arquivo' => $nomeArquivo,
+                'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
+
+            return false;
+        }
+    }
+
+    /**
+     * ✅ MÉTODO DE DEBUG: Verificar documentação da proposta
+     */
+    public function debugDocumentacao($id)
+    {
+        try {
+            $proposta = DB::selectOne(
+                "SELECT id, numero_proposta, documentacao, created_at, updated_at FROM propostas WHERE id = ? AND deleted_at IS NULL", 
+                [$id]
+            );
             
-            throw $e;
+            if (!$proposta) {
+                return response()->json(['error' => 'Proposta não encontrada'], 404);
+            }
+
+            $documentacao = json_decode($proposta->documentacao ?? '{}', true);
+            
+            return response()->json([
+                'proposta' => [
+                    'id' => $proposta->id,
+                    'numero_proposta' => $proposta->numero_proposta,
+                    'created_at' => $proposta->created_at,
+                    'updated_at' => $proposta->updated_at
+                ],
+                'documentacao' => $documentacao,
+                'documentacao_raw' => $proposta->documentacao,
+                'json_valido' => json_last_error() === JSON_ERROR_NONE,
+                'json_error' => json_last_error_msg(),
+                'estrutura' => [
+                    'tem_faturas_ucs' => isset($documentacao['faturas_ucs']),
+                    'total_faturas' => count($documentacao['faturas_ucs'] ?? []),
+                    'chaves_principais' => array_keys($documentacao)
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ], 500);
         }
     }
 
