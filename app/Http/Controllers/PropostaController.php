@@ -891,6 +891,18 @@ class PropostaController extends Controller
             }
 
             // 3️⃣ DOCUMENTAÇÃO DA UC (específica para a UC sendo editada)
+            if ($numeroUC && $request->has('documentacao')) {
+                $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
+                $novaDocumentacao = $request->get('documentacao');
+                
+                // Se houver campos de arquivo, eles já devem ter os nomes dos arquivos salvos
+                $documentacaoAtual[$numeroUC] = $novaDocumentacao;
+                
+                $updateFields[] = 'documentacao = ?';
+                $updateParams[] = json_encode($documentacaoAtual, JSON_UNESCAPED_UNICODE);
+            }
+
+            // 4️⃣ CAMPOS ADICIONAIS DE WHATSAPP E EMAIL DO REPRESENTANTE
             if ($numeroUC && ($request->has('whatsappRepresentante') || $request->has('emailRepresentante'))) {
                 $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
                 
