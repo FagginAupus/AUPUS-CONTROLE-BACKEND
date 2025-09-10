@@ -873,7 +873,7 @@ class PropostaController extends Controller
             $numeroUC = $request->get('numeroUC') ?? $request->get('numero_uc');
 
             // 1️⃣ CAMPOS GERAIS (aplicam para toda a proposta)
-            $camposGerais = ['nome_cliente', 'data_proposta', 'observacoes', 'recorrencia', 'inflacao', 'tarifa_tributos'];
+            $camposGerais = ['nome_cliente', 'data_proposta', 'observacoes', 'inflacao', 'tarifa_tributos'];
             foreach ($camposGerais as $campo) {
                 if ($request->has($campo)) {
                     $updateFields[] = "{$campo} = ?";
@@ -905,42 +905,102 @@ class PropostaController extends Controller
                 }
             }
 
-            // Tratar consultor_id direto (se vier)
-            if ($request->has('consultor_id') && $request->consultor_id) {
-                $consultorExiste = DB::selectOne("
-                    SELECT id FROM usuarios 
-                    WHERE id = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
-                    AND deleted_at IS NULL
-                ", [$request->consultor_id]);
+            $definindoSemConsultor = false;
+            $recorrenciaDefinida = false;
+
+            // Tratar recorrência primeiro (se vier no request)
+            if ($request->has('recorrencia')) {
+                $updateFields[] = 'recorrencia = ?';
+                $updateParams[] = $request->get('recorrencia');
+                $recorrenciaDefinida = true;
+            }
+
+            // Tratar campo 'consultor' (nome) enviado pelo frontend
+            if ($request->has('consultor')) {
+                $consultorNome = trim($request->consultor);
                 
-                if ($consultorExiste) {
-                    $updateFields[] = 'consultor_id = ?';
-                    $updateParams[] = $request->consultor_id;
+                if (empty($consultorNome) || $consultorNome === 'Sem consultor') {
+                    $updateFields[] = 'consultor_id = NULL';
+                    $definindoSemConsultor = true;
                     
-                    Log::info('✅ Consultor_id direto será atualizado', [
-                        'consultor_id' => $request->consultor_id
+                    Log::info('✅ Consultor removido - definindo como NULL', [
+                        'proposta_id' => $id,
+                        'consultor_nome' => $consultorNome
                     ]);
+                } else {
+                    $consultorEncontrado = DB::selectOne("
+                        SELECT id FROM usuarios 
+                        WHERE nome = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                        AND deleted_at IS NULL
+                    ", [$consultorNome]);
+                    
+                    if ($consultorEncontrado) {
+                        $updateFields[] = 'consultor_id = ?';
+                        $updateParams[] = $consultorEncontrado->id;
+                        
+                        Log::info('✅ Consultor encontrado e será atualizado', [
+                            'nome_consultor' => $consultorNome,
+                            'consultor_id' => $consultorEncontrado->id
+                        ]);
+                    } else {
+                        Log::warning('❌ Consultor não encontrado pelo nome', [
+                            'nome_pesquisado' => $consultorNome
+                        ]);
+                    }
+                }
+            }
+            
+            if ($request->has('consultor_id')) {
+                $consultorId = $request->consultor_id;
+                
+                if (empty($consultorId) || $consultorId === 'null' || $consultorId === null || $consultorId === '') {
+                    $updateFields[] = 'consultor_id = NULL';
+                    $definindoSemConsultor = true;
+                    
+                    Log::info('✅ Consultor_id removido - definindo como NULL', [
+                        'proposta_id' => $id,
+                        'consultor_id_recebido' => $consultorId
+                    ]);
+                } else {
+                    $consultorExiste = DB::selectOne("
+                        SELECT id FROM usuarios 
+                        WHERE id = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                        AND deleted_at IS NULL
+                    ", [$consultorId]);
+                    
+                    if ($consultorExiste) {
+                        $updateFields[] = 'consultor_id = ?';
+                        $updateParams[] = $consultorId;
+                        
+                        Log::info('✅ Consultor_id direto será atualizado', [
+                            'consultor_id' => $consultorId
+                        ]);
+                    } else {
+                        Log::warning('❌ Consultor_id não encontrado', [
+                            'consultor_id_pesquisado' => $consultorId
+                        ]);
+                    }
                 }
             }
 
-            // Tratar consultor_id direto (se vier)
-            if ($request->has('consultor_id') && $request->consultor_id) {
-                $consultorExiste = DB::selectOne("
-                    SELECT id FROM usuarios 
-                    WHERE id = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
-                    AND deleted_at IS NULL
-                ", [$request->consultor_id]);
+            // REGRA: Se definiu como "sem consultor" E não definiu recorrência ainda, ajustar recorrência para 0%
+            if ($definindoSemConsultor && !$recorrenciaDefinida) {
+                $updateFields[] = 'recorrencia = ?';
+                $updateParams[] = '0%';
                 
-                if ($consultorExiste) {
-                    $updateFields[] = 'consultor_id = ?';
-                    $updateParams[] = $request->consultor_id;
-                    
-                    Log::info('✅ Consultor_id direto será atualizado', [
-                        'consultor_id' => $request->consultor_id
-                    ]);
-                }
+                Log::info('✅ Recorrência ajustada para 0% por estar sem consultor', [
+                    'proposta_id' => $id
+                ]);
             }
 
+            if ($definindoSemConsultor) {
+                $updateFields[] = 'recorrencia = ?';
+                $updateParams[] = '0%';
+                
+                Log::info('✅ Recorrência ajustada para 0% por estar sem consultor', [
+                    'proposta_id' => $id
+                ]);
+            }
 
             // Descontos especiais
             if ($request->has('descontoTarifa') || $request->has('economia')) {
