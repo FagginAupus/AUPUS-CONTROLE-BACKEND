@@ -1172,4 +1172,175 @@ class ControleController extends Controller
             ], 500);
         }
     }
+    public function getUCDetalhes(Request $request, string $controleId): JsonResponse
+    {
+        try {
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            // Buscar controle com relacionamentos
+            $controle = ControleClube::with(['proposta', 'uc'])
+                ->where('id', $controleId)
+                ->first();
+
+            if (!$controle) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Controle não encontrado'
+                ], 404);
+            }
+
+            // Buscar dados da proposta e UC
+            $proposta = $controle->proposta;
+            $uc = $controle->uc;
+
+            if (!$proposta || !$uc) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados da proposta ou UC não encontrados'
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'controle_id' => $controle->id,
+                    'numero_proposta' => $proposta->numero_proposta,
+                    'nome_cliente' => $proposta->nome_cliente,
+                    'numero_uc' => $uc->numero_unidade,
+                    'apelido' => $uc->apelido,
+                    'consumo_medio' => $uc->consumo_medio,
+                    'calibragem_individual' => $controle->calibragem_individual,
+                    'usa_calibragem_global' => $controle->isUsandoCalibragemGlobal(),
+                    'calibragem_global' => \App\Models\Configuracao::getCalibragemGlobal(),
+                    'calibragem_efetiva' => $controle->getCalibragemEfetiva()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao buscar detalhes da UC', [
+                'controle_id' => $controleId,
+                'user_id' => $currentUser->id ?? 'N/A',
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ ATUALIZAR DADOS DA UC (CONSUMO MÉDIO E CALIBRAGEM)
+     */
+    public function updateUCDetalhes(Request $request, string $controleId): JsonResponse
+    {
+        try {
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            // Validação
+            $validator = Validator::make($request->all(), [
+                'consumo_medio' => 'required|numeric|min:0|max:999999.99',
+                'usa_calibragem_global' => 'required|boolean',
+                'calibragem_individual' => 'nullable|numeric|min:0|max:100'
+            ], [
+                'consumo_medio.required' => 'Consumo médio é obrigatório',
+                'consumo_medio.numeric' => 'Consumo médio deve ser um número',
+                'consumo_medio.min' => 'Consumo médio deve ser maior ou igual a 0',
+                'consumo_medio.max' => 'Consumo médio deve ser menor que 1.000.000',
+                'usa_calibragem_global.required' => 'Definição de calibragem é obrigatória',
+                'usa_calibragem_global.boolean' => 'Definição de calibragem inválida',
+                'calibragem_individual.numeric' => 'Calibragem deve ser um número',
+                'calibragem_individual.min' => 'Calibragem deve ser maior ou igual a 0',
+                'calibragem_individual.max' => 'Calibragem deve ser menor ou igual a 100'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados inválidos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Buscar controle
+            $controle = ControleClube::with(['proposta', 'uc'])
+                ->where('id', $controleId)
+                ->first();
+
+            if (!$controle) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Controle não encontrado'
+                ], 404);
+            }
+
+            DB::beginTransaction();
+
+            // 1. Atualizar consumo médio na UC
+            $controle->uc->update([
+                'consumo_medio' => $request->consumo_medio
+            ]);
+
+            // 2. Atualizar calibragem
+            if ($request->usa_calibragem_global) {
+                $controle->usarCalibragemGlobal();
+            } else {
+                $calibragemIndividual = $request->calibragem_individual;
+                if ($calibragemIndividual === null) {
+                    throw new \InvalidArgumentException('Calibragem individual é obrigatória quando não usar calibragem global');
+                }
+                $controle->definirCalibragemIndividual($calibragemIndividual);
+            }
+
+            DB::commit();
+
+            Log::info('UC atualizada com sucesso', [
+                'controle_id' => $controleId,
+                'user_id' => $currentUser->id,
+                'consumo_medio' => $request->consumo_medio,
+                'usa_calibragem_global' => $request->usa_calibragem_global,
+                'calibragem_individual' => $request->calibragem_individual
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'UC atualizada com sucesso',
+                'data' => [
+                    'consumo_medio' => $controle->uc->fresh()->consumo_medio,
+                    'calibragem_individual' => $controle->fresh()->calibragem_individual,
+                    'calibragem_efetiva' => $controle->fresh()->getCalibragemEfetiva(),
+                    'usa_calibragem_global' => $controle->fresh()->isUsandoCalibragemGlobal()
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            Log::error('Erro ao atualizar UC', [
+                'controle_id' => $controleId,
+                'user_id' => $currentUser->id ?? 'N/A',
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao atualizar UC: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

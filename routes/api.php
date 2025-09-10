@@ -318,6 +318,9 @@ Route::middleware('auth:api')->group(function () {
         // Operações especiais
         Route::post('bulk-calibragem', [ControleController::class, 'bulkCalibragem']);
         Route::post('bulk-toggle-status', [ControleController::class, 'bulkToggleStatus']);
+
+        Route::get('/controle/{controleId}/uc-detalhes', [ControleController::class, 'getUCDetalhes']);
+        Route::put('/controle/{controleId}/uc-detalhes', [ControleController::class, 'updateUCDetalhes']);
     });
 
     // ==========================================

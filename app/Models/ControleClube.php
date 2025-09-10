@@ -30,6 +30,7 @@ class ControleClube extends Model
         'proposta_id',
         'uc_id',
         'ug_id',
+        'calibragem_individual',
         'observacoes',
         'data_entrada_controle',
         'created_at',
@@ -45,6 +46,7 @@ class ControleClube extends Model
         'proposta_id' => 'string',
         'uc_id' => 'string',
         'ug_id' => 'string',
+        'calibragem_individual' => 'decimal:2',
         'data_entrada_controle' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -278,5 +280,42 @@ class ControleClube extends Model
         $array['tem_valor_calibrado'] = $this->temValorCalibrado();
         
         return $array;
+    }
+
+     public function getCalibragemEfetiva(): float
+    {
+        // Se tem calibragem individual, usar ela
+        if ($this->calibragem_individual !== null) {
+            return (float) $this->calibragem_individual;
+        }
+
+        // Caso contrário, usar calibragem global
+        return \App\Models\Configuracao::getCalibragemGlobal();
+    }
+
+    /**
+     * Verificar se está usando calibragem global
+     */
+    public function isUsandoCalibragemGlobal(): bool
+    {
+        return $this->calibragem_individual === null;
+    }
+
+    /**
+     * Definir para usar calibragem global (limpar individual)
+     */
+    public function usarCalibragemGlobal(): void
+    {
+        $this->calibragem_individual = null;
+        $this->save();
+    }
+
+    /**
+     * Definir calibragem individual
+     */
+    public function definirCalibragemIndividual(float $calibragem): void
+    {
+        $this->calibragem_individual = $calibragem;
+        $this->save();
     }
 }
