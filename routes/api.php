@@ -308,7 +308,9 @@ Route::middleware('auth:api')->group(function () {
         Route::get('ugs-disponiveis', [ControleController::class, 'getUgsDisponiveis']);
         Route::patch('{id}/status-troca', [ControleController::class, 'updateStatusTroca']);
         Route::post('{id}/atribuir-ug', [ControleController::class, 'atribuirUg']);
-        Route::patch('{id}/remover-ug', [ControleController::class, 'removerUg']);  // ⬅️ ADICIONAR ESTA LINHA
+        Route::patch('{id}/remover-ug', [ControleController::class, 'removerUg']); 
+        Route::get('{id}/uc-detalhes', [ControleController::class, 'getUCDetalhes']);
+        Route::put('{id}/uc-detalhes', [ControleController::class, 'updateUCDetalhes']);;
         
         // Rotas genéricas por último
         Route::get('{id}', [ControleController::class, 'show']);
@@ -319,8 +321,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('bulk-calibragem', [ControleController::class, 'bulkCalibragem']);
         Route::post('bulk-toggle-status', [ControleController::class, 'bulkToggleStatus']);
 
-        Route::get('/controle/{controleId}/uc-detalhes', [ControleController::class, 'getUCDetalhes']);
-        Route::put('/controle/{controleId}/uc-detalhes', [ControleController::class, 'updateUCDetalhes']);
+    
     });
 
     // ==========================================

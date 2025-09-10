@@ -210,12 +210,18 @@ class ControleController extends Controller
                     'ugCapacidade' => floatval($controle->ug_capacidade ?? 0),
                     
                     // Calibragem
-                    'calibragem' => floatval($controle->calibragem ?? 0),
+                    'calibragem_individual' => $controle->calibragem_individual,
+                    'calibragem_efetiva' => $controle->calibragem_individual !== null 
+                        ? (float) $controle->calibragem_individual 
+                        : \App\Models\Configuracao::getCalibragemGlobal(),
+                    'usa_calibragem_global' => $controle->calibragem_individual === null,
                     'valorCalibrado' => $this->calcularValorCalibrado(
                         floatval($controle->consumo_medio ?? 0),
-                        floatval($controle->calibragem ?? 0)
+                        $controle->calibragem_individual !== null 
+                            ? (float) $controle->calibragem_individual 
+                            : \App\Models\Configuracao::getCalibragemGlobal()
                     ),
-                    
+                         
                     // Metadados
                     'observacoes' => $controle->observacoes,
                     'dataEntradaControle' => $controle->data_entrada_controle,
