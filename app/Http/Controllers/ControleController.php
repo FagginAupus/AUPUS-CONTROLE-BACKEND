@@ -57,7 +57,7 @@ class ControleController extends Controller
                 cc.updated_at, 
                 p.numero_proposta, 
                 p.nome_cliente, 
-                u_consultor.nome as consultor_nome,
+                COALESCE(u_consultor.nome, p.consultor, 'Sem consultor') as consultor_nome,
                 p.data_proposta, 
                 p.usuario_id, 
                 uc.numero_unidade, 
@@ -69,7 +69,7 @@ class ControleController extends Controller
                 ug.capacidade_calculada as ug_capacidade
             FROM controle_clube cc
             LEFT JOIN propostas p ON cc.proposta_id = p.id
-            LEFT JOIN usuarios u_consultor ON p.usuario_id = u_consultor.id
+            LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
             LEFT JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
             LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id
             WHERE cc.deleted_at IS NULL";
@@ -179,7 +179,7 @@ class ControleController extends Controller
                     // Dados da proposta
                     'numeroProposta' => $controle->numero_proposta ?? 'N/A',
                     'nomeCliente' => $controle->nome_cliente ?? 'N/A',
-                    'consultor' => $controle->consultor_nome ?? 'Sem consultor',
+                    'consultor' => $controle->consultor_nome ?? $controle->consultor ?? 'Sem consultor',
                     'dataProposta' => $controle->data_proposta,
                     
                     // Dados da UC
