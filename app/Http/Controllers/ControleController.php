@@ -57,7 +57,7 @@ class ControleController extends Controller
                 cc.updated_at, 
                 p.numero_proposta, 
                 p.nome_cliente, 
-                COALESCE(u_consultor.nome, p.consultor, 'Sem consultor') as consultor_nome,
+                COALESCE(u_consultor.nome, 'Sem consultor') as consultor_nome,
                 p.data_proposta, 
                 p.usuario_id, 
                 uc.numero_unidade, 
@@ -199,7 +199,8 @@ class ControleController extends Controller
                     'ugCapacidade' => floatval($controle->ug_capacidade ?? 0),
                     
                     // Calibragem
-                    'calibragem_individual' => $controle->calibragem_individual,
+                    
+                    'calibragemIndividual' => $controle->calibragem_individual ? floatval($controle->calibragem_individual) : null,
                     'calibragem_efetiva' => $controle->calibragem_individual !== null 
                         ? (float) $controle->calibragem_individual 
                         : \App\Models\Configuracao::getCalibragemGlobal(),
@@ -1211,7 +1212,7 @@ class ControleController extends Controller
                     'numero_uc' => $uc->numero_unidade,
                     'apelido' => $uc->apelido,
                     'consumo_medio' => $uc->consumo_medio,
-                    'calibragem_individual' => $controle->calibragem_individual,
+                    'calibragemIndividual' => $controle->calibragem_individual ? floatval($controle->calibragem_individual) : null,
                     'usa_calibragem_global' => $controle->isUsandoCalibragemGlobal(),
                     'calibragem_global' => \App\Models\Configuracao::getCalibragemGlobal(),
                     'calibragem_efetiva' => $controle->getCalibragemEfetiva()
