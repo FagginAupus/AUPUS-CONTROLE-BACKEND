@@ -35,7 +35,7 @@ class PropostaController extends Controller
                 'user_role' => $currentUser->role
             ]);
 
-            $query = "SELECT p.*, u.nome as consultor_nome, p.logadouro_uc FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
+            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
             $params = [];
 
             if ($currentUser->role !== 'admin') {
