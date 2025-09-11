@@ -111,7 +111,6 @@ class PropostaController extends Controller
                     'recorrencia' => $proposta->recorrencia,
                     'observacoes' => $proposta->observacoes,
                     'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
-                    'logadouroUC' => $proposta->logadouro_uc ?? '',
                     'apelido' => $primeiraUC['apelido'] ?? '',
                     'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
                     'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '',
@@ -566,7 +565,7 @@ class PropostaController extends Controller
             $sql = "INSERT INTO propostas (
                 id, numero_proposta, data_proposta, nome_cliente, consultor_id, 
                 usuario_id, recorrencia, desconto_tarifa, desconto_bandeira,
-                observacoes, beneficios, unidades_consumidoras, logadouro_uc,
+                observacoes, beneficios, unidades_consumidoras,
                 inflacao, tarifa_tributos, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
@@ -581,7 +580,6 @@ class PropostaController extends Controller
                 $this->formatarDesconto($request->economia ?? 20),   
                 $this->formatarDesconto($request->bandeira ?? 20),  
                 $request->observacoes ?? '',
-                $request->logadouroUC ?? null,
                 $beneficiosJson,
                 $ucJson,
                 $request->inflacao ?? 2.00,              
@@ -681,8 +679,7 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.id = ? AND p.deleted_at IS NULL";
-            $params = [$id];
+            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
 
             // Se não for admin, verificar se é proposta do usuário
             if ($currentUser->role !== 'admin') {
@@ -753,7 +750,6 @@ class PropostaController extends Controller
                 'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
-                'logadouroUC' => $proposta->logadouro_uc ?? '',
                 'economia' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'bandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 'inflacao' => floatval($proposta->inflacao ?? 2.00),
@@ -875,7 +871,7 @@ class PropostaController extends Controller
             $numeroUC = $request->get('numeroUC') ?? $request->get('numero_uc');
 
             // 1️⃣ CAMPOS GERAIS (aplicam para toda a proposta)
-            $camposGerais = ['nome_cliente', 'data_proposta', 'observacoes', 'logadouro_uc', 'inflacao', 'tarifa_tributos'];
+            $camposGerais = ['nome_cliente', 'data_proposta', 'observacoes', 'inflacao', 'tarifa_tributos'];
             foreach ($camposGerais as $campo) {
                 if ($request->has($campo)) {
                     $updateFields[] = "{$campo} = ?";
@@ -1091,8 +1087,7 @@ class PropostaController extends Controller
                 }
 
                 if ($request->has('logadouroUC')) {
-                    $updateFields[] = 'logadouro_uc = ?';
-                    $updateParams[] = $request->logadouroUC;
+                    $documentacaoAtual[$numeroUC]['logadouroUC'] = $request->input('logadouroUC');
                 }
 
                 if ($request->has('documentacao') && is_array($request->documentacao)) {
@@ -1246,7 +1241,6 @@ class PropostaController extends Controller
                 'id' => $propostaAtualizada->id,
                 'numeroProposta' => $propostaAtualizada->numero_proposta,
                 'nomeCliente' => $propostaAtualizada->nome_cliente,
-                'logadouroUC' => $propostaAtualizada->logadouro_uc ?? '',
                 'consultor' => $proposta->consultor_nome ?? 'Sem consultor',
                 'consultor_id' => $propostaAtualizada->consultor_id,
                 'data' => $propostaAtualizada->data_proposta,
