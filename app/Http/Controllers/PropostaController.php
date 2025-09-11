@@ -35,7 +35,7 @@ class PropostaController extends Controller
                 'user_role' => $currentUser->role
             ]);
 
-            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
+            $query = "SELECT p.*, u.nome as consultor_nome, p.logadouro_uc FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
             $params = [];
 
             if ($currentUser->role !== 'admin') {
@@ -111,7 +111,7 @@ class PropostaController extends Controller
                     'recorrencia' => $proposta->recorrencia,
                     'observacoes' => $proposta->observacoes,
                     'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
-                    // Dados da UC (para compatibilidade com frontend)
+                    'logadouroUC' => $proposta->logadouro_uc ?? '',
                     'apelido' => $primeiraUC['apelido'] ?? '',
                     'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
                     'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '',
@@ -566,9 +566,9 @@ class PropostaController extends Controller
             $sql = "INSERT INTO propostas (
                 id, numero_proposta, data_proposta, nome_cliente, consultor_id, 
                 usuario_id, recorrencia, desconto_tarifa, desconto_bandeira,
-                observacoes, beneficios, unidades_consumidoras,
+                observacoes, beneficios, unidades_consumidoras, logadouro_uc,
                 inflacao, tarifa_tributos, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
             $params = [
                 $id,
@@ -581,6 +581,7 @@ class PropostaController extends Controller
                 $this->formatarDesconto($request->economia ?? 20),   
                 $this->formatarDesconto($request->bandeira ?? 20),  
                 $request->observacoes ?? '',
+                $request->logadouroUC ?? null,
                 $beneficiosJson,
                 $ucJson,
                 $request->inflacao ?? 2.00,              
@@ -752,6 +753,7 @@ class PropostaController extends Controller
                 'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
+                'logadouroUC' => $proposta->logadouro_uc ?? '',
                 'economia' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'bandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 'inflacao' => floatval($proposta->inflacao ?? 2.00),
@@ -873,7 +875,7 @@ class PropostaController extends Controller
             $numeroUC = $request->get('numeroUC') ?? $request->get('numero_uc');
 
             // 1️⃣ CAMPOS GERAIS (aplicam para toda a proposta)
-            $camposGerais = ['nome_cliente', 'data_proposta', 'observacoes', 'inflacao', 'tarifa_tributos'];
+            $camposGerais = ['nome_cliente', 'data_proposta', 'observacoes', 'logadouro_uc', 'inflacao', 'tarifa_tributos'];
             foreach ($camposGerais as $campo) {
                 if ($request->has($campo)) {
                     $updateFields[] = "{$campo} = ?";
@@ -1001,17 +1003,72 @@ class PropostaController extends Controller
                 $updateFields[] = 'beneficios = ?';
                 $updateParams[] = json_encode($request->beneficios, JSON_UNESCAPED_UNICODE);
             }
+            
+            if ($request->has('status') && ($request->status === 'Fechado' || $request->status === 'Fechada')) {
+                $documentacao = $request->documentacao ?? [];
+                $erros = [];
+                
+                // Campos básicos obrigatórios
+                if (empty($request->nomeCliente)) $erros[] = 'Nome do Cliente';
+                if (empty($request->apelido)) $erros[] = 'Apelido UC';
+                if (empty($numeroUC)) $erros[] = 'Número UC';
+                
+                // Campos de documentação obrigatórios
+                if (empty($documentacao['enderecoUC'])) {
+                    $erros[] = 'Endereço da UC';
+                }
+                
+                if (empty($documentacao['enderecoRepresentante'])) {
+                    $erros[] = 'Endereço do Representante';
+                }
+                
+                if (empty($documentacao['nomeRepresentante'])) {
+                    $erros[] = 'Nome do Representante';
+                }
+                
+                // Validação específica por tipo de documento
+                if (($documentacao['tipoDocumento'] ?? '') === 'CPF') {
+                    if (empty($documentacao['cpf'])) {
+                        $erros[] = 'CPF é obrigatório para pessoa física';
+                    }
+                } else if (($documentacao['tipoDocumento'] ?? '') === 'CNPJ') {
+                    if (empty($documentacao['razaoSocial'])) {
+                        $erros[] = 'Razão Social é obrigatória para pessoa jurídica';
+                    }
+                    if (empty($documentacao['cnpj'])) {
+                        $erros[] = 'CNPJ é obrigatório para pessoa jurídica';
+                    }
+                }
+                
+                // Se há erros, retornar antes de processar
+                if (!empty($erros)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Para fechar a proposta, corrija os seguintes campos:',
+                        'errors' => $erros
+                    ], 422);
+                }
+            }
 
             // 3️⃣ DOCUMENTAÇÃO DA UC (específica para a UC sendo editada)
             if ($numeroUC && $request->has('documentacao')) {
                 $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
                 $novaDocumentacao = $request->get('documentacao');
                 
-                // Se houver campos de arquivo, eles já devem ter os nomes dos arquivos salvos
-                $documentacaoAtual[$numeroUC] = $novaDocumentacao;
+                // Mesclar com documentação existente da UC
+                $documentacaoAtual[$numeroUC] = array_merge(
+                    $documentacaoAtual[$numeroUC] ?? [],
+                    $novaDocumentacao
+                );
                 
                 $updateFields[] = 'documentacao = ?';
                 $updateParams[] = json_encode($documentacaoAtual, JSON_UNESCAPED_UNICODE);
+                
+                Log::info('Documentação da UC atualizada', [
+                    'proposta_id' => $id,
+                    'numero_uc' => $numeroUC,
+                    'campos_atualizados' => array_keys($novaDocumentacao)
+                ]);
             }
 
             // 4️⃣ CAMPOS ADICIONAIS DE WHATSAPP E EMAIL DO REPRESENTANTE
@@ -1031,6 +1088,36 @@ class PropostaController extends Controller
                 // Adicionar Email se fornecido
                 if ($request->has('emailRepresentante')) {
                     $documentacaoAtual[$numeroUC]['emailRepresentante'] = $request->input('emailRepresentante');
+                }
+
+                if ($request->has('logadouroUC')) {
+                    $updateFields[] = 'logadouro_uc = ?';
+                    $updateParams[] = $request->logadouroUC;
+                }
+
+                if ($request->has('documentacao') && is_array($request->documentacao)) {
+                    // Processar documentação específica da UC
+                    $numeroUC = $request->get('numeroUC') ?? $request->get('numero_unidade');
+                    
+                    if ($numeroUC) {
+                        // Buscar documentação existente
+                        $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
+                        
+                        // Atualizar documentação específica da UC
+                        $documentacaoAtual[$numeroUC] = array_merge(
+                            $documentacaoAtual[$numeroUC] ?? [],
+                            $request->documentacao
+                        );
+                        
+                        $updateFields[] = 'documentacao = ?';
+                        $updateParams[] = json_encode($documentacaoAtual, JSON_UNESCAPED_UNICODE);
+                        
+                        Log::info('Documentação da UC atualizada', [
+                            'proposta_id' => $id,
+                            'numero_uc' => $numeroUC,
+                            'campos_atualizados' => array_keys($request->documentacao)
+                        ]);
+                    }
                 }
                 
                 $updateFields[] = 'documentacao = ?';
@@ -1144,7 +1231,10 @@ class PropostaController extends Controller
 
             Log::info('Proposta atualizada com sucesso', [
                 'proposta_id' => $id,
-                'user_id' => $currentUser->id
+                'user_id' => $currentUser->id,
+                'logadouro_alterado' => $request->has('logadouroUC'),
+                'documentacao_alterada' => $request->has('documentacao'),
+                'campos_alterados' => array_keys($request->all())
             ]);
 
             // ✅ MAPEAR RESPOSTA PARA O FRONTEND
@@ -1156,6 +1246,7 @@ class PropostaController extends Controller
                 'id' => $propostaAtualizada->id,
                 'numeroProposta' => $propostaAtualizada->numero_proposta,
                 'nomeCliente' => $propostaAtualizada->nome_cliente,
+                'logadouroUC' => $propostaAtualizada->logadouro_uc ?? '',
                 'consultor' => $proposta->consultor_nome ?? 'Sem consultor',
                 'consultor_id' => $propostaAtualizada->consultor_id,
                 'data' => $propostaAtualizada->data_proposta,
@@ -2610,5 +2701,44 @@ class PropostaController extends Controller
             ]);
             return false;
         }
+    }
+
+    private function extrairDocumentacaoUC($documentacao, $numeroUC)
+    {
+        if (empty($documentacao) || empty($numeroUC)) {
+            return [];
+        }
+        
+        $docs = is_string($documentacao) ? json_decode($documentacao, true) : $documentacao;
+        
+        return $docs[$numeroUC] ?? [];
+    }
+
+    /**
+     * Validar campos obrigatórios para fechamento
+     */
+    private function validarCamposObrigatoriosParaFechamento($dadosProposta, $documentacao)
+    {
+        $erros = [];
+        
+        // Campos básicos
+        if (empty($dadosProposta['nomeCliente'])) $erros[] = 'Nome do Cliente';
+        if (empty($dadosProposta['apelido'])) $erros[] = 'Apelido UC';
+        if (empty($dadosProposta['numeroUC'])) $erros[] = 'Número UC';
+        
+        // Documentação
+        if (empty($documentacao['enderecoUC'])) $erros[] = 'Endereço da UC';
+        if (empty($documentacao['enderecoRepresentante'])) $erros[] = 'Endereço do Representante';
+        if (empty($documentacao['nomeRepresentante'])) $erros[] = 'Nome do Representante';
+        
+        // Tipo de documento específico
+        if (($documentacao['tipoDocumento'] ?? '') === 'CPF') {
+            if (empty($documentacao['cpf'])) $erros[] = 'CPF';
+        } else {
+            if (empty($documentacao['cnpj'])) $erros[] = 'CNPJ';
+            if (empty($documentacao['razaoSocial'])) $erros[] = 'Razão Social';
+        }
+        
+        return $erros;
     }
 } 
