@@ -183,14 +183,14 @@ class DocumentController extends Controller
         return [
             'nomeAssociado' => $dados['nomeCliente'] ?? '',
             'endereco' => $dados['enderecoUC'] ?? '',
-            'formaPagamento' => 'Boleto',
+            'formaPagamento' => 'Boleto', // ← fixo por enquanto
             'cpf' => $cpfCnpj,
             'representanteLegal' => $dados['nomeRepresentante'] ?? '',
             'numeroUnidade' => $dados['numeroUC'] ?? '',
-            'logradouro' => $dados['logradouro'] ?? '',
+            'logradouro' => $dados['logradouroUC'] ?? '', // ← mudou aqui
             'dia' => $agora->format('d'),
             'mes' => $agora->format('m'),
-            'economia' => $dados['economia'] ?? '0'
+            'economia' => $dados['descontoTarifa'] ?? '0' // ← usar descontoTarifa
         ];
     }
 
@@ -500,6 +500,15 @@ class DocumentController extends Controller
             'user_id' => auth()->id()
         ]);
 
+        Log::info('=== DADOS RECEBIDOS PARA VALIDAÇÃO ===', [
+            'request_all' => $request->all(),
+            'validation_rules' => [
+                'nomeCliente', 'numeroUC', 'enderecoUC', 'tipoDocumento',
+                'nomeRepresentante', 'enderecoRepresentante', 'emailRepresentante',
+                'economia', 'formaPagamento', 'logradouro'
+            ]
+        ]);
+
         try {
             // Reutilizar validação do método existente
             $validator = Validator::make($request->all(), [
@@ -511,9 +520,8 @@ class DocumentController extends Controller
                 'enderecoRepresentante' => 'required|string',
                 'emailRepresentante' => 'required|email',
                 'whatsappRepresentante' => 'nullable|string',
-                'economia' => 'required|numeric|min:0|max:100',
-                'formaPagamento' => 'required|string',
-                'logradouro' => 'required|string'
+                'descontoTarifa' => 'required|numeric|min:0|max:100', 
+                'logradouroUC' => 'required|string'  
             ]);
 
             if ($validator->fails()) {

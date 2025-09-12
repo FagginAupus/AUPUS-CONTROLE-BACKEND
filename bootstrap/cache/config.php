@@ -184,6 +184,12 @@
       'Vite' => 'Illuminate\\Support\\Facades\\Vite',
     ),
   ),
+  'autentique' => 
+  array (
+    'api_url' => 'https://api.autentique.com.br/v2/graphql',
+    'api_token' => '183fe3231ede509d4dccf66e5d046f56f96fb5646377ccb49ee21c69cd2b9f1b',
+    'sandbox' => true,
+  ),
   'auth' => 
   array (
     'defaults' => 

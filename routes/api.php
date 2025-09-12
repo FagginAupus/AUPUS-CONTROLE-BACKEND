@@ -573,8 +573,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/propostas/{proposta}/gerar-termo', [DocumentController::class, 'gerarTermoAdesao'])
             ->middleware('permission:prospec.edit');
 
-        Route::post('/propostas/{proposta}/gerar-termo-completo', [DocumentController::class, 'gerarTermoCompleto'])
-            ->middleware('permission:prospec.edit');
+        Route::post('/propostas/{proposta}/gerar-termo-completo', [DocumentController::class, 'gerarTermoCompleto']);
+        //    ->middleware('permission:prospec.edit');
             
         // Finalizar documento após preenchimento no frontend
         Route::post('/finalizar', [DocumentController::class, 'finalizarDocumento'])

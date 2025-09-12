@@ -19,17 +19,16 @@ class AutentiqueService
             'timeout' => 60,
             'verify' => false
         ]);
-        $this->apiUrl = env('AUTENTIQUE_API_URL', 'https://api.autentique.com.br/v2/graphql');
-        $this->token = env('AUTENTIQUE_API_TOKEN');
+        $this->apiUrl = config('autentique.api_url');
+        $this->token = config('autentique.api_token');
         
-        // ✅ CORREÇÃO: Log de debug mas não falha no construtor
         Log::info('AutentiqueService inicializado', [
             'api_url' => $this->apiUrl,
             'token_configured' => !empty($this->token),
             'token_length' => $this->token ? strlen($this->token) : 0,
-            'env_check' => [
-                'AUTENTIQUE_API_TOKEN' => env('AUTENTIQUE_API_TOKEN') ? 'FOUND' : 'NOT_FOUND',
-                'AUTENTIQUE_API_URL' => env('AUTENTIQUE_API_URL', 'DEFAULT')
+            'config_check' => [
+                'AUTENTIQUE_API_TOKEN' => config('autentique.api_token') ? 'FOUND' : 'NOT_FOUND',
+                'AUTENTIQUE_API_URL' => config('autentique.api_url')
             ]
         ]);
     }
@@ -60,6 +59,7 @@ class AutentiqueService
     /**
      * Cria um documento na Autentique a partir dos dados da proposta
      */
+    
     public function createDocumentFromProposta($propostaData, $signers, $pdfContent, $sandbox = true)
     {
         $this->ensureTokenConfigured();
@@ -72,16 +72,25 @@ class AutentiqueService
             'message' => 'Documento para assinatura digital - Termo de Adesão AUPUS Energia'
         ];
 
-        // Salvar PDF temporário
+        // ✅ CORREÇÃO: Salvar PDF como arquivo temporário REAL (como no api_authentic)
         $tempDir = storage_path('app/temp');
         if (!is_dir($tempDir)) {
             mkdir($tempDir, 0755, true);
         }
         
-        $tempPdfPath = $tempDir . '/termo_' . time() . '.pdf';
+        $tempPdfPath = $tempDir . '/termo_' . time() . '_' . uniqid() . '.pdf';
+        
+        Log::info('📄 Salvando PDF temporário para Autentique', [
+            'temp_path' => $tempPdfPath,
+            'content_length' => strlen($pdfContent),
+            'is_pdf' => str_starts_with($pdfContent, '%PDF')
+        ]);
+        
+        // Salvar conteúdo como arquivo físico
         file_put_contents($tempPdfPath, $pdfContent);
 
         try {
+            // ✅ Usar o método que funcionava no api_authentic
             $result = $this->createSimpleDocument($documentData, $signers, $tempPdfPath, $sandbox);
             
             // Limpar arquivo temporário
@@ -441,11 +450,22 @@ class AutentiqueService
                 ];
             }
             
+            // DEBUG: Verificar o conteúdo PDF antes de decodificar
+            $pdfContent = base64_decode($dados['conteudo_pdf']);
+            
+            Log::info('=== DEBUG PDF CONTENT ===', [
+                'base64_length' => strlen($dados['conteudo_pdf']),
+                'decoded_length' => strlen($pdfContent),
+                'pdf_header' => substr($pdfContent, 0, 20),
+                'is_pdf' => str_starts_with($pdfContent, '%PDF'),
+                'pdf_version' => substr($pdfContent, 0, 8)
+            ]);
+            
             // Usar o método já existente
             return $this->createDocumentFromProposta(
                 ['nome_cliente' => $dados['nome']],
                 $signatarios,
-                base64_decode($dados['conteudo_pdf']),
+                $pdfContent,
                 env('AUTENTIQUE_SANDBOX', true)
             );
             
