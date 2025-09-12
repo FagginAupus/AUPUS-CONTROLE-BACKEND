@@ -1086,9 +1086,27 @@ class PropostaController extends Controller
                     $documentacaoAtual[$numeroUC]['emailRepresentante'] = $request->input('emailRepresentante');
                 }
 
-                if ($request->has('logradouroUC')) {
+                if ($numeroUC && $request->has('logradouroUC')) {
+                    $documentacaoAtual = json_decode($proposta->documentacao ?? '{}', true);
+                    
+                    // Garantir estrutura da UC
+                    if (!isset($documentacaoAtual[$numeroUC])) {
+                        $documentacaoAtual[$numeroUC] = [];
+                    }
+                    
+                    // Salvar logradouroUC no JSON da documentação
                     $documentacaoAtual[$numeroUC]['logradouroUC'] = $request->input('logradouroUC');
+                    
+                    $updateFields[] = 'documentacao = ?';
+                    $updateParams[] = json_encode($documentacaoAtual, JSON_UNESCAPED_UNICODE);
+                    
+                    Log::info('LogradouroUC salvo na documentação', [
+                        'proposta_id' => $id,
+                        'numero_uc' => $numeroUC,
+                        'logradouro' => $request->input('logradouroUC')
+                    ]);
                 }
+
 
                 if ($request->has('documentacao') && is_array($request->documentacao)) {
                     // Processar documentação específica da UC
