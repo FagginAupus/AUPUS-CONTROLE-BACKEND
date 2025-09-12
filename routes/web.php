@@ -143,3 +143,19 @@ Route::get('/download/propostas/{tipo}/{filename}', function ($tipo, $filename) 
     ]);
     
 })->where(['tipo' => '(documentos|faturas)', 'filename' => '.*']);
+
+Route::get('/storage/templates/{filename}', function ($filename) {
+    $path = storage_path('app/templates/' . $filename);
+    
+    if (!file_exists($path)) {
+        abort(404, 'Template PDF não encontrado: ' . $filename);
+    }
+    
+    return response()->file($path, [
+        'Content-Type' => 'application/pdf',
+        'Content-Disposition' => 'inline; filename="' . $filename . '"',
+        'Access-Control-Allow-Origin' => '*',
+        'Access-Control-Allow-Methods' => 'GET, OPTIONS',
+        'Access-Control-Allow-Headers' => 'Origin, Content-Type, Accept, Authorization'
+    ]);
+})->where('filename', '.*\.pdf$');

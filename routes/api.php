@@ -6,9 +6,10 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\PropostaController;
 use App\Http\Controllers\UnidadeConsumidoraController;
-use App\Http\Controllers\ControleController; // ADICIONADO
+use App\Http\Controllers\ControleController; 
 use App\Http\Controllers\ConfiguracaoController;
 use App\Http\Controllers\NotificacaoController;
+use App\Http\Controllers\DocumentController;
 
 /*
 |--------------------------------------------------------------------------
@@ -563,7 +564,48 @@ Route::middleware('auth:api')->group(function () {
             ], $overallStatus === 'healthy' ? 200 : 503);
         });
     });
+
+    // ==========================================
+    // DOCUMENTOS - Sistema de Assinatura Digital
+    // ==========================================
+    Route::prefix('documentos')->group(function () {
+        // Gerar dados para preenchimento do termo no frontend
+        Route::post('/propostas/{proposta}/gerar-termo', [DocumentController::class, 'gerarTermoAdesao'])
+            ->middleware('permission:prospec.edit');
+            
+        // Finalizar documento após preenchimento no frontend
+        Route::post('/finalizar', [DocumentController::class, 'finalizarDocumento'])
+            ->middleware('permission:prospec.edit');
+            
+        // Buscar status do documento de uma proposta
+        Route::get('/propostas/{proposta}/status', [DocumentController::class, 'buscarStatusDocumento'])
+            ->middleware('permission:prospec.view');
+            
+        // Listar documentos de uma proposta
+        Route::get('/propostas/{proposta}', [DocumentController::class, 'listarDocumentosProposta'])
+            ->middleware('permission:prospec.view');
+            
+        // Buscar documento específico
+        Route::get('/{documento}', [DocumentController::class, 'show'])
+            ->middleware('permission:prospec.view');
+            
+        // Reenviar convite de assinatura
+        Route::post('/{documento}/reenviar', [DocumentController::class, 'reenviarConvite'])
+            ->middleware('permission:prospec.edit');
+            
+        // Cancelar documento
+        Route::delete('/{documento}', [DocumentController::class, 'cancelarDocumento'])
+            ->middleware('permission:prospec.delete');
+    });
+    
+    // Rota de teste da API Autentique
+    Route::get('/documentos/test/autentique', [DocumentController::class, 'testarAutentique'])
+        ->middleware('permission:configuracoes.view');
 });
+
+// Webhook da Autentique (público - sem autenticação)
+Route::post('/documentos/webhook/autentique', [DocumentController::class, 'webhook']);
+Route::post('/webhook/autentique', [DocumentController::class, 'webhook']); // Rota alternativa
 
 // ==========================================
 // FALLBACK - Rotas não encontradas

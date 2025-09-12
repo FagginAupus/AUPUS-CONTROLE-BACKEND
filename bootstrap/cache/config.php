@@ -312,9 +312,12 @@
     array (
       0 => 'api/*',
       1 => 'sanctum/csrf-cookie',
-      2 => 'auth/*',
-      3 => 'health',
-      4 => 'health-check',
+      2 => 'storage/templates/*',
+      3 => 'documentos/*',
+      4 => 'webhook/*',
+      5 => 'auth/*',
+      6 => 'health',
+      7 => 'health-check',
     ),
     'allowed_methods' => 
     array (
@@ -327,6 +330,7 @@
       2 => 'https://localhost:3000',
       3 => 'http://localhost:3001',
       4 => 'http://127.0.0.1:3001',
+      5 => 'http://localhost:3000',
     ),
     'allowed_origins_patterns' => 
     array (

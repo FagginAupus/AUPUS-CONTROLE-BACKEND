@@ -18,6 +18,9 @@ return [
     'paths' => [
         'api/*', 
         'sanctum/csrf-cookie',
+        'storage/templates/*', 
+        'documentos/*',
+        'webhook/*',
         'auth/*',
         'health',
         'health-check'
@@ -31,6 +34,7 @@ return [
         'https://localhost:3000',
         'http://localhost:3001',
         'http://127.0.0.1:3001',
+         env('APP_FRONTEND_URL', 'http://localhost:3000'),
     ],
 
     'allowed_origins_patterns' => [
