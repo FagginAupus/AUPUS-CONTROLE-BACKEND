@@ -572,6 +572,9 @@ Route::middleware('auth:api')->group(function () {
         // Gerar dados para preenchimento do termo no frontend
         Route::post('/propostas/{proposta}/gerar-termo', [DocumentController::class, 'gerarTermoAdesao'])
             ->middleware('permission:prospec.edit');
+
+        Route::post('/propostas/{proposta}/gerar-termo-completo', [DocumentController::class, 'gerarTermoCompleto'])
+            ->middleware('permission:prospec.edit');
             
         // Finalizar documento após preenchimento no frontend
         Route::post('/finalizar', [DocumentController::class, 'finalizarDocumento'])
@@ -597,8 +600,6 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('/{documento}', [DocumentController::class, 'cancelarDocumento'])
             ->middleware('permission:prospec.delete');
 
-        Route::post('/propostas/{proposta}/gerar-termo-completo', [DocumentController::class, 'gerarTermoCompleto'])
-            ->middleware('permission:prospec.edit');
     });
     
     // Rota de teste da API Autentique
