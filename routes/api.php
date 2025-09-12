@@ -596,6 +596,9 @@ Route::middleware('auth:api')->group(function () {
         // Cancelar documento
         Route::delete('/{documento}', [DocumentController::class, 'cancelarDocumento'])
             ->middleware('permission:prospec.delete');
+
+        Route::post('/propostas/{proposta}/gerar-termo-completo', [DocumentController::class, 'gerarTermoCompleto'])
+            ->middleware('permission:prospec.edit');
     });
     
     // Rota de teste da API Autentique
