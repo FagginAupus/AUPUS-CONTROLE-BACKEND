@@ -1086,8 +1086,8 @@ class PropostaController extends Controller
                     $documentacaoAtual[$numeroUC]['emailRepresentante'] = $request->input('emailRepresentante');
                 }
 
-                if ($request->has('logadouroUC')) {
-                    $documentacaoAtual[$numeroUC]['logadouroUC'] = $request->input('logadouroUC');
+                if ($request->has('logradouroUC')) {
+                    $documentacaoAtual[$numeroUC]['logradouroUC'] = $request->input('logradouroUC');
                 }
 
                 if ($request->has('documentacao') && is_array($request->documentacao)) {
@@ -1227,7 +1227,7 @@ class PropostaController extends Controller
             Log::info('Proposta atualizada com sucesso', [
                 'proposta_id' => $id,
                 'user_id' => $currentUser->id,
-                'logadouro_alterado' => $request->has('logadouroUC'),
+                'logradouro_alterado' => $request->has('logradouroUC'),
                 'documentacao_alterada' => $request->has('documentacao'),
                 'campos_alterados' => array_keys($request->all())
             ]);
