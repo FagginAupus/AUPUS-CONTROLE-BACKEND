@@ -492,4 +492,117 @@ class DocumentController extends Controller
             ], 500);
         }
     }
+
+    public function gerarTermoCompleto(Request $request, $propostaId): JsonResponse
+    {
+        Log::info('=== INÍCIO GERAÇÃO TERMO COMPLETO ===', [
+            'proposta_id' => $propostaId,
+            'user_id' => auth()->id()
+        ]);
+
+        try {
+            // Reutilizar validação do método existente
+            $validator = Validator::make($request->all(), [
+                'nomeCliente' => 'required|string|max:255',
+                'numeroUC' => 'required|string',
+                'enderecoUC' => 'required|string',
+                'tipoDocumento' => 'required|in:CPF,CNPJ',
+                'nomeRepresentante' => 'required|string|max:255',
+                'enderecoRepresentante' => 'required|string',
+                'emailRepresentante' => 'required|email',
+                'whatsappRepresentante' => 'nullable|string',
+                'economia' => 'required|numeric|min:0|max:100',
+                'formaPagamento' => 'required|string',
+                'logradouro' => 'required|string'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados inválidos para gerar o termo',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Buscar proposta
+            $proposta = Proposta::findOrFail($propostaId);
+            
+            // Verificar documento existente
+            $documentoExistente = Document::where('proposta_id', $propostaId)
+                ->where('status', Document::STATUS_PENDING)
+                ->first();
+
+            if ($documentoExistente) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Já existe um termo pendente de assinatura para esta proposta',
+                    'documento' => [
+                        'id' => $documentoExistente->id,
+                        'status' => $documentoExistente->status,
+                        'nome' => $documentoExistente->name,
+                        'progresso' => $documentoExistente->signing_progress,
+                        'link_assinatura' => $documentoExistente->signing_url,
+                        'email_signatario' => $documentoExistente->signer_email
+                    ]
+                ], 409);
+            }
+
+            // 1. Gerar PDF usando o service
+            Log::info('📄 Gerando PDF...');
+            $dadosParaPDF = array_merge($request->all(), [
+                'numeroProposta' => $proposta->numero_proposta,
+                'nomeCliente' => $proposta->nome_cliente,
+                'consultor' => $proposta->consultor
+            ]);
+            
+            $pdfContent = $this->pdfGeneratorService->gerarTermoAdesao($dadosParaPDF);
+            
+            // 2. Enviar para Autentique
+            Log::info('📤 Enviando para Autentique...');
+            $documento = $this->autentiqueService->criarDocumento([
+                'nome' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'conteudo_pdf' => $pdfContent,
+                'signatarios' => [[
+                    'email' => $request->emailRepresentante,
+                    'nome' => $request->nomeRepresentante
+                ]]
+            ]);
+
+            // 3. Salvar no banco
+            $documentoSalvo = Document::create([
+                'proposta_id' => $propostaId,
+                'autentique_id' => $documento['id'],
+                'name' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'status' => Document::STATUS_PENDING,
+                'signer_email' => $request->emailRepresentante,
+                'signer_name' => $request->nomeRepresentante,
+                'signing_url' => $documento['link_assinatura'] ?? null,
+                'created_by' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Termo gerado e enviado para assinatura com sucesso!',
+                'documento' => [
+                    'id' => $documentoSalvo->id,
+                    'status' => $documentoSalvo->status,
+                    'nome' => $documentoSalvo->name,
+                    'link_assinatura' => $documentoSalvo->signing_url,
+                    'email_signatario' => $documentoSalvo->signer_email
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao gerar termo completo', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno ao gerar termo: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

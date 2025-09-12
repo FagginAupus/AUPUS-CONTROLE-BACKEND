@@ -226,4 +226,50 @@ class PDFGeneratorService
         </body>
         </html>';
     }
+
+
+    public function gerarTermoAdesao(array $dados): string
+    {
+        Log::info('📄 Iniciando geração de PDF - Termo de Adesão');
+        
+        try {
+            // Preparar dados formatados
+            $dadosFormatados = $this->prepararDadosParaPDF($dados);
+            
+            // Usar método existente
+            return $this->gerarTermoPreenchido($dadosFormatados);
+            
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao gerar PDF', [
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+    }
+
+    private function prepararDadosParaPDF(array $dados): array
+    {
+        $agora = \Carbon\Carbon::now();
+        
+        // Determinar CPF/CNPJ baseado no tipo
+        $cpfCnpj = '';
+        if (($dados['tipoDocumento'] ?? '') === 'CPF') {
+            $cpfCnpj = $dados['cpf'] ?? '';
+        } else {
+            $cpfCnpj = $dados['cnpj'] ?? '';
+        }
+
+        return [
+            'nomeAssociado' => $dados['nomeCliente'] ?? '',
+            'endereco' => $dados['enderecoUC'] ?? '',
+            'formaPagamento' => $dados['formaPagamento'] ?? 'Boleto',
+            'cpf' => $cpfCnpj,
+            'representanteLegal' => $dados['nomeRepresentante'] ?? '',
+            'numeroUnidade' => $dados['numeroUC'] ?? '',
+            'logradouro' => $dados['logradouro'] ?? '',
+            'dia' => $agora->format('d'),
+            'mes' => $agora->format('m'),
+            'economia' => $dados['economia'] ?? '0'
+        ];
+    }
 }

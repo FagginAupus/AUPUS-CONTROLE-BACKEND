@@ -423,4 +423,37 @@ class AutentiqueService
             throw new \Exception('Erro de conexão com a API da Autentique: ' . $e->getMessage());
         }
     }
+
+    public function criarDocumento(array $dados): array
+    {
+        Log::info('📤 Criando documento na Autentique', [
+            'nome' => $dados['nome']
+        ]);
+        
+        try {
+            // Preparar signatários no formato correto
+            $signatarios = [];
+            foreach ($dados['signatarios'] as $signatario) {
+                $signatarios[] = [
+                    'email' => $signatario['email'],
+                    'action' => 'SIGN',
+                    'name' => $signatario['nome']
+                ];
+            }
+            
+            // Usar o método já existente
+            return $this->createDocumentFromProposta(
+                ['nome_cliente' => $dados['nome']],
+                $signatarios,
+                base64_decode($dados['conteudo_pdf']),
+                env('AUTENTIQUE_SANDBOX', true)
+            );
+            
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao criar documento na Autentique', [
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+    }
 }
