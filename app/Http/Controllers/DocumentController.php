@@ -39,16 +39,15 @@ class DocumentController extends Controller
             // Validação dos dados recebidos
             $validator = Validator::make($request->all(), [
                 'nomeCliente' => 'required|string|max:255',
-                'numeroUC' => 'required|string',
+                'numeroUC' => 'required',
                 'enderecoUC' => 'required|string',
                 'tipoDocumento' => 'required|in:CPF,CNPJ',
                 'nomeRepresentante' => 'required|string|max:255',
                 'enderecoRepresentante' => 'required|string',
                 'emailRepresentante' => 'required|email',
                 'whatsappRepresentante' => 'nullable|string',
-                'economia' => 'required|numeric|min:0|max:100',
-                'formaPagamento' => 'required|string',
-                'logradouro' => 'required|string'
+                'descontoTarifa' => 'required|numeric|min:0|max:100',
+                'logradouroUC' => 'required|string'
             ]);
 
             if ($validator->fails()) {
@@ -183,14 +182,14 @@ class DocumentController extends Controller
         return [
             'nomeAssociado' => $dados['nomeCliente'] ?? '',
             'endereco' => $dados['enderecoUC'] ?? '',
-            'formaPagamento' => 'Boleto', // ← fixo por enquanto
+            'formaPagamento' => 'Boleto', // ← Sempre fixo
             'cpf' => $cpfCnpj,
             'representanteLegal' => $dados['nomeRepresentante'] ?? '',
-            'numeroUnidade' => $dados['numeroUC'] ?? '',
-            'logradouro' => $dados['logradouroUC'] ?? '', // ← mudou aqui
+            'numeroUnidade' => (string)($dados['numeroUC'] ?? ''),
+            'logradouro' => $dados['logradouroUC'] ?? '',
             'dia' => $agora->format('d'),
             'mes' => $agora->format('m'),
-            'economia' => $dados['descontoTarifa'] ?? '0' // ← usar descontoTarifa
+            'economia' => $dados['descontoTarifa'] ?? '0'
         ];
     }
 
@@ -513,7 +512,7 @@ class DocumentController extends Controller
             // Reutilizar validação do método existente
             $validator = Validator::make($request->all(), [
                 'nomeCliente' => 'required|string|max:255',
-                'numeroUC' => 'required|string',
+                'numeroUC' => 'required',
                 'enderecoUC' => 'required|string',
                 'tipoDocumento' => 'required|in:CPF,CNPJ',
                 'nomeRepresentante' => 'required|string|max:255',
@@ -525,6 +524,25 @@ class DocumentController extends Controller
             ]);
 
             if ($validator->fails()) {
+                // Debug detalhado dos erros de validação
+                Log::error('=== VALIDAÇÃO FALHOU - DEBUG DETALHADO ===', [
+                    'errors' => $validator->errors()->all(),
+                    'errors_by_field' => $validator->errors()->toArray(),
+                    'campos_recebidos' => array_keys($request->all()),
+                    'valores_problemáticos' => [
+                        'numeroUC' => [
+                            'valor' => $request->numeroUC,
+                            'tipo' => gettype($request->numeroUC),
+                            'é_string' => is_string($request->numeroUC)
+                        ],
+                        'descontoTarifa' => [
+                            'valor' => $request->descontoTarifa,
+                            'tipo' => gettype($request->descontoTarifa),
+                            'é_numeric' => is_numeric($request->descontoTarifa)
+                        ]
+                    ]
+                ]);
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Dados inválidos para gerar o termo',
@@ -567,7 +585,7 @@ class DocumentController extends Controller
             
             // 2. Enviar para Autentique
             Log::info('📤 Enviando para Autentique...');
-            $documento = $this->autentiqueService->criarDocumento([
+            $resultado = $this->autentiqueService->criarDocumento([
                 'nome' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'conteudo_pdf' => $pdfContent,
                 'signatarios' => [[
@@ -576,16 +594,39 @@ class DocumentController extends Controller
                 ]]
             ]);
 
+            // ✅ CORREÇÃO: Acessar a estrutura correta da resposta
+            $documento = $resultado['createDocument'] ?? $resultado;
+
+            Log::info('=== DEBUG DOCUMENTO RETORNADO ===', [
+                'resultado_keys' => array_keys($resultado),
+                'documento_keys' => array_keys($documento),
+                'documento_id' => $documento['id'] ?? 'NAO_ENCONTRADO'
+            ]);
+
             // 3. Salvar no banco
             $documentoSalvo = Document::create([
-                'proposta_id' => $propostaId,
+                'proposta_id' => $proposta->id,
                 'autentique_id' => $documento['id'],
                 'name' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'status' => Document::STATUS_PENDING,
                 'signer_email' => $request->emailRepresentante,
                 'signer_name' => $request->nomeRepresentante,
-                'signing_url' => $documento['link_assinatura'] ?? null,
-                'created_by' => auth()->id()
+                'signing_url' => $documento['signatures'][0]['link']['short_link'] ?? null,
+                'created_by' => auth()->id(),
+                
+                // ✅ ADICIONAR CAMPOS OBRIGATÓRIOS:
+                'document_data' => $request->all(), // Dados da requisição
+                'signers' => [[
+                    'email' => $request->emailRepresentante,
+                    'name' => $request->nomeRepresentante,
+                    'action' => 'SIGN'
+                ]], // Array de signatários
+                'autentique_response' => $documento, // Resposta da Autentique
+                'is_sandbox' => env('AUTENTIQUE_SANDBOX', true),
+                'total_signers' => 1,
+                'signed_count' => 0,
+                'rejected_count' => 0,
+                'autentique_created_at' => $documento['created_at'] ?? now()
             ]);
 
             return response()->json([

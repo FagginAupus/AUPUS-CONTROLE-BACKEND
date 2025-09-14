@@ -59,7 +59,7 @@ class AutentiqueService
     /**
      * Cria um documento na Autentique a partir dos dados da proposta
      */
-    
+
     public function createDocumentFromProposta($propostaData, $signers, $pdfContent, $sandbox = true)
     {
         $this->ensureTokenConfigured();
@@ -114,8 +114,10 @@ class AutentiqueService
      */
     public function createSimpleDocument($documentData, $signers, $filePath, $sandbox = false)
     {
-        $this->ensureTokenConfigured();
-        
+        if (!$this->token) {
+            throw new \Exception('Token da Autentique não configurado no .env');
+        }
+
         if (!file_exists($filePath)) {
             throw new \Exception('Arquivo PDF não encontrado: ' . $filePath);
         }
@@ -450,15 +452,14 @@ class AutentiqueService
                 ];
             }
             
-            // DEBUG: Verificar o conteúdo PDF antes de decodificar
-            $pdfContent = base64_decode($dados['conteudo_pdf']);
+            // ✅ CORREÇÃO: NÃO decodificar - o conteúdo já é binário
+            $pdfContent = $dados['conteudo_pdf']; // Remover base64_decode
             
             Log::info('=== DEBUG PDF CONTENT ===', [
-                'base64_length' => strlen($dados['conteudo_pdf']),
-                'decoded_length' => strlen($pdfContent),
-                'pdf_header' => substr($pdfContent, 0, 20),
+                'content_type' => gettype($dados['conteudo_pdf']),
+                'content_length' => strlen($pdfContent),
                 'is_pdf' => str_starts_with($pdfContent, '%PDF'),
-                'pdf_version' => substr($pdfContent, 0, 8)
+                'pdf_header' => substr($pdfContent, 0, 8)
             ]);
             
             // Usar o método já existente
