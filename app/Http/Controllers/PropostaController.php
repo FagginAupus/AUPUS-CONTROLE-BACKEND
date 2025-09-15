@@ -1501,12 +1501,35 @@ class PropostaController extends Controller
     public function popularControleAutomaticoParaUC($proposta_id, $numero_uc)
     {
         try {
-            $currentUser = JWTAuth::user();
+            // ✅ TENTAR PEGAR USUÁRIO LOGADO, SE FALHAR BUSCAR DA PROPOSTA
+            try {
+                $currentUser = JWTAuth::user();
+                $usuarioId = $currentUser ? $currentUser->id : null;
+            } catch (\Exception $e) {
+                $currentUser = null;
+                $usuarioId = null;
+            }
+            
+            // Se não há usuário logado (webhook), buscar usuário da proposta
+            if (!$usuarioId) {
+                $usuarioProposta = DB::selectOne(
+                    "SELECT usuario_id FROM propostas WHERE id = ?", 
+                    [$proposta_id]
+                );
+                $usuarioId = $usuarioProposta ? $usuarioProposta->usuario_id : '01K2CPBYE07B3HWW0CZHHB3ZCR';
+                
+                Log::info('Usando usuário da proposta (sem autenticação JWT)', [
+                    'proposta_id' => $proposta_id,
+                    'usuario_id' => $usuarioId,
+                    'contexto' => 'webhook'
+                ]);
+            }
             
             Log::info('Iniciando population do controle para UC específica', [
                 'proposta_id' => $proposta_id,
                 'numero_uc' => $numero_uc,
-                'user_id' => $currentUser->id
+                'user_id' => $usuarioId,
+                'tem_jwt' => !is_null($currentUser)
             ]);
             
             // ✅ BUSCAR PROPOSTA
@@ -1533,44 +1556,33 @@ class PropostaController extends Controller
                     break;
                 }
             }
-
+            
             if (!$ucEspecifica) {
-                Log::warning('UC específica não encontrada', [
+                Log::warning('UC específica não encontrada na proposta', [
                     'proposta_id' => $proposta_id,
                     'numero_uc' => $numero_uc
                 ]);
                 return false;
             }
 
-            Log::info('UC específica encontrada para processar', [
-                'proposta_id' => $proposta_id,
-                'numero_uc' => $numero_uc,
+            $numeroUC = $ucEspecifica['numero_unidade'] ?? $ucEspecifica['numeroUC'];
+
+            Log::info('UC encontrada para processar', [
+                'numero_uc' => $numeroUC,
                 'uc_data' => $ucEspecifica
             ]);
 
-            // ✅ PROCESSAR APENAS ESTA UC
-            $numeroUC = $ucEspecifica['numero_unidade'] ?? $ucEspecifica['numeroUC'] ?? $numero_uc;
+            // ✅ VERIFICAR SE UC JÁ EXISTE NA TABELA unidades_consumidoras
+            $ucExistente = DB::selectOne(
+                "SELECT id FROM unidades_consumidoras WHERE numero_unidade = ?", 
+                [$numeroUC]
+            );
 
-            if (empty($numeroUC)) {
-                Log::warning('Número da UC não encontrado', ['uc_data' => $ucEspecifica]);
-                return false;
-            }
-
-            // ✅ BUSCAR OU CRIAR UC NO BANCO
-            $ucBanco = DB::selectOne("
-                SELECT id FROM unidades_consumidoras 
-                WHERE numero_unidade = ? AND usuario_id = ? AND deleted_at IS NULL
-            ", [$numeroUC, $currentUser->id]);
-
-            $ucIdFinal = null;
-
-            if ($ucBanco) {
-                $ucIdFinal = $ucBanco->id;
-                Log::info('UC já existe no banco', ['uc_id' => $ucIdFinal, 'numero_uc' => $numeroUC]);
-            } else {
-                // ✅ CRIAR UC NO BANCO
-                $ucIdFinal = \Illuminate\Support\Str::ulid()->toString();
+            if (!$ucExistente) {
+                // ✅ GERAR ULID PARA A UC
+                $ucId = \Illuminate\Support\Str::ulid()->toString();
                 
+                // ✅ INSERIR UC NA TABELA com os campos corretos
                 DB::insert("
                     INSERT INTO unidades_consumidoras (
                         id, usuario_id, concessionaria_id, endereco_id, numero_unidade, 
@@ -1579,96 +1591,83 @@ class PropostaController extends Controller
                         created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 ", [
-                    $ucIdFinal,                                          // id (ULID)
-                    $currentUser->id,                                    // usuario_id (usuário logado)
-                    '01JB849ZDG0RPC5EB8ZFTB4GJN',                       // concessionaria_id (EQUATORIAL)
-                    null,                                                // endereco_id (deixar em branco por enquanto)
-                    $numeroUC,                                           // numero_unidade
-                    $ucEspecifica['apelido'] ?? 'UC ' . $numeroUC,      // apelido
+                    $ucId,                                          // id (ULID)
+                    $usuarioId,                                     // usuario_id
+                    '01JB849ZDG0RPC5EB8ZFTB4GJN',                  // concessionaria_id (EQUATORIAL)
+                    null,                                           // endereco_id
+                    $numeroUC,                                      // numero_unidade
+                    $ucEspecifica['apelido'] ?? 'UC ' . $numeroUC, // apelido
                     $ucEspecifica['consumo_medio'] ?? $ucEspecifica['media'] ?? 0, // consumo_medio
-                    $ucEspecifica['ligacao'] ?? 'Monofásica',           // ligacao
-                    $ucEspecifica['distribuidora'] ?? 'EQUATORIAL GO',   // distribuidora
-                    $proposta_id,                                        // proposta_id
+                    $ucEspecifica['ligacao'] ?? 'Monofásica',       // ligacao
+                    $ucEspecifica['distribuidora'] ?? 'EQUATORIAL GO', // distribuidora
+                    $proposta_id,                                   // proposta_id
                     $ucEspecifica['endereco_uc'] ?? $ucEspecifica['localizacao'] ?? null, // localizacao
-                    false,                                               // gerador (sempre false para UCs normais)
-                    'B',                                                 // grupo
+                    false,                                          // gerador (sempre false para UCs normais)
+                    'B',                                           // grupo
                     $this->extrairValorDesconto($proposta->desconto_tarifa), // desconto_fatura
                     $this->extrairValorDesconto($proposta->desconto_bandeira), // desconto_bandeira
                 ]);
 
-                Log::info('UC criada no banco para UC específica', ['uc_id' => $ucIdFinal, 'numero_uc' => $numeroUC]);
+                Log::info('UC criada na tabela unidades_consumidoras', [
+                    'uc_id' => $ucId,
+                    'numero_unidade' => $numeroUC,
+                    'proposta_id' => $proposta_id,
+                    'usuario_id' => $usuarioId
+                ]);
+
+                $ucIdFinal = $ucId;
+            } else {
+                $ucIdFinal = $ucExistente->id;
+                Log::info('UC já existia na tabela', [
+                    'uc_id' => $ucIdFinal,
+                    'numero_unidade' => $numeroUC
+                ]);
             }
 
             // ✅ VERIFICAR SE JÁ EXISTE CONTROLE PARA ESTA UC
-            $controleExistente = DB::selectOne("
-                SELECT id, deleted_at FROM controle_clube 
-                WHERE proposta_id = ? AND uc_id = ?", 
+            $controleExistente = DB::selectOne(
+                "SELECT id, deleted_at FROM controle_clube WHERE proposta_id = ? AND uc_id = ?",
                 [$proposta_id, $ucIdFinal]
             );
 
-            if (!$controleExistente) {
-                // ✅ GERAR ULID PARA O CONTROLE
+            if ($controleExistente) {
+                if ($controleExistente->deleted_at) {
+                    // ✅ REATIVAR CONTROLE (REMOVER SOFT DELETE)
+                    DB::update("UPDATE controle_clube SET deleted_at = NULL WHERE id = ?", [$controleExistente->id]);
+                    
+                    Log::info('Controle reativado (removido soft delete)', [
+                        'controle_id' => $controleExistente->id,
+                        'proposta_id' => $proposta_id,
+                        'uc_id' => $ucIdFinal,
+                        'numero_uc' => $numeroUC
+                    ]);
+                } else {
+                    Log::info('Controle já existia ativo para esta UC', [
+                        'controle_existente_id' => $controleExistente->id,
+                        'proposta_id' => $proposta_id,
+                        'uc_id' => $ucIdFinal,
+                        'numero_uc' => $numeroUC
+                    ]);
+                }
+            } else {
+                // ✅ CRIAR NOVO CONTROLE
                 $controleId = \Illuminate\Support\Str::ulid()->toString();
                 
-                // ✅ CRIAR CONTROLE
                 DB::insert("
                     INSERT INTO controle_clube (
-                        id, proposta_id, uc_id, calibragem, 
+                        id, proposta_id, uc_id, calibragem, valor_calibrado,
                         data_entrada_controle, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, NOW(), NOW(), NOW())
+                    ) VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())
                 ", [
                     $controleId,
                     $proposta_id,
                     $ucIdFinal,
-                    0.00
+                    0, // calibragem padrão
+                    floatval($ucEspecifica['consumo_medio'] ?? $ucEspecifica['media'] ?? 0)
                 ]);
 
-                // ADICIONAR AQUI:
-                AuditoriaService::registrar('controle_clube', $controleId, 'CRIADO', [
-                    'entidade_relacionada' => 'propostas',
-                    'entidade_relacionada_id' => $proposta_id,
-                    'sub_acao' => 'CRIACAO_POR_STATUS_FECHADA',
-                    'metadados' => [
-                        'proposta_id' => $proposta_id,
-                        'uc_id' => $ucIdFinal,
-                        'numero_uc' => $numeroUC,
-                        'motivo' => 'Status alterado para Fechada'
-                    ]
-                ]);
-
-                Log::info('Controle criado com sucesso para UC específica', [
+                Log::info('Novo controle criado para UC', [
                     'controle_id' => $controleId,
-                    'proposta_id' => $proposta_id,
-                    'uc_id' => $ucIdFinal,
-                    'numero_uc' => $numeroUC
-                ]);
-            } elseif ($controleExistente->deleted_at !== null) {
-                // ✅ REATIVAR CONTROLE SOFT DELETED
-                DB::update("
-                    UPDATE controle_clube 
-                    SET deleted_at = NULL, updated_at = NOW() 
-                    WHERE id = ?
-                ", [$controleExistente->id]);
-                
-                // ✅ REGISTRAR AUDITORIA DA REATIVAÇÃO
-                AuditoriaService::registrarReativacaoControle(
-                    $proposta_id,
-                    $ucIdFinal,
-                    $controleExistente->id,
-                    $statusAnterior ?? 'Aguardando',  // Para popularControleAutomatico use um valor padrão
-                    'Fechada'
-                );
-                
-                Log::info('Controle reativado (removido soft delete)', [
-                    'controle_id' => $controleExistente->id,
-                    'proposta_id' => $proposta_id,
-                    'uc_id' => $ucIdFinal,
-                    'numero_uc' => $numeroUC
-                ]);
-            }
-            else {
-                Log::info('Controle já existia ativo para esta UC', [
-                    'controle_existente_id' => $controleExistente->id,
                     'proposta_id' => $proposta_id,
                     'uc_id' => $ucIdFinal,
                     'numero_uc' => $numeroUC
@@ -2569,23 +2568,20 @@ class PropostaController extends Controller
         return $numero . '%';
     }
 
-    private function extrairValorDesconto($desconto): float
+    private function extrairValorDesconto($desconto)
     {
-        if (is_string($desconto) && str_ends_with($desconto, '%')) {
-            $valor = floatval(str_replace('%', '', $desconto));
-            \Log::info('🔍 Extraindo desconto:', [
-                'original' => $desconto,
-                'extraido' => $valor
-            ]);
-            return $valor;
+        if (empty($desconto)) return 0;
+        
+        // Se já for número, retorna
+        if (is_numeric($desconto)) {
+            return floatval($desconto);
         }
         
-        $valor = floatval($desconto);
-        \Log::info('🔍 Desconto numérico:', [
-            'original' => $desconto,
-            'convertido' => $valor
-        ]);
-        return $valor;
+        // Se for string, extrai o número
+        $numeroStr = preg_replace('/[^0-9.,]/', '', $desconto);
+        $numeroStr = str_replace(',', '.', $numeroStr);
+        
+        return floatval($numeroStr) ?: 0;
     }
 
     /**
