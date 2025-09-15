@@ -10,6 +10,7 @@ class Document extends Model
     const STATUS_PENDING = 'pending';
     const STATUS_SIGNED = 'signed';
     const STATUS_REJECTED = 'rejected';
+    const STATUS_CANCELLED = 'cancelled';
     
     protected $fillable = [
         'autentique_id',
@@ -25,7 +26,9 @@ class Document extends Model
         'rejected_count',
         'autentique_created_at',
         'last_checked_at',
-        'created_by'
+        'created_by',
+        'cancelled_at',     
+        'cancelled_by'
     ];
 
     protected $casts = [
@@ -35,6 +38,7 @@ class Document extends Model
         'is_sandbox' => 'boolean',
         'autentique_created_at' => 'datetime',
         'last_checked_at' => 'datetime',
+        'cancelled_at' => 'datetime',
     ];
 
     public function proposta(): BelongsTo
@@ -59,8 +63,14 @@ class Document extends Model
             self::STATUS_PENDING => 'Aguardando Assinatura',
             self::STATUS_SIGNED => 'Assinado',
             self::STATUS_REJECTED => 'Rejeitado',
+            self::STATUS_CANCELLED => 'Cancelado',
             default => 'Status Desconhecido'
         };
+    }
+
+    public function isCancelled(): bool  // ← ADICIONAR MÉTODO
+    {
+        return $this->status === self::STATUS_CANCELLED;
     }
 
     public function isCompleted(): bool
