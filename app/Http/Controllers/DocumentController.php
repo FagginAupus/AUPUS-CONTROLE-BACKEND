@@ -99,7 +99,7 @@ class DocumentController extends Controller
                 $dadosParaPDF,
                 $signatarios,
                 $pdfContent,
-                env('AUTENTIQUE_SANDBOX', true)
+                env('AUTENTIQUE_SANDBOX', false)
             );
 
             // Salvar documento no banco local
@@ -107,7 +107,7 @@ class DocumentController extends Controller
                 'autentique_id' => $resultado['id'],
                 'name' => $dadosParaPDF['nomeAssociado'] ? "Termo de Adesão - {$dadosParaPDF['nomeAssociado']}" : "Termo de Adesão",
                 'status' => Document::STATUS_PENDING,
-                'is_sandbox' => env('AUTENTIQUE_SANDBOX', true),
+                'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
                 'proposta_id' => $propostaId,
                 'document_data' => $dadosParaPDF,
                 'signers' => $signatarios,
@@ -229,7 +229,7 @@ class DocumentController extends Controller
                 $request->dados,
                 $request->signatarios,
                 $pdfContent,
-                $request->sandbox ?? env('AUTENTIQUE_SANDBOX', true)
+                $request->sandbox ?? env('AUTENTIQUE_SANDBOX', false)
             );
 
             // Salvar documento no banco local
@@ -237,7 +237,7 @@ class DocumentController extends Controller
                 'autentique_id' => $resultado['id'],
                 'name' => $request->dados['nomeAssociado'] ? "Termo de Adesão - {$request->dados['nomeAssociado']}" : "Termo de Adesão",
                 'status' => Document::STATUS_PENDING,
-                'is_sandbox' => $request->sandbox ?? env('AUTENTIQUE_SANDBOX', true),
+                'is_sandbox' => $request->sandbox ?? env('AUTENTIQUE_SANDBOX', false),
                 'proposta_id' => $request->proposta_id,
                 'document_data' => $request->dados,
                 'signers' => $request->signatarios,
@@ -379,7 +379,12 @@ class DocumentController extends Controller
                 // Buscar proposta e alterar status da UC
                 $proposta = \App\Models\Proposta::find($localDocument->proposta_id);
                 if ($proposta) {
-                    $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                    $unidadesConsumidoras = $proposta->unidades_consumidoras;
+                    if (is_string($unidadesConsumidoras)) {
+                        $unidadesConsumidoras = json_decode($unidadesConsumidoras, true);
+                    } elseif (!is_array($unidadesConsumidoras)) {
+                        $unidadesConsumidoras = [];
+                    }
                     
                     foreach ($unidadesConsumidoras as &$uc) {
                         if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
@@ -638,7 +643,7 @@ class DocumentController extends Controller
                     'action' => 'SIGN'
                 ]],
                 'autentique_response' => $documento,
-                'is_sandbox' => env('AUTENTIQUE_SANDBOX', true),
+                'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
                 'total_signers' => 1,
                 'signed_count' => 0,
                 'rejected_count' => 0,
@@ -803,7 +808,7 @@ class DocumentController extends Controller
                 'document_data' => $request->dados,
                 'signers' => [$request->signatario],
                 'autentique_response' => $documento,
-                'is_sandbox' => env('AUTENTIQUE_SANDBOX', true),
+                'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
                 'total_signers' => 1,
                 'signed_count' => 0,
                 'rejected_count' => 0,

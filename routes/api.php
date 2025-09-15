@@ -395,8 +395,8 @@ Route::middleware('auth:api')->group(function () {
         ->middleware('permission:prospec.edit');
 
     // Rota para baixar PDF assinado  
-    Route::get('/documentos/propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado'])
-        ->middleware('permission:prospec.view');
+    Route::get('/documentos/propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado']);
+        //->middleware('permission:prospec.view');
 
     // ==========================================
     // DASHBOARD - Dados gerais do dashboard

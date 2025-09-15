@@ -467,7 +467,7 @@ class AutentiqueService
                 ['nome_cliente' => $dados['nome']],
                 $signatarios,
                 $pdfContent,
-                env('AUTENTIQUE_SANDBOX', true)
+                env('AUTENTIQUE_SANDBOX', false)
             );
             
         } catch (\Exception $e) {
@@ -475,6 +475,41 @@ class AutentiqueService
                 'error' => $e->getMessage()
             ]);
             throw $e;
+        }
+    }
+    public function downloadSignedDocument($documentId)
+    {
+        try {
+            Log::info('Tentando baixar PDF assinado', ['document_id' => $documentId]);
+            
+            // URL direta do PDF assinado baseada no padrão da Autentique
+            $pdfUrl = "https://api.autentique.com.br/documentos/{$documentId}/assinado.pdf";
+            
+            Log::info('Baixando PDF da URL', ['url' => $pdfUrl]);
+            
+            // Baixar o PDF diretamente
+            $context = stream_context_create([
+                'http' => [
+                    'header' => "Authorization: Bearer " . $this->token
+                ]
+            ]);
+            
+            $pdfContent = file_get_contents($pdfUrl, false, $context);
+            
+            if (!$pdfContent) {
+                Log::error('Erro ao baixar PDF da URL', ['url' => $pdfUrl]);
+                return null;
+            }
+            
+            Log::info('PDF baixado com sucesso', ['size' => strlen($pdfContent)]);
+            return $pdfContent;
+            
+        } catch (\Exception $e) {
+            Log::error('Erro ao baixar documento assinado', [
+                'document_id' => $documentId,
+                'error' => $e->getMessage()
+            ]);
+            return null;
         }
     }
 }
