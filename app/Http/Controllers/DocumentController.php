@@ -301,8 +301,11 @@ class DocumentController extends Controller
         ]);
 
         try {
-            $eventType = $request->input('event') ?? $request->input('type');
-            $eventData = $request->input('data') ?? $request->all();
+            // A estrutura do webhook da Autentique é diferente do esperado
+            $webhookBody = $request->all();
+            $event = $webhookBody['event'] ?? [];
+            $eventType = $event['type'] ?? null;
+            $eventData = $event['data'] ?? [];
 
             Log::info('📥 Processando evento webhook', [
                 'event_type' => $eventType,
@@ -311,19 +314,23 @@ class DocumentController extends Controller
 
             switch ($eventType) {
                 case 'document.finished':
-                    $this->handleDocumentFinished($eventData, $request->all());
+                    $this->handleDocumentFinished($eventData, $webhookBody);
+                    break;
+                    
+                case 'document.created':  // NOVO CASO ADICIONADO
+                    $this->handleDocumentCreated($eventData, $webhookBody);
                     break;
                     
                 case 'document.updated':
-                    $this->handleDocumentUpdated($eventData, $request->all());
+                    $this->handleDocumentUpdated($eventData, $webhookBody);
                     break;
                     
                 case 'signature.accepted':
-                    $this->handleSignatureAccepted($eventData, $request->all());
+                    $this->handleSignatureAccepted($eventData, $webhookBody);
                     break;
                     
                 case 'signature.rejected':
-                    $this->handleSignatureRejected($eventData, $request->all());
+                    $this->handleSignatureRejected($eventData, $webhookBody);
                     break;
                     
                 default:
@@ -341,6 +348,104 @@ class DocumentController extends Controller
 
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
+    }
+
+    private function handleDocumentCreated(array $eventData, array $fullEvent)
+    {
+        $documentId = $eventData['id'] ?? null;
+        if (!$documentId) return;
+
+        $localDocument = Document::where('autentique_id', $documentId)->first();
+        if (!$localDocument) {
+            Log::warning('Documento não encontrado localmente', ['document_id' => $documentId]);
+            return;
+        }
+
+        // Atualizar status para "enviado" ou manter pendente
+        $localDocument->update([
+            'status' => Document::STATUS_PENDING, // ou STATUS_SENT se existir
+            'last_checked_at' => now(),
+            'autentique_response' => $fullEvent
+        ]);
+
+        // Verificar se email foi enviado
+        $emailEnviado = false;
+        if (isset($eventData['signatures'])) {
+            foreach ($eventData['signatures'] as $signature) {
+                if (!empty($signature['mail']['sent'])) {
+                    $emailEnviado = true;
+                    break;
+                }
+            }
+        }
+
+        Log::info('📧 DOCUMENTO CRIADO E ENVIADO!', [
+            'document_id' => $documentId,
+            'document_name' => $localDocument->name,
+            'email_enviado' => $emailEnviado
+        ]);
+    }
+
+    /**
+     * Handle document.updated - documento foi atualizado
+     */
+    private function handleDocumentUpdated(array $eventData, array $fullEvent)
+    {
+        $documentId = $eventData['id'] ?? null;
+        if (!$documentId) return;
+
+        $localDocument = Document::where('autentique_id', $documentId)->first();
+        if (!$localDocument) {
+            Log::warning('Documento não encontrado localmente', ['document_id' => $documentId]);
+            return;
+        }
+
+        // Verificar se documento foi visualizado ou assinado parcialmente
+        $signedCount = $eventData['signed_count'] ?? 0;
+        $previousSignedCount = $fullEvent['event']['previous_attributes']['signed_count'] ?? 0;
+
+        // Se houve mudança no contador de assinaturas, algo importante aconteceu
+        if ($signedCount != $previousSignedCount) {
+            $localDocument->update([
+                'signed_count' => $signedCount,
+                'last_checked_at' => now(),
+                'autentique_response' => $fullEvent
+            ]);
+
+            // Verificar se alguém visualizou ou assinou
+            $ultimosEventos = [];
+            if (isset($eventData['signatures'])) {
+                foreach ($eventData['signatures'] as $signature) {
+                    if (isset($signature['events']) && is_array($signature['events'])) {
+                        $ultimosEventos = array_merge($ultimosEventos, $signature['events']);
+                    }
+                }
+            }
+
+            // Verificar eventos recentes
+            foreach ($ultimosEventos as $evento) {
+                if ($evento['type'] === 'viewed') {
+                    Log::info('👀 DOCUMENTO VISUALIZADO!', [
+                        'document_id' => $documentId,
+                        'user' => $evento['user']['name'] ?? 'N/A',
+                        'viewed_at' => $evento['created_at'] ?? now()
+                    ]);
+                } elseif ($evento['type'] === 'signed') {
+                    Log::info('✍️ ASSINATURA REALIZADA!', [
+                        'document_id' => $documentId,
+                        'user' => $evento['user']['name'] ?? 'N/A',
+                        'signed_at' => $evento['created_at'] ?? now(),
+                        'signed_count' => $signedCount
+                    ]);
+                }
+            }
+        }
+
+        Log::info('📝 Documento atualizado via webhook', [
+            'document_id' => $documentId,
+            'status' => $localDocument->status,
+            'signed_count' => $signedCount
+        ]);
     }
 
     /**
@@ -368,9 +473,12 @@ class DocumentController extends Controller
         Log::info('🎉 DOCUMENTO TOTALMENTE ASSINADO!', [
             'document_id' => $localDocument->autentique_id,
             'document_name' => $localDocument->name,
-            'proposta_id' => $localDocument->proposta_id
+            'proposta_id' => $localDocument->proposta_id,
+            'status_anterior' => $oldStatus,
+            'status_novo' => Document::STATUS_SIGNED
         ]);
         
+        // Lógica automática quando documento for assinado
         if ($localDocument->proposta_id && $localDocument->document_data) {
             $dadosDocumento = $localDocument->document_data;
             $numeroUC = $dadosDocumento['numeroUC'] ?? null;
@@ -391,7 +499,7 @@ class DocumentController extends Controller
                             $statusAnterior = $uc['status'] ?? null;
                             $uc['status'] = 'Fechada';
                             
-                            Log::info('Status UC alterado automaticamente após assinatura', [
+                            Log::info('✅ STATUS UC ALTERADO AUTOMATICAMENTE APÓS ASSINATURA', [
                                 'proposta_id' => $localDocument->proposta_id,
                                 'numero_uc' => $numeroUC,
                                 'status_anterior' => $statusAnterior,
@@ -406,36 +514,22 @@ class DocumentController extends Controller
                     ]);
                     
                     // Adicionar ao controle automaticamente
-                    if ($numeroUC) {
-                        // Usar método existente para popular controle
+                    try {
                         app(PropostaController::class)->popularControleAutomaticoParaUC($localDocument->proposta_id, $numeroUC);
+                        Log::info('🔄 UC ADICIONADA AO CONTROLE AUTOMATICAMENTE', [
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('❌ Erro ao adicionar UC ao controle automaticamente', [
+                            'error' => $e->getMessage(),
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
                     }
                 }
             }
         }
-    }
-
-    /**
-     * Handle document.updated - documento foi atualizado
-     */
-    private function handleDocumentUpdated(array $eventData, array $fullEvent)
-    {
-        $documentId = $eventData['id'] ?? null;
-        if (!$documentId) return;
-
-        $localDocument = Document::where('autentique_id', $documentId)->first();
-        if (!$localDocument) return;
-
-        // Atualizar dados do documento
-        $localDocument->update([
-            'last_checked_at' => now(),
-            'autentique_response' => $fullEvent
-        ]);
-
-        Log::info('📝 Documento atualizado via webhook', [
-            'document_id' => $documentId,
-            'status' => $localDocument->status
-        ]);
     }
 
     /**
@@ -486,9 +580,11 @@ class DocumentController extends Controller
 
         Log::info('❌ ASSINATURA REJEITADA!', [
             'document_id' => $documentId,
-            'signer_name' => $signerName
+            'signer_name' => $signerName,
+            'rejected_count' => $localDocument->rejected_count
         ]);
     }
+
     public function buscarStatusDocumento(Request $request, $propostaId): JsonResponse
     {
         try {
