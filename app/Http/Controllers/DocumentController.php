@@ -492,24 +492,18 @@ class DocumentController extends Controller
         }
     }
 
+    /**
+     * ✅ GERAÇÃO TERMO - USANDO PREENCHIMENTO REAL DE FORM FIELDS
+     */
     public function gerarTermoCompleto(Request $request, $propostaId): JsonResponse
     {
-        Log::info('=== INÍCIO GERAÇÃO TERMO COMPLETO ===', [
+        Log::info('=== INÍCIO GERAÇÃO TERMO COM FORM FIELDS ===', [
             'proposta_id' => $propostaId,
             'user_id' => auth()->id()
         ]);
 
-        Log::info('=== DADOS RECEBIDOS PARA VALIDAÇÃO ===', [
-            'request_all' => $request->all(),
-            'validation_rules' => [
-                'nomeCliente', 'numeroUC', 'enderecoUC', 'tipoDocumento',
-                'nomeRepresentante', 'enderecoRepresentante', 'emailRepresentante',
-                'economia', 'formaPagamento', 'logradouro'
-            ]
-        ]);
-
         try {
-            // Reutilizar validação do método existente
+            // Validação
             $validator = Validator::make($request->all(), [
                 'nomeCliente' => 'required|string|max:255',
                 'numeroUC' => 'required',
@@ -519,30 +513,11 @@ class DocumentController extends Controller
                 'enderecoRepresentante' => 'required|string',
                 'emailRepresentante' => 'required|email',
                 'whatsappRepresentante' => 'nullable|string',
-                'descontoTarifa' => 'required|numeric|min:0|max:100', 
-                'logradouroUC' => 'required|string'  
+                'descontoTarifa' => 'required|numeric|min:0|max:100',
+                'logradouroUC' => 'required|string'
             ]);
 
             if ($validator->fails()) {
-                // Debug detalhado dos erros de validação
-                Log::error('=== VALIDAÇÃO FALHOU - DEBUG DETALHADO ===', [
-                    'errors' => $validator->errors()->all(),
-                    'errors_by_field' => $validator->errors()->toArray(),
-                    'campos_recebidos' => array_keys($request->all()),
-                    'valores_problemáticos' => [
-                        'numeroUC' => [
-                            'valor' => $request->numeroUC,
-                            'tipo' => gettype($request->numeroUC),
-                            'é_string' => is_string($request->numeroUC)
-                        ],
-                        'descontoTarifa' => [
-                            'valor' => $request->descontoTarifa,
-                            'tipo' => gettype($request->descontoTarifa),
-                            'é_numeric' => is_numeric($request->descontoTarifa)
-                        ]
-                    ]
-                ]);
-
                 return response()->json([
                     'success' => false,
                     'message' => 'Dados inválidos para gerar o termo',
@@ -552,7 +527,7 @@ class DocumentController extends Controller
 
             // Buscar proposta
             $proposta = Proposta::findOrFail($propostaId);
-            
+
             // Verificar documento existente
             $documentoExistente = Document::where('proposta_id', $propostaId)
                 ->where('status', Document::STATUS_PENDING)
@@ -561,30 +536,29 @@ class DocumentController extends Controller
             if ($documentoExistente) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Já existe um termo pendente de assinatura para esta proposta',
-                    'documento' => [
-                        'id' => $documentoExistente->id,
-                        'status' => $documentoExistente->status,
-                        'nome' => $documentoExistente->name,
-                        'progresso' => $documentoExistente->signing_progress,
-                        'link_assinatura' => $documentoExistente->signing_url,
-                        'email_signatario' => $documentoExistente->signer_email
-                    ]
+                    'message' => 'Já existe um termo pendente de assinatura para esta proposta'
                 ], 409);
             }
 
-            // 1. Gerar PDF usando o service
-            Log::info('📄 Gerando PDF...');
-            $dadosParaPDF = array_merge($request->all(), [
+            // ✅ NOVA ESTRATÉGIA: Tentar diferentes métodos de preenchimento
+            $dadosCompletos = array_merge($request->all(), [
                 'numeroProposta' => $proposta->numero_proposta,
                 'nomeCliente' => $proposta->nome_cliente,
                 'consultor' => $proposta->consultor
             ]);
-            
-            $pdfContent = $this->pdfGeneratorService->gerarTermoAdesao($dadosParaPDF);
-            
-            // 2. Enviar para Autentique
-            Log::info('📤 Enviando para Autentique...');
+
+            Log::info('🎯 Tentando preenchimento de PDF com form fields');
+
+            // 1️⃣ PRIMEIRA OPÇÃO: PDFtk (melhor para form fields)
+            $pdfContent = $this->tentarPreenchimentoPDFtk($dadosCompletos);
+
+            // 2️⃣ SEGUNDA OPÇÃO: Frontend com pdf-lib.js  
+            if (!$pdfContent) {
+                Log::info('📤 PDFtk não disponível, preparando para frontend');
+                return $this->prepararParaPreenchimentoFrontend($dadosCompletos, $proposta, $request);
+            }
+
+            // ✅ 3️⃣ ENVIAR PARA AUTENTIQUE
             $resultado = $this->autentiqueService->criarDocumento([
                 'nome' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'conteudo_pdf' => $pdfContent,
@@ -594,16 +568,9 @@ class DocumentController extends Controller
                 ]]
             ]);
 
-            // ✅ CORREÇÃO: Acessar a estrutura correta da resposta
             $documento = $resultado['createDocument'] ?? $resultado;
 
-            Log::info('=== DEBUG DOCUMENTO RETORNADO ===', [
-                'resultado_keys' => array_keys($resultado),
-                'documento_keys' => array_keys($documento),
-                'documento_id' => $documento['id'] ?? 'NAO_ENCONTRADO'
-            ]);
-
-            // 3. Salvar no banco
+            // Salvar no banco
             $documentoSalvo = Document::create([
                 'proposta_id' => $proposta->id,
                 'autentique_id' => $documento['id'],
@@ -613,21 +580,21 @@ class DocumentController extends Controller
                 'signer_name' => $request->nomeRepresentante,
                 'signing_url' => $documento['signatures'][0]['link']['short_link'] ?? null,
                 'created_by' => auth()->id(),
-                
-                // ✅ ADICIONAR CAMPOS OBRIGATÓRIOS:
-                'document_data' => $request->all(), // Dados da requisição
+                'document_data' => $request->all(),
                 'signers' => [[
                     'email' => $request->emailRepresentante,
                     'name' => $request->nomeRepresentante,
                     'action' => 'SIGN'
-                ]], // Array de signatários
-                'autentique_response' => $documento, // Resposta da Autentique
+                ]],
+                'autentique_response' => $documento,
                 'is_sandbox' => env('AUTENTIQUE_SANDBOX', true),
                 'total_signers' => 1,
                 'signed_count' => 0,
                 'rejected_count' => 0,
                 'autentique_created_at' => $documento['created_at'] ?? now()
             ]);
+
+            Log::info('✅ Termo gerado e enviado com sucesso');
 
             return response()->json([
                 'success' => true,
@@ -642,7 +609,7 @@ class DocumentController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('❌ Erro ao gerar termo completo', [
+            Log::error('❌ Erro ao gerar termo', [
                 'proposta_id' => $propostaId,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
@@ -651,6 +618,168 @@ class DocumentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro interno ao gerar termo: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ MÉTODO 1: Tentar preenchimento com PDFtk
+     */
+    private function tentarPreenchimentoPDFtk(array $dados): ?string
+    {
+        try {
+            // Verificar se PDFtk está instalado
+            exec('which pdftk', $output, $returnCode);
+            
+            if ($returnCode !== 0) {
+                Log::info('⚠️ PDFtk não encontrado no sistema');
+                return null;
+            }
+
+            Log::info('🔧 PDFtk encontrado, tentando preenchimento');
+            
+            return $this->pdfGeneratorService->preencherComPDFtk($dados);
+
+        } catch (\Exception $e) {
+            Log::warning('⚠️ Erro com PDFtk', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * ✅ MÉTODO 2: Preparar para preenchimento no frontend
+     */
+    private function prepararParaPreenchimentoFrontend(array $dados, $proposta, $request): JsonResponse
+    {
+        try {
+            $dadosParaFrontend = $this->pdfGeneratorService->prepararParaFrontend($dados);
+
+            if (!$dadosParaFrontend['sucesso']) {
+                throw new \Exception($dadosParaFrontend['erro']);
+            }
+
+            Log::info('📋 Dados preparados para frontend', [
+                'campos_preenchidos' => count(array_filter($dadosParaFrontend['mapeamento_campos']))
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'tipo' => 'preenchimento_frontend',
+                'message' => 'Template e dados preparados para preenchimento no frontend',
+                'dados' => [
+                    'template_base64' => $dadosParaFrontend['template_base64'],
+                    'mapeamento_campos' => $dadosParaFrontend['mapeamento_campos'],
+                    'proposta' => [
+                        'id' => $proposta->id,
+                        'numero' => $proposta->numero_proposta,
+                        'nome_cliente' => $proposta->nome_cliente
+                    ],
+                    'signatario' => [
+                        'nome' => $request->nomeRepresentante,
+                        'email' => $request->emailRepresentante
+                    ]
+                ],
+                'instrucoes' => [
+                    'usar_pdf_lib' => true,
+                    'preencher_form_fields' => true,
+                    'enviar_preenchido_para' => '/api/documentos/finalizar-preenchido'
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao preparar para frontend', ['error' => $e->getMessage()]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao preparar dados para preenchimento: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ MÉTODO 3: Receber PDF preenchido do frontend
+     */
+    public function finalizarPreenchido(Request $request): JsonResponse
+    {
+        Log::info('📥 Recebendo PDF preenchido do frontend');
+
+        try {
+            $validator = Validator::make($request->all(), [
+                'proposta_id' => 'required|string',
+                'pdf_base64' => 'required|string',
+                'dados' => 'required|array',
+                'signatario' => 'required|array'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados inválidos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Decodificar PDF preenchido
+            $pdfContent = base64_decode($request->pdf_base64);
+            if (!$pdfContent) {
+                throw new \Exception('Erro ao decodificar PDF');
+            }
+
+            $proposta = Proposta::findOrFail($request->proposta_id);
+
+            // Enviar para Autentique
+            $resultado = $this->autentiqueService->criarDocumento([
+                'nome' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'conteudo_pdf' => $pdfContent,
+                'signatarios' => [[
+                    'email' => $request->signatario['email'],
+                    'nome' => $request->signatario['nome']
+                ]]
+            ]);
+
+            $documento = $resultado['createDocument'] ?? $resultado;
+
+            // Salvar no banco
+            $documentoSalvo = Document::create([
+                'proposta_id' => $request->proposta_id,
+                'autentique_id' => $documento['id'],
+                'name' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'status' => Document::STATUS_PENDING,
+                'signer_email' => $request->signatario['email'],
+                'signer_name' => $request->signatario['nome'],
+                'signing_url' => $documento['signatures'][0]['link']['short_link'] ?? null,
+                'created_by' => auth()->id(),
+                'document_data' => $request->dados,
+                'signers' => [$request->signatario],
+                'autentique_response' => $documento,
+                'is_sandbox' => env('AUTENTIQUE_SANDBOX', true),
+                'total_signers' => 1,
+                'signed_count' => 0,
+                'rejected_count' => 0,
+                'autentique_created_at' => $documento['created_at'] ?? now()
+            ]);
+
+            Log::info('✅ PDF preenchido processado com sucesso');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Termo preenchido e enviado para assinatura!',
+                'documento' => [
+                    'id' => $documentoSalvo->id,
+                    'status' => $documentoSalvo->status,
+                    'nome' => $documentoSalvo->name,
+                    'link_assinatura' => $documentoSalvo->signing_url
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao finalizar preenchimento', [
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao processar PDF preenchido: ' . $e->getMessage()
             ], 500);
         }
     }

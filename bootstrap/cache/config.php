@@ -93,7 +93,7 @@
     'url' => 'https://staging-api.aupusenergia.com.br',
     'frontend_url' => 'http://localhost:3000',
     'asset_url' => NULL,
-    'timezone' => 'UTC',
+    'timezone' => 'America/Sao_Paulo',
     'locale' => 'pt_BR',
     'fallback_locale' => 'en',
     'faker_locale' => 'pt_BR',

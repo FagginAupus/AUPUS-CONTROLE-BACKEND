@@ -425,7 +425,7 @@ class AutentiqueService
             
             if ($e->hasResponse()) {
                 $response = $e->getResponse();
-                Log::error('Detalhes da resposta de erro', [
+                Log::error('text_1semi da resposta de erro', [
                     'status_code' => $response->getStatusCode(),
                     'body' => $response->getBody()->getContents()
                 ]);
