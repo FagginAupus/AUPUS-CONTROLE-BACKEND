@@ -104,7 +104,7 @@ class DocumentController extends Controller
 
             // Salvar documento no banco local
             $document = Document::create([
-                'autentique_id' => $resultado['id'],
+                'autentique_id' => $documento['id'],
                 'name' => $dadosParaPDF['nomeAssociado'] ? "Termo de Adesão - {$dadosParaPDF['nomeAssociado']}" : "Termo de Adesão",
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
@@ -121,14 +121,14 @@ class DocumentController extends Controller
 
             // Extrair links de assinatura
             $linkAssinatura = null;
-            if (isset($resultado['signatures'][0]['link']['short_link'])) {
-                $linkAssinatura = $resultado['signatures'][0]['link']['short_link'];
+            if (isset($documento['signatures'][0]['link']['short_link'])) {
+                $linkAssinatura = $documento['signatures'][0]['link']['short_link'];
             }
 
             Log::info('✅ Termo de adesão gerado com sucesso', [
                 'proposta_id' => $propostaId,
                 'document_id' => $document->id,
-                'autentique_id' => $resultado['id'],
+                'autentique_id' => $documento['id'],
                 'signatario' => $request->emailRepresentante,
                 'link_assinatura' => $linkAssinatura
             ]);
@@ -138,7 +138,7 @@ class DocumentController extends Controller
                 'message' => 'Termo de adesão gerado e enviado para assinatura com sucesso!',
                 'documento' => [
                     'id' => $document->id,
-                    'autentique_id' => $resultado['id'],
+                    'autentique_id' => $documento['id'],
                     'nome' => $document->name,
                     'status' => $document->status_label,
                     'progresso' => $document->signing_progress . '%',
@@ -234,7 +234,7 @@ class DocumentController extends Controller
 
             // Salvar documento no banco local
             $document = Document::create([
-                'autentique_id' => $resultado['id'],
+                'autentique_id' => $documento['id'],
                 'name' => $request->dados['nomeAssociado'] ? "Termo de Adesão - {$request->dados['nomeAssociado']}" : "Termo de Adesão",
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => $request->sandbox ?? env('AUTENTIQUE_SANDBOX', false),
@@ -257,7 +257,7 @@ class DocumentController extends Controller
 
             Log::info('✅ Documento finalizado com sucesso', [
                 'document_id' => $document->id,
-                'autentique_id' => $resultado['id']
+                'autentique_id' => $documento['id']
             ]);
 
             return response()->json([
@@ -265,7 +265,7 @@ class DocumentController extends Controller
                 'message' => 'Termo de adesão gerado e enviado para assinatura com sucesso!',
                 'documento' => [
                     'id' => $document->id,
-                    'autentique_id' => $resultado['id'],
+                    'autentique_id' => $documento['id'],
                     'nome' => $document->name,
                     'status' => $document->status_label,
                     'progresso' => $document->signing_progress . '%',
@@ -585,48 +585,92 @@ class DocumentController extends Controller
         ]);
     }
 
-    public function buscarStatusDocumento(Request $request, $propostaId): JsonResponse
+    public function verificarPdfTemporario($propostaId): JsonResponse
+    {
+        try {
+            $dirTemp = storage_path('app/public/temp');
+            $pattern = "temp_termo_{$propostaId}_*.pdf";
+            $arquivos = glob($dirTemp . '/' . $pattern);
+            
+            if (empty($arquivos)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum PDF temporário encontrado'
+                ], 404);
+            }
+            
+            // Pegar o arquivo mais recente
+            $arquivoMaisRecente = array_reduce($arquivos, function($a, $b) {
+                return filemtime($a) > filemtime($b) ? $a : $b;
+            });
+            
+            $nomeArquivo = basename($arquivoMaisRecente);
+            $timestamp = filemtime($arquivoMaisRecente);
+            
+            return response()->json([
+                'success' => true,
+                'pdf' => [
+                    'nome' => $nomeArquivo,
+                    'url' => asset("storage/temp/{$nomeArquivo}"),
+                    'tamanho' => filesize($arquivoMaisRecente),
+                    'gerado_em' => date('d/m/Y H:i', $timestamp)
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao verificar PDF temporário'
+            ], 500);
+        }
+    }
+
+    public function buscarStatusDocumento($propostaId): JsonResponse
     {
         try {
             $documento = Document::where('proposta_id', $propostaId)
-                ->orderBy('created_at', 'desc')
+                ->whereIn('status', [Document::STATUS_PENDING, Document::STATUS_SIGNED])
                 ->first();
 
             if (!$documento) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Nenhum documento encontrado para esta proposta'
+                    'message' => 'Nenhum documento encontrado'
                 ], 404);
             }
 
-            // Buscar link de assinatura se disponível
-            $linkAssinatura = null;
-            if ($documento->autentique_response && isset($documento->autentique_response['signatures'][0]['link']['short_link'])) {
-                $linkAssinatura = $documento->autentique_response['signatures'][0]['link']['short_link'];
+            // Determinar URL do PDF baseada no status
+            $pdfUrl = null;
+            if ($documento->status === Document::STATUS_SIGNED) {
+                // Se assinado, usar URL do PDF assinado
+                $pdfUrl = route('documentos.pdf-assinado', $documento->proposta_id);
+            } else {
+                // Se pendente, usar URL de visualização da Autentique ou link de assinatura
+                $pdfUrl = $documento->signing_url;
             }
 
             return response()->json([
                 'success' => true,
                 'documento' => [
                     'id' => $documento->id,
+                    'autentique_id' => $documento->autentique_id,
                     'nome' => $documento->name,
                     'status' => $documento->status_label,
-                    'progresso' => $documento->signing_progress . '%',
-                    'link_assinatura' => $linkAssinatura,
+                    'email_signatario' => $documento->signer_email,
                     'criado_em' => $documento->created_at->format('d/m/Y H:i'),
-                    'atualizado_em' => $documento->updated_at->format('d/m/Y H:i')
+                    'pdf_url' => $pdfUrl ?: $documento->signing_url  // Fallback para signing_url
                 ]
             ]);
 
         } catch (\Exception $e) {
-            Log::error('❌ Erro ao buscar status do documento', [
+            Log::error('Erro ao buscar status do documento', [
                 'proposta_id' => $propostaId,
                 'error' => $e->getMessage()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao buscar status do documento'
+                'message' => 'Erro interno'
             ], 500);
         }
     }
@@ -1027,6 +1071,285 @@ class DocumentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao baixar PDF assinado'
+            ], 500);
+        }
+    }
+
+    public function gerarPdfApenas(Request $request, $propostaId): JsonResponse
+    {
+        Log::info('📄 Gerando PDF do termo sem enviar para Autentique', [
+            'proposta_id' => $propostaId
+        ]);
+
+        try {
+            $proposta = Proposta::findOrFail($propostaId);
+
+            // Validar campos obrigatórios
+            $validator = Validator::make($request->all(), [
+                'nomeRepresentante' => 'required|string|max:255',
+                'emailRepresentante' => 'required|email|max:255',
+                'whatsappRepresentante' => 'required|string|max:20',
+                'nomeCliente' => 'required|string|max:255',
+                'numeroUC' => 'required',
+                'enderecoUC' => 'required|string',
+                'tipoDocumento' => 'required|in:CPF,CNPJ',
+                'enderecoRepresentante' => 'required|string',
+                'descontoTarifa' => 'required|numeric|min:0|max:100',
+                'logradouroUC' => 'required|string'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Campos obrigatórios não preenchidos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Preparar dados completos
+            $dadosCompletos = array_merge($request->all(), [
+                'numeroProposta' => $proposta->numero_proposta,
+                'nomeCliente' => $proposta->nome_cliente,
+                'consultor' => $proposta->consultor,
+                'propostaId' => $propostaId
+            ]);
+
+            Log::info('🎯 Gerando PDF para visualização');
+
+            // Tentar preenchimento com PDFtk (usar método existente se houver)
+            $pdfContent = null;
+            if (method_exists($this, 'tentarPreenchimentoPDFtk')) {
+                $pdfContent = $this->tentarPreenchimentoPDFtk($dadosCompletos);
+            }
+
+            // Se não conseguir com PDFtk, retornar dados para frontend
+            if (!$pdfContent) {
+                Log::info('📤 PDFtk não disponível, enviando dados para frontend');
+                return response()->json([
+                    'success' => true,
+                    'requires_frontend_processing' => true,
+                    'dados' => $dadosCompletos,
+                    'template_url' => asset('pdfs/termo_adesao_template.pdf')
+                ]);
+            }
+
+            // Salvar PDF temporariamente para visualização
+            $nomeArquivoTemp = "temp_termo_{$propostaId}_" . time() . ".pdf";
+            $caminhoTemp = storage_path("app/public/temp/{$nomeArquivoTemp}");
+            
+            if (!is_dir(dirname($caminhoTemp))) {
+                mkdir(dirname($caminhoTemp), 0755, true);
+            }
+            
+            file_put_contents($caminhoTemp, $pdfContent);
+
+            // Limpar arquivos temporários antigos
+            $this->limparArquivosTemporarios();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'PDF gerado com sucesso!',
+                'pdf' => [
+                    'nome' => $nomeArquivoTemp,
+                    'url' => asset("storage/temp/{$nomeArquivoTemp}"),
+                    'tamanho' => strlen($pdfContent),
+                    'gerado_em' => now()->format('d/m/Y H:i')
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao gerar PDF apenas', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno ao gerar PDF: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    private function limparArquivosTemporarios()
+    {
+        try {
+            $dirTemp = storage_path('app/public/temp');
+            if (!is_dir($dirTemp)) return;
+
+            $arquivos = glob($dirTemp . '/temp_termo_*.pdf');
+            $agora = time();
+            
+            foreach ($arquivos as $arquivo) {
+                // Remove arquivos com mais de 1 hora
+                if (filemtime($arquivo) < $agora - 3600) {
+                    unlink($arquivo);
+                    Log::info('🗑️ Arquivo temporário removido', ['arquivo' => basename($arquivo)]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('Erro ao limpar arquivos temporários', ['error' => $e->getMessage()]);
+        }
+    }
+
+    public function enviarParaAutentique(Request $request, $propostaId): JsonResponse
+    {
+        Log::info('📤 Enviando PDF para Autentique', [
+            'proposta_id' => $propostaId
+        ]);
+
+        try {
+            $proposta = Proposta::findOrFail($propostaId);
+
+            // Verificar se já existe documento pendente
+            $documentoExistente = Document::where('proposta_id', $propostaId)
+                ->whereIn('status', [Document::STATUS_PENDING, Document::STATUS_SIGNED])
+                ->first();
+
+            if ($documentoExistente) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Já existe um documento ativo para esta proposta. Cancele primeiro para enviar novo termo.',
+                    'documento' => [
+                        'id' => $documentoExistente->id,
+                        'status' => $documentoExistente->status_label,
+                        'pode_cancelar' => true
+                    ]
+                ], 409);
+            }
+
+            // Validar dados do envio
+            $validator = Validator::make($request->all(), [
+                'nomeRepresentante' => 'required|string|max:255',
+                'emailRepresentante' => 'required|email|max:255',
+                'whatsappRepresentante' => 'required|string|max:20',
+                'enviar_whatsapp' => 'boolean',
+                'enviar_email' => 'boolean',
+                'pdf_base64' => 'string',
+                'nome_arquivo_temp' => 'string'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados inválidos para envio',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Obter conteúdo do PDF
+            $pdfContent = null;
+            
+            if ($request->has('pdf_base64')) {
+                $pdfContent = base64_decode($request->pdf_base64);
+                Log::info('📄 Usando PDF enviado pelo frontend');
+            } elseif ($request->has('nome_arquivo_temp')) {
+                $caminhoTemp = storage_path("app/public/temp/{$request->nome_arquivo_temp}");
+                if (file_exists($caminhoTemp)) {
+                    $pdfContent = file_get_contents($caminhoTemp);
+                    Log::info('📄 Usando PDF temporário salvo', ['arquivo' => $request->nome_arquivo_temp]);
+                }
+            }
+
+            if (!$pdfContent) {
+                Log::info('📄 Gerando PDF novamente como fallback');
+                $dadosCompletos = array_merge($request->all(), [
+                    'numeroProposta' => $proposta->numero_proposta,
+                    'nomeCliente' => $proposta->nome_cliente,
+                    'consultor' => $proposta->consultor
+                ]);
+                if (method_exists($this, 'tentarPreenchimentoPDFtk')) {
+                    $pdfContent = $this->tentarPreenchimentoPDFtk($dadosCompletos);
+                }
+            }
+
+            if (!$pdfContent) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Não foi possível obter o conteúdo do PDF para envio'
+                ], 400);
+            }
+
+            // Preparar signatário
+            $signatarios = [[
+                'email' => $request->emailRepresentante,
+                'action' => 'SIGN',
+                'name' => $request->nomeRepresentante
+            ]];
+
+            // Enviar para Autentique
+            $resultado = $this->autentiqueService->createDocumentFromProposta(
+                ['nome_cliente' => $proposta->nome_cliente],
+                $signatarios,
+                $pdfContent,
+                env('AUTENTIQUE_SANDBOX', false)
+            );
+
+            $documentoData = $resultado['data']['createDocument'] ?? $resultado;
+            $documentId = $documentoData['id'];
+            $linkAssinatura = null;
+
+            if (isset($documentoData['signatures'][0]['link']['short_link'])) {
+                $linkAssinatura = $documentoData['signatures'][0]['link']['short_link'];
+            }
+            // Salvar documento no banco
+            $document = Document::create([
+                'autentique_id' => $documentId,  // ← USAR $documentId
+                'name' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'status' => Document::STATUS_PENDING,
+                'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
+                'proposta_id' => $propostaId,
+                'document_data' => $request->all(),
+                'signers' => $signatarios,
+                'autentique_response' => $resultado,
+                'total_signers' => 1,
+                'signed_count' => 0,
+                'rejected_count' => 0,
+                'autentique_created_at' => now(),
+                'created_by' => auth()->id(),
+                'signer_email' => $request->emailRepresentante,
+                'signer_name' => $request->nomeRepresentante,
+                'signing_url' => $linkAssinatura,
+                'envio_whatsapp' => $request->boolean('enviar_whatsapp', false),
+                'envio_email' => $request->boolean('enviar_email', true)
+            ]);
+
+            // Limpar arquivo temporário se foi usado
+            if ($request->has('nome_arquivo_temp')) {
+                $caminhoTemp = storage_path("app/public/temp/{$request->nome_arquivo_temp}");
+                if (file_exists($caminhoTemp)) {
+                    unlink($caminhoTemp);
+                    Log::info('🗑️ Arquivo temporário removido após envio');
+                }
+            }
+
+            Log::info('✅ Termo enviado para Autentique com sucesso', [
+                'proposta_id' => $propostaId,
+                'document_id' => $document->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Termo enviado para assinatura com sucesso!',
+                'documento' => [
+                    'id' => $document->id,
+                    'autentique_id' => $documentId,  // ← USAR $documentId
+                    'nome' => $document->name,
+                    'status' => $document->status_label,
+                    'link_assinatura' => $linkAssinatura,
+                    'email_signatario' => $request->emailRepresentante,
+                    'criado_em' => $document->created_at->format('d/m/Y H:i')
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao enviar para Autentique', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno ao enviar documento: ' . $e->getMessage()
             ], 500);
         }
     }

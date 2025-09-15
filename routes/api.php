@@ -391,13 +391,6 @@ Route::middleware('auth:api')->group(function () {
         Route::post('broadcast', [NotificacaoController::class, 'broadcast']);
     });
 
-    Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente'])
-        ->middleware('permission:prospec.edit');
-
-    // Rota para baixar PDF assinado  
-    Route::get('/documentos/propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado']);
-        //->middleware('permission:prospec.view');
-
     // ==========================================
     // DASHBOARD - Dados gerais do dashboard
     // ==========================================
@@ -576,42 +569,53 @@ Route::middleware('auth:api')->group(function () {
     // DOCUMENTOS - Sistema de Assinatura Digital
     // ==========================================
     Route::prefix('documentos')->group(function () {
-        // Gerar dados para preenchimento do termo no frontend
-        Route::post('/propostas/{proposta}/gerar-termo', [DocumentController::class, 'gerarTermoAdesao'])
+        
+        // ✅ NOVAS ROTAS - ADICIONAR AQUI NO INÍCIO
+        Route::post('propostas/{proposta}/gerar-pdf-apenas', [DocumentController::class, 'gerarPdfApenas']);
+            //->middleware('permission:prospec.edit');
+        
+        Route::post('propostas/{proposta}/enviar-para-autentique', [DocumentController::class, 'enviarParaAutentique']);
+           // ->middleware('permission:prospec.edit');
+
+        Route::get('propostas/{proposta}/pdf-temporario', [DocumentController::class, 'verificarPdfTemporario']);
+
+        Route::post('propostas/{proposta}/gerar-termo', [DocumentController::class, 'gerarTermoAdesao'])
             ->middleware('permission:prospec.edit');
 
-        Route::post('/propostas/{proposta}/gerar-termo-completo', [DocumentController::class, 'gerarTermoCompleto']);
-        //    ->middleware('permission:prospec.edit');
+        Route::post('propostas/{proposta}/gerar-termo-completo', [DocumentController::class, 'gerarTermoCompleto']);
             
         // Finalizar documento após preenchimento no frontend
-        Route::post('/finalizar', [DocumentController::class, 'finalizarDocumento'])
+        Route::post('finalizar', [DocumentController::class, 'finalizarDocumento'])
             ->middleware('permission:prospec.edit');
             
         // Buscar status do documento de uma proposta
-        Route::get('/propostas/{proposta}/status', [DocumentController::class, 'buscarStatusDocumento'])
-            ->middleware('permission:prospec.view');
+        Route::get('propostas/{proposta}/status', [DocumentController::class, 'buscarStatusDocumento']);
+            //->middleware('permission:prospec.view');
             
         // Listar documentos de uma proposta
-        Route::get('/propostas/{proposta}', [DocumentController::class, 'listarDocumentosProposta'])
+        Route::get('propostas/{proposta}', [DocumentController::class, 'listarDocumentosProposta'])
             ->middleware('permission:prospec.view');
             
         // Buscar documento específico
-        Route::get('/{documento}', [DocumentController::class, 'show'])
+        Route::get('{documento}', [DocumentController::class, 'show'])
             ->middleware('permission:prospec.view');
             
         // Reenviar convite de assinatura
-        Route::post('/{documento}/reenviar', [DocumentController::class, 'reenviarConvite'])
+        Route::post('{documento}/reenviar', [DocumentController::class, 'reenviarConvite'])
             ->middleware('permission:prospec.edit');
             
-        // Cancelar documento
-        Route::delete('/{documento}', [DocumentController::class, 'cancelarDocumento'])
+        // Cancelar documento - ROTA JÁ EXISTE COM NOME DIFERENTE
+        Route::delete('{documento}', [DocumentController::class, 'cancelarDocumento'])
             ->middleware('permission:prospec.delete');
 
     });
     
-    // Rota de teste da API Autentique
-    Route::get('/documentos/test/autentique', [DocumentController::class, 'testarAutentique'])
-        ->middleware('permission:configuracoes.view');
+    Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente'])
+        ->middleware('permission:prospec.edit');
+
+    // Rota para baixar PDF assinado  
+    Route::get('/documentos/propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado']);
+        //->middleware('permission:prospec.view');
 });
 
 // Webhook da Autentique (público - sem autenticação)
