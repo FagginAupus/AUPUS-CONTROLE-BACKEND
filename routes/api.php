@@ -391,6 +391,13 @@ Route::middleware('auth:api')->group(function () {
         Route::post('broadcast', [NotificacaoController::class, 'broadcast']);
     });
 
+    Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente'])
+        ->middleware('permission:prospec.edit');
+
+    // Rota para baixar PDF assinado  
+    Route::get('/documentos/propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado'])
+        ->middleware('permission:prospec.view');
+
     // ==========================================
     // DASHBOARD - Dados gerais do dashboard
     // ==========================================
@@ -610,6 +617,8 @@ Route::middleware('auth:api')->group(function () {
 // Webhook da Autentique (público - sem autenticação)
 Route::post('/documentos/webhook/autentique', [DocumentController::class, 'webhook']);
 Route::post('/webhook/autentique', [DocumentController::class, 'webhook']); // Rota alternativa
+
+
 
 // ==========================================
 // FALLBACK - Rotas não encontradas

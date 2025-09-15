@@ -370,6 +370,44 @@ class DocumentController extends Controller
             'document_name' => $localDocument->name,
             'proposta_id' => $localDocument->proposta_id
         ]);
+        
+        if ($localDocument->proposta_id && $localDocument->document_data) {
+            $dadosDocumento = $localDocument->document_data;
+            $numeroUC = $dadosDocumento['numeroUC'] ?? null;
+            
+            if ($numeroUC) {
+                // Buscar proposta e alterar status da UC
+                $proposta = \App\Models\Proposta::find($localDocument->proposta_id);
+                if ($proposta) {
+                    $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                    
+                    foreach ($unidadesConsumidoras as &$uc) {
+                        if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
+                            $statusAnterior = $uc['status'] ?? null;
+                            $uc['status'] = 'Fechada';
+                            
+                            Log::info('Status UC alterado automaticamente após assinatura', [
+                                'proposta_id' => $localDocument->proposta_id,
+                                'numero_uc' => $numeroUC,
+                                'status_anterior' => $statusAnterior,
+                                'status_novo' => 'Fechada'
+                            ]);
+                            break;
+                        }
+                    }
+                    
+                    $proposta->update([
+                        'unidades_consumidoras' => json_encode($unidadesConsumidoras)
+                    ]);
+                    
+                    // Adicionar ao controle automaticamente
+                    if ($numeroUC) {
+                        // Usar método existente para popular controle
+                        app(PropostaController::class)->popularControleAutomaticoParaUC($localDocument->proposta_id, $numeroUC);
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -536,7 +574,20 @@ class DocumentController extends Controller
             if ($documentoExistente) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Já existe um termo pendente de assinatura para esta proposta'
+                    'message' => 'Já existe um termo pendente de assinatura para esta proposta. Para atualizar o termo, cancele o atual primeiro.',
+                    'documento' => [
+                        'id' => $documentoExistente->id,
+                        'autentique_id' => $documentoExistente->autentique_id,
+                        'nome' => $documentoExistente->name,
+                        'status' => $documentoExistente->status_label,
+                        'progresso' => $documentoExistente->signing_progress . '%',
+                        'link_assinatura' => null, // Não fornecer link para forçar cancelamento
+                        'criado_em' => $documentoExistente->created_at->format('d/m/Y H:i'),
+                        'opcoes' => [
+                            'pode_cancelar' => true,
+                            'pode_atualizar' => false
+                        ]
+                    ]
                 ], 409);
             }
 
@@ -780,6 +831,101 @@ class DocumentController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao processar PDF preenchido: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function cancelarDocumentoPendente($propostaId): JsonResponse
+    {
+        try {
+            $documento = Document::where('proposta_id', $propostaId)
+                ->where('status', Document::STATUS_PENDING)
+                ->first();
+
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum documento pendente encontrado'
+                ], 404);
+            }
+
+            // Cancelar na Autentique se necessário
+            try {
+                $this->autentiqueService->cancelDocument($documento->autentique_id);
+            } catch (\Exception $e) {
+                Log::warning('Erro ao cancelar documento na Autentique', ['error' => $e->getMessage()]);
+            }
+
+            // Marcar como cancelado localmente
+            $documento->update([
+                'status' => Document::STATUS_CANCELLED,
+                'cancelled_at' => now(),
+                'cancelled_by' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Documento cancelado com sucesso'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao cancelar documento', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao cancelar documento'
+            ], 500);
+        }
+    }
+
+    public function baixarPDFAssinado($propostaId): JsonResponse
+    {
+        try {
+            $documento = Document::where('proposta_id', $propostaId)
+                ->where('status', Document::STATUS_SIGNED)
+                ->first();
+
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum documento assinado encontrado'
+                ], 404);
+            }
+
+            // Buscar PDF assinado na Autentique
+            $pdfAssinado = $this->autentiqueService->downloadSignedDocument($documento->autentique_id);
+            
+            if (!$pdfAssinado) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'PDF assinado não encontrado na Autentique'
+                ], 404);
+            }
+
+            // Salvar PDF localmente para cache
+            $nomeArquivo = "termo_assinado_{$documento->id}.pdf";
+            $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivo}");
+            
+            if (!is_dir(dirname($caminhoLocal))) {
+                mkdir(dirname($caminhoLocal), 0755, true);
+            }
+            
+            file_put_contents($caminhoLocal, $pdfAssinado);
+
+            return response()->json([
+                'success' => true,
+                'documento' => [
+                    'nome' => $nomeArquivo,
+                    'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
+                    'tamanho' => strlen($pdfAssinado),
+                    'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao baixar PDF assinado', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao baixar PDF assinado'
             ], 500);
         }
     }
