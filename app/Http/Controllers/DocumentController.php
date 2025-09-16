@@ -1213,8 +1213,8 @@ class DocumentController extends Controller
             // Validar campos obrigatórios
             $validator = Validator::make($request->all(), [
                 'nomeRepresentante' => 'required|string|max:255',
-                'emailRepresentante' => 'required|email|max:255',
-                'whatsappRepresentante' => 'required|string|max:20',
+                'emailRepresentante' => 'nullable|email|max:255',
+                'whatsappRepresentante' => 'nullable|string|max:20',
                 'nomeCliente' => 'required|string|max:255',
                 'numeroUC' => 'required',
                 'enderecoUC' => 'required|string',
