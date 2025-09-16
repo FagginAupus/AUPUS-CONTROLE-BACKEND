@@ -72,7 +72,92 @@ class AutentiqueService
             'message' => 'Documento para assinatura digital - Termo de Adesão AUPUS Energia'
         ];
 
-        // ✅ CORREÇÃO: Salvar PDF como arquivo temporário REAL (como no api_authentic)
+        // ✅ OBTER OPÇÕES DE ENVIO DO USUÁRIO
+        $enviarEmail = $propostaData['opcoes_envio']['enviar_email'] ?? true;
+        $enviarWhatsApp = $propostaData['opcoes_envio']['enviar_whatsapp'] ?? false;
+
+        Log::info('🎯 Processando opções de envio escolhidas pelo usuário', [
+            'enviar_email' => $enviarEmail,
+            'enviar_whatsapp' => $enviarWhatsApp,
+            'signers_originais' => $signers
+        ]);
+
+        // ✅ PROCESSAR SIGNATÁRIOS RESPEITANDO AS ESCOLHAS DO USUÁRIO
+        $processedSigners = [];
+        
+        foreach ($signers as $signer) {
+            Log::info('📝 Processando signatário', [
+                'signer_original' => $signer,
+                'opcoes_usuario' => ['email' => $enviarEmail, 'whatsapp' => $enviarWhatsApp]
+            ]);
+            
+            $hasEmail = isset($signer['email']) && !empty($signer['email']);
+            $hasPhone = isset($signer['phone_number']) && !empty($signer['phone_number']);
+            
+            // ✅ LÓGICA CORRIGIDA: Respeitar exatamente o que o usuário escolheu
+            if ($enviarEmail && $enviarWhatsApp) {
+                // USUÁRIO QUER AMBOS - Criar signatário por email (principal)
+                if ($hasEmail) {
+                    $processedSigners[] = [
+                        'email' => $signer['email'],
+                        'action' => $signer['action'] ?? 'SIGN',
+                        'name' => $signer['name'] ?? ''
+                    ];
+                    
+                    Log::info('✅ Email + WhatsApp: Criado signatário por email', [
+                        'email' => $signer['email'],
+                        'note' => 'WhatsApp será enviado como notificação adicional'
+                    ]);
+                } else {
+                    throw new \Exception('Email é obrigatório quando envio por email está ativado');
+                }
+                
+            } elseif ($enviarEmail && !$enviarWhatsApp) {
+                // USUÁRIO QUER APENAS EMAIL
+                if ($hasEmail) {
+                    $processedSigners[] = [
+                        'email' => $signer['email'],
+                        'action' => $signer['action'] ?? 'SIGN',
+                        'name' => $signer['name'] ?? ''
+                    ];
+                    
+                    Log::info('✅ Apenas Email: Criado signatário por email', [
+                        'email' => $signer['email']
+                    ]);
+                } else {
+                    throw new \Exception('Email é obrigatório quando apenas envio por email está ativado');
+                }
+                
+            } elseif (!$enviarEmail && $enviarWhatsApp) {
+                // ✅ USUÁRIO QUER APENAS WHATSAPP
+                if ($hasPhone) {
+                    $processedSigners[] = [
+                        'phone' => $signer['phone_number'],
+                        'delivery_method' => 'DELIVERY_METHOD_WHATSAPP',
+                        'action' => $signer['action'] ?? 'SIGN'
+                    ];
+                    
+                    Log::info('✅ Apenas WhatsApp: Criado signatário por telefone', [
+                        'phone' => $signer['phone_number']
+                    ]);
+                } else {
+                    throw new \Exception('Telefone é obrigatório quando apenas envio por WhatsApp está ativado');
+                }
+                
+            } else {
+                // NEM EMAIL NEM WHATSAPP - Erro
+                throw new \Exception('Pelo menos uma opção de envio deve estar ativada (email ou WhatsApp)');
+            }
+        }
+        
+        Log::info('🔄 Signatários processados conforme escolha do usuário', [
+            'opcoes_usuario' => ['email' => $enviarEmail, 'whatsapp' => $enviarWhatsApp],
+            'original_count' => count($signers),
+            'processed_count' => count($processedSigners),
+            'processed_signers' => $processedSigners
+        ]);
+
+        // Resto do método continua igual (salvar PDF temporário e enviar)
         $tempDir = storage_path('app/temp');
         if (!is_dir($tempDir)) {
             mkdir($tempDir, 0755, true);
@@ -86,14 +171,11 @@ class AutentiqueService
             'is_pdf' => str_starts_with($pdfContent, '%PDF')
         ]);
         
-        // Salvar conteúdo como arquivo físico
         file_put_contents($tempPdfPath, $pdfContent);
 
         try {
-            // ✅ Usar o método que funcionava no api_authentic
-            $result = $this->createSimpleDocument($documentData, $signers, $tempPdfPath, $sandbox);
+            $result = $this->createSimpleDocument($documentData, $processedSigners, $tempPdfPath, $sandbox);
             
-            // Limpar arquivo temporário
             if (file_exists($tempPdfPath)) {
                 unlink($tempPdfPath);
             }
@@ -101,7 +183,6 @@ class AutentiqueService
             return $result;
             
         } catch (\Exception $e) {
-            // Limpar arquivo temporário em caso de erro
             if (file_exists($tempPdfPath)) {
                 unlink($tempPdfPath);
             }
@@ -442,21 +523,40 @@ class AutentiqueService
         ]);
         
         try {
-            // Preparar signatários no formato correto
+            // ✅ CORREÇÃO: Processar signatários no formato correto da API Autentique
             $signatarios = [];
             foreach ($dados['signatarios'] as $signatario) {
-                $signerData = [
-                    'email' => $signatario['email'],
-                    'action' => 'SIGN',
-                    'name' => $signatario['nome']
-                ];
                 
-                // ✅ ADICIONAR TELEFONE SE FORNECIDO
-                if (isset($signatario['phone_number']) && !empty($signatario['phone_number'])) {
-                    $signerData['phone_number'] = $signatario['phone_number'];
+                $hasEmail = isset($signatario['email']) && !empty($signatario['email']);
+                $hasPhone = isset($signatario['phone_number']) && !empty($signatario['phone_number']);
+                
+                if ($hasEmail && !$hasPhone) {
+                    // APENAS EMAIL
+                    $signatarios[] = [
+                        'email' => $signatario['email'],
+                        'action' => 'SIGN',
+                        'name' => $signatario['nome'] ?? ''
+                    ];
+                    
+                } elseif (!$hasEmail && $hasPhone) {
+                    // APENAS WHATSAPP - Formato correto da API
+                    $signatarios[] = [
+                        'phone' => $signatario['phone_number'],  // ✅ "phone", não "phone_number"
+                        'delivery_method' => 'DELIVERY_METHOD_WHATSAPP',  // ✅ Obrigatório
+                        'action' => 'SIGN'
+                    ];
+                    
+                } elseif ($hasEmail && $hasPhone) {
+                    // EMAIL + WHATSAPP - Apenas email (WhatsApp como notificação)
+                    $signatarios[] = [
+                        'email' => $signatario['email'],
+                        'action' => 'SIGN',
+                        'name' => $signatario['nome'] ?? ''
+                    ];
+                    
+                } else {
+                    throw new \Exception('Signatário deve ter email ou telefone');
                 }
-                
-                $signatarios[] = $signerData;
             }
 
             Log::info('📋 Signatários preparados para Autentique', [

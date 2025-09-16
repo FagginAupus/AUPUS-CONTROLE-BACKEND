@@ -1382,33 +1382,65 @@ class DocumentController extends Controller
                 ], 400);
             }
 
+            $dadosDocumento = array_merge($request->all(), [
+                'numeroProposta' => $proposta->numero_proposta,
+                'nomeCliente' => $proposta->nome_cliente,
+                'consultor' => $proposta->consultor,
+                'nome_cliente' => $proposta->nome_cliente,  // Para compatibilidade
+                // ✅ ADICIONAR OPÇÕES DE ENVIO ESCOLHIDAS PELO USUÁRIO
+                'opcoes_envio' => [
+                    'enviar_email' => $request->boolean('enviar_email', true),
+                    'enviar_whatsapp' => $request->boolean('enviar_whatsapp', false)
+                ]
+            ]);
+
+            // ✅ LOG PARA VERIFICAR AS OPÇÕES
+            Log::info('📋 Opções de envio definidas pelo usuário', [
+                'enviar_email' => $dadosDocumento['opcoes_envio']['enviar_email'],
+                'enviar_whatsapp' => $dadosDocumento['opcoes_envio']['enviar_whatsapp'],
+                'proposta_id' => $propostaId
+            ]);
+
+            // Continuar com a preparação do signatário (manter como está)
             $signatario = [
                 'email' => $request->emailRepresentante,
                 'action' => 'SIGN',
                 'name' => $request->nomeRepresentante
             ];
-            
+
             if ($request->whatsappRepresentante && $request->boolean('enviar_whatsapp', false)) {
-                // Limpar formatação do telefone
+                // Formatação do telefone (manter como está)
                 $telefone = preg_replace('/\D/', '', $request->whatsappRepresentante);
                 
-                // Adicionar código do Brasil se necessário
-                if (strlen($telefone) === 11 && substr($telefone, 0, 1) !== '0') {
-                    $telefone = '55' . $telefone;
+                if (strlen($telefone) === 11) {
+                    $telefone = '+55' . $telefone;
                 } elseif (strlen($telefone) === 10) {
-                    $telefone = '559' . $telefone; // Adicionar 9 para celulares antigos
+                    $telefone = '+559' . $telefone;
+                } elseif (strlen($telefone) === 13 && substr($telefone, 0, 2) === '55') {
+                    $telefone = '+' . $telefone;
+                } else {
+                    if (strlen($telefone) >= 10) {
+                        $telefone = '+55' . $telefone;
+                    }
                 }
                 
                 $signatario['phone_number'] = $telefone;
+                
+                Log::info('✅ WhatsApp adicionado ao signatário', [
+                    'phone_number' => $telefone
+                ]);
             }
 
             $signatarios = [$signatario];
 
-            $dadosDocumento = ['nome_cliente' => $proposta->nome_cliente];
+            Log::info('📋 Signatários preparados com opções de envio', [
+                'signatarios' => $signatarios,
+                'opcoes_envio' => $dadosDocumento['opcoes_envio']
+            ]);
 
-            // Enviar para Autentique
+            // ✅ CHAMAR O AUTENTIQUE SERVICE COM AS OPÇÕES
             $resultado = $this->autentiqueService->createDocumentFromProposta(
-                $dadosDocumento,  // ✅ Usar variável correta
+                $dadosDocumento,  // ✅ Agora inclui opcoes_envio
                 $signatarios,
                 $pdfContent,
                 env('AUTENTIQUE_SANDBOX', false)
@@ -1458,14 +1490,13 @@ class DocumentController extends Controller
                 'consultor' => $proposta->consultor
             ]);
 
-            // Salvar documento no banco
             $document = Document::create([
                 'autentique_id' => $documentId,
                 'name' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
                 'proposta_id' => $propostaId,
-                'document_data' => $documentData,  // ✅ Usar dados preparados
+                'document_data' => $documentData,
                 'signers' => $signatarios,
                 'autentique_response' => $resultado,
                 'total_signers' => 1,
@@ -1489,12 +1520,41 @@ class DocumentController extends Controller
                 }
             }
 
+            // ✅ PREPARAR INFORMAÇÕES DE ENVIO PARA RESPOSTA
+            $envioEmail = $request->boolean('enviar_email', true);
+            $envioWhatsApp = $request->boolean('enviar_whatsapp', false);
+
+            // ✅ DETERMINAR CANAIS DE ENVIO E DESTINATÁRIO PARA EXIBIÇÃO
+            $canaisEnvio = [];
+            $destinatarioExibicao = '';
+
+            if ($envioEmail && $envioWhatsApp) {
+                $canaisEnvio[] = 'E-mail';
+                $canaisEnvio[] = 'WhatsApp';
+                $destinatarioExibicao = $request->emailRepresentante; // Principal por email
+                
+            } elseif ($envioEmail && !$envioWhatsApp) {
+                $canaisEnvio[] = 'E-mail';
+                $destinatarioExibicao = $request->emailRepresentante;
+                
+            } elseif (!$envioEmail && $envioWhatsApp) {
+                $canaisEnvio[] = 'WhatsApp';
+                $destinatarioExibicao = $request->whatsappRepresentante; // ✅ Mostrar telefone quando só WhatsApp
+                
+            } else {
+                $canaisEnvio[] = 'Nenhum canal selecionado';
+                $destinatarioExibicao = 'N/A';
+            }
+
             Log::info('✅ Termo enviado para Autentique com sucesso', [
                 'proposta_id' => $propostaId,
                 'document_id' => $document->id,
-                'autentique_id' => $documentId
+                'autentique_id' => $documentId,
+                'canais_envio' => $canaisEnvio,
+                'destinatario_exibicao' => $destinatarioExibicao
             ]);
 
+            // ✅ RESPOSTA CORRIGIDA PARA O FRONTEND
             return response()->json([
                 'success' => true,
                 'message' => 'Termo enviado para assinatura com sucesso!',
@@ -1504,8 +1564,17 @@ class DocumentController extends Controller
                     'nome' => $document->name,
                     'status' => $document->status_label,
                     'link_assinatura' => $linkAssinatura,
-                    'email_signatario' => $request->emailRepresentante,
-                    'criado_em' => $document->created_at->format('d/m/Y H:i')
+                    // ✅ CAMPOS CORRIGIDOS PARA EXIBIÇÃO ADEQUADA
+                    'email_signatario' => $destinatarioExibicao, 
+                    'destinatario_exibicao' => $destinatarioExibicao,
+                    'canais_envio' => $canaisEnvio,
+                    'canais_envio_texto' => implode(' e ', $canaisEnvio), 
+                    'criado_em' => $document->created_at->format('d/m/Y H:i'),
+                    // ✅ Campos específicos para controle
+                    'envio_email' => $envioEmail,
+                    'envio_whatsapp' => $envioWhatsApp,
+                    'whatsapp_formatado' => $request->whatsappRepresentante ? 
+                        preg_replace('/\D/', '', $request->whatsappRepresentante) : null
                 ]
             ]);
 
