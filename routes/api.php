@@ -595,6 +595,12 @@ Route::middleware('auth:api')->group(function () {
         // Buscar status do documento de uma proposta
         Route::get('propostas/{proposta}/status', [DocumentController::class, 'buscarStatusDocumento']);
             //->middleware('permission:prospec.view');
+        
+        Route::get('propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado'])
+            ->name('documentos.pdf-assinado');
+            //->middleware('permission:prospec.view');
+
+        Route::post('propostas/{proposta}/upload-termo-assinado', [DocumentController::class, 'uploadTermoAssinadoManual']);
             
         // Listar documentos de uma proposta
         Route::get('propostas/{proposta}', [DocumentController::class, 'listarDocumentosProposta'])
@@ -616,10 +622,7 @@ Route::middleware('auth:api')->group(function () {
     
     Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente']);
         //->middleware('permission:prospec.edit');
-
-    // Rota para baixar PDF assinado  
-    Route::get('/documentos/propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado']);
-        //->middleware('permission:prospec.view');
+    
 });
 
 // Webhook da Autentique (público - sem autenticação)

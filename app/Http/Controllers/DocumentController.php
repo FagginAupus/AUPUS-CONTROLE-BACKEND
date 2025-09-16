@@ -662,17 +662,21 @@ class DocumentController extends Controller
             }
 
             return response()->json([
-                'success' => true,
-                'documento' => [
-                    'id' => $documento->id,
-                    'autentique_id' => $documento->autentique_id,
-                    'nome' => $documento->name,
-                    'status' => $documento->status_label,
-                    'email_signatario' => $documento->signer_email,
-                    'criado_em' => $documento->created_at->format('d/m/Y H:i'),
-                    'pdf_url' => $pdfUrl ?: $documento->signing_url  // Fallback para signing_url
-                ]
-            ]);
+            'success' => true,
+            'documento' => [
+                'id' => $documento->id,
+                'autentique_id' => $documento->autentique_id,
+                'nome' => $documento->name,
+                'status' => $documento->status,  // ✅ MANTER O STATUS ORIGINAL ('signed')
+                'status_label' => $documento->status_label,
+                'email_signatario' => $documento->signer_email,
+                'criado_em' => $documento->created_at->format('d/m/Y H:i'),
+                'updated_at' => $documento->updated_at->format('d/m/Y H:i'),
+                'data_assinatura' => $documento->updated_at->format('d/m/Y H:i'),
+                'link_assinatura' => $documento->signing_url,
+                'pdf_url' => $pdfUrl
+            ]
+        ]);
 
         } catch (\Exception $e) {
             Log::error('Erro ao buscar status do documento', [
@@ -1046,7 +1050,11 @@ class DocumentController extends Controller
     }
 
     public function baixarPDFAssinado($propostaId): JsonResponse
-    {
+    {   
+        Log::info("📋 ERRO na busca PDF", ['proposta' => $propostaId]);
+        Log::info("📋 ERRO na verificação do documento");
+        Log::info("📋 ERRO no processamento da request");
+        Log::info("📋 ERRO na busca por arquivos finalizados");
         try {
             $documento = Document::where('proposta_id', $propostaId)
                 ->where('status', Document::STATUS_SIGNED)
@@ -1059,44 +1067,139 @@ class DocumentController extends Controller
                 ], 404);
             }
 
-            // Buscar PDF assinado na Autentique
-            $pdfAssinado = $this->autentiqueService->downloadSignedDocument($documento->autentique_id);
+            $nomeArquivo = "termo_assinado_{$documento->id}.pdf";
+            $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivo}");
+
+            // TENTATIVA 1: Baixar da Autentique (se tiver autentique_id)
+            if (!empty($documento->autentique_id)) {
+                try {
+                    Log::info('📥 Tentando baixar da Autentique', ['autentique_id' => $documento->autentique_id]);
+                    
+                    $pdfAssinado = $this->autentiqueService->downloadSignedDocument($documento->autentique_id);
+                    
+                    if ($pdfAssinado) {
+                        // Salvar localmente
+                        if (!is_dir(dirname($caminhoLocal))) {
+                            mkdir(dirname($caminhoLocal), 0755, true);
+                        }
+                        
+                        file_put_contents($caminhoLocal, $pdfAssinado);
+
+                        return response()->json([
+                            'success' => true,
+                            'source' => 'autentique',
+                            'documento' => [
+                                'nome' => $nomeArquivo,
+                                'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
+                                'tamanho' => strlen($pdfAssinado),
+                                'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
+                            ]
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('⚠️ Falha ao baixar da Autentique', ['error' => $e->getMessage()]);
+                }
+            }
+
+            // TENTATIVA 2: Verificar se já existe arquivo local
+            if (file_exists($caminhoLocal)) {
+                Log::info('📁 Usando arquivo local existente');
+                
+                return response()->json([
+                    'success' => true,
+                    'source' => 'local_cache',
+                    'documento' => [
+                        'nome' => $nomeArquivo,
+                        'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
+                        'tamanho' => filesize($caminhoLocal),
+                        'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
+                    ]
+                ]);
+            }
+
+            // TENTATIVA 3: Documento histórico - precisa de upload manual
+            Log::info('📋 Documento histórico - upload manual necessário');
             
-            if (!$pdfAssinado) {
+            return response()->json([
+                'success' => false,
+                'needs_manual_upload' => true,
+                'message' => 'Documento assinado não encontrado - upload manual necessário',
+                'documento_info' => [
+                    'id' => $documento->id,
+                    'nome' => $documento->name,
+                    'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
+                ]
+            ], 404);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao buscar PDF assinado', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno ao buscar documento assinado'
+            ], 500);
+        }
+    }
+
+    public function uploadTermoAssinadoManual(Request $request, $propostaId): JsonResponse
+    {
+        try {
+            $documento = Document::where('proposta_id', $propostaId)
+                ->where('status', Document::STATUS_SIGNED)
+                ->first();
+
+            if (!$documento) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'PDF assinado não encontrado na Autentique'
+                    'message' => 'Documento não encontrado'
                 ], 404);
             }
 
-            // Salvar PDF localmente para cache
+            $request->validate([
+                'arquivo' => 'required|mimes:pdf|max:10240' // 10MB máximo
+            ]);
+
+            $arquivo = $request->file('arquivo');
             $nomeArquivo = "termo_assinado_{$documento->id}.pdf";
-            $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivo}");
-            
-            if (!is_dir(dirname($caminhoLocal))) {
-                mkdir(dirname($caminhoLocal), 0755, true);
-            }
-            
-            file_put_contents($caminhoLocal, $pdfAssinado);
+            $caminhoDestino = "termos_assinados/{$nomeArquivo}";
+
+            // Salvar arquivo no storage público
+            $arquivo->storeAs('public/' . dirname($caminhoDestino), basename($caminhoDestino));
+
+            // Atualizar documento com informação de upload manual
+            $documento->update([
+                'uploaded_manually' => true,
+                'uploaded_at' => now(),
+                'uploaded_by' => auth()->id(),
+                'manual_upload_filename' => $arquivo->getClientOriginalName()
+            ]);
+
+            Log::info('📄 Upload manual realizado', [
+                'documento_id' => $documento->id,
+                'proposta_id' => $propostaId,
+                'original_filename' => $arquivo->getClientOriginalName(),
+                'user_id' => auth()->id()
+            ]);
 
             return response()->json([
                 'success' => true,
+                'message' => 'Termo assinado enviado com sucesso',
                 'documento' => [
                     'nome' => $nomeArquivo,
-                    'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
-                    'tamanho' => strlen($pdfAssinado),
-                    'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
+                    'url' => asset("storage/{$caminhoDestino}"),
+                    'tamanho' => $arquivo->getSize(),
+                    'uploaded_manually' => true
                 ]
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro ao baixar PDF assinado', ['error' => $e->getMessage()]);
+            Log::error('❌ Erro no upload manual', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao baixar PDF assinado'
+                'message' => 'Erro ao enviar arquivo: ' . $e->getMessage()
             ], 500);
         }
     }
+
 
     public function gerarPdfApenas(Request $request, $propostaId): JsonResponse
     {
