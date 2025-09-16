@@ -445,12 +445,24 @@ class AutentiqueService
             // Preparar signatários no formato correto
             $signatarios = [];
             foreach ($dados['signatarios'] as $signatario) {
-                $signatarios[] = [
+                $signerData = [
                     'email' => $signatario['email'],
                     'action' => 'SIGN',
                     'name' => $signatario['nome']
                 ];
+                
+                // ✅ ADICIONAR TELEFONE SE FORNECIDO
+                if (isset($signatario['phone_number']) && !empty($signatario['phone_number'])) {
+                    $signerData['phone_number'] = $signatario['phone_number'];
+                }
+                
+                $signatarios[] = $signerData;
             }
+
+            Log::info('📋 Signatários preparados para Autentique', [
+                'count' => count($signatarios),
+                'signatarios' => $signatarios
+            ]);
             
             // ✅ CORREÇÃO: NÃO decodificar - o conteúdo já é binário
             $pdfContent = $dados['conteudo_pdf']; // Remover base64_decode
