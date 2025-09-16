@@ -512,4 +512,46 @@ class AutentiqueService
             return null;
         }
     }
+    /**
+     * Cancelar documento na Autentique
+     */
+    public function cancelDocument($documentId): bool
+    {
+        Log::info('🚫 Tentando cancelar documento na Autentique', ['document_id' => $documentId]);
+        
+        try {
+            $this->ensureTokenConfigured();
+            
+            // ✅ QUERY CORRIGIDA - deleteDocument retorna Boolean, não objeto
+            $mutation = '
+                mutation DeleteDocument($id: UUID!) {
+                    deleteDocument(id: $id)
+                }
+            ';
+
+            $resultado = $this->sendGraphQLRequest($mutation, ['id' => $documentId]);
+
+            // ✅ VERIFICAÇÃO CORRIGIDA - deleteDocument retorna boolean diretamente
+            if (isset($resultado['deleteDocument']) && $resultado['deleteDocument'] === true) {
+                Log::info('✅ Documento cancelado na Autentique com sucesso', [
+                    'document_id' => $documentId
+                ]);
+                return true;
+            } else {
+                Log::warning('⚠️ Falha ao cancelar documento na Autentique', [
+                    'document_id' => $documentId,
+                    'response' => $resultado
+                ]);
+                return false;
+            }
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao cancelar documento na Autentique', [
+                'document_id' => $documentId,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
+
 }

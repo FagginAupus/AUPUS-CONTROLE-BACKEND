@@ -169,11 +169,11 @@ class DocumentController extends Controller
      */
     private function prepararDadosParaPDF($dados): array
     {
-        $agora = Carbon::now();
+        $agora = \Carbon\Carbon::now('America/Sao_Paulo');
         
         // Determinar CPF/CNPJ baseado no tipo
         $cpfCnpj = '';
-        if ($dados['tipoDocumento'] === 'CPF') {
+        if (($dados['tipoDocumento'] ?? '') === 'CPF') {
             $cpfCnpj = $dados['cpf'] ?? '';
         } else {
             $cpfCnpj = $dados['cnpj'] ?? '';
@@ -224,7 +224,6 @@ class DocumentController extends Controller
                 throw new \Exception('Erro ao decodificar PDF base64');
             }
 
-            // Criar documento na Autentique
             $resultado = $this->autentiqueService->createDocumentFromProposta(
                 $request->dados,
                 $request->signatarios,
@@ -232,9 +231,22 @@ class DocumentController extends Controller
                 $request->sandbox ?? env('AUTENTIQUE_SANDBOX', false)
             );
 
+            // ✅ CORREÇÃO AQUI TAMBÉM
+            if (isset($resultado['data']['createDocument'])) {
+                $documento = $resultado['data']['createDocument'];
+            } elseif (isset($resultado['createDocument'])) {
+                $documento = $resultado['createDocument'];
+            } else {
+                $documento = $resultado;
+            }
+
+            if (!isset($documento['id'])) {
+                throw new \Exception('ID do documento não encontrado na resposta da Autentique');
+            }
+
             // Salvar documento no banco local
             $document = Document::create([
-                'autentique_id' => $documento['id'],
+                'autentique_id' => $documento['id'], // ✅ Garantido que existe
                 'name' => $request->dados['nomeAssociado'] ? "Termo de Adesão - {$request->dados['nomeAssociado']}" : "Termo de Adesão",
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => $request->sandbox ?? env('AUTENTIQUE_SANDBOX', false),
@@ -933,12 +945,23 @@ class DocumentController extends Controller
                 ]]
             ]);
 
-            $documento = $resultado['createDocument'] ?? $resultado;
+            // ✅ CORREÇÃO AQUI TAMBÉM
+            if (isset($resultado['data']['createDocument'])) {
+                $documento = $resultado['data']['createDocument'];
+            } elseif (isset($resultado['createDocument'])) {
+                $documento = $resultado['createDocument'];
+            } else {
+                $documento = $resultado;
+            }
+
+            if (!isset($documento['id'])) {
+                throw new \Exception('ID do documento não encontrado na resposta da Autentique');
+            }
 
             // Salvar no banco
             $documentoSalvo = Document::create([
                 'proposta_id' => $request->proposta_id,
-                'autentique_id' => $documento['id'],
+                'autentique_id' => $documento['id'], // ✅ Garantido que existe
                 'name' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'status' => Document::STATUS_PENDING,
                 'signer_email' => $request->signatario['email'],
@@ -1191,49 +1214,36 @@ class DocumentController extends Controller
         }
     }
 
-    public function enviarParaAutentique(Request $request, $propostaId): JsonResponse
+    public function enviarParaAutentique(Request $request, string $propostaId): JsonResponse
     {
-        Log::info('📤 Enviando PDF para Autentique', [
-            'proposta_id' => $propostaId
-        ]);
+        Log::info('📤 Enviando PDF para Autentique', ['proposta_id' => $propostaId]);
 
         try {
             $proposta = Proposta::findOrFail($propostaId);
 
             // Verificar se já existe documento pendente
             $documentoExistente = Document::where('proposta_id', $propostaId)
-                ->whereIn('status', [Document::STATUS_PENDING, Document::STATUS_SIGNED])
+                ->where('status', '!=', Document::STATUS_CANCELLED)
                 ->first();
 
             if ($documentoExistente) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Já existe um documento ativo para esta proposta. Cancele primeiro para enviar novo termo.',
+                    'message' => 'Já existe um documento pendente para esta proposta. Para atualizar o termo, cancele o atual primeiro.',
                     'documento' => [
                         'id' => $documentoExistente->id,
+                        'autentique_id' => $documentoExistente->autentique_id,
+                        'nome' => $documentoExistente->name,
                         'status' => $documentoExistente->status_label,
-                        'pode_cancelar' => true
+                        'progresso' => $documentoExistente->signing_progress . '%',
+                        'link_assinatura' => null,
+                        'criado_em' => $documentoExistente->created_at->format('d/m/Y H:i'),
+                        'opcoes' => [
+                            'pode_cancelar' => true,
+                            'pode_atualizar' => false
+                        ]
                     ]
                 ], 409);
-            }
-
-            // Validar dados do envio
-            $validator = Validator::make($request->all(), [
-                'nomeRepresentante' => 'required|string|max:255',
-                'emailRepresentante' => 'required|email|max:255',
-                'whatsappRepresentante' => 'required|string|max:20',
-                'enviar_whatsapp' => 'boolean',
-                'enviar_email' => 'boolean',
-                'pdf_base64' => 'string',
-                'nome_arquivo_temp' => 'string'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos para envio',
-                    'errors' => $validator->errors()
-                ], 422);
             }
 
             // Obter conteúdo do PDF
@@ -1276,29 +1286,69 @@ class DocumentController extends Controller
                 'name' => $request->nomeRepresentante
             ]];
 
+            // ✅ CORREÇÃO: Usar dados simples para a Autentique (não $dadosParaPDF)
+            $dadosDocumento = ['nome_cliente' => $proposta->nome_cliente];
+
             // Enviar para Autentique
             $resultado = $this->autentiqueService->createDocumentFromProposta(
-                ['nome_cliente' => $proposta->nome_cliente],
+                $dadosDocumento,  // ✅ Usar variável correta
                 $signatarios,
                 $pdfContent,
                 env('AUTENTIQUE_SANDBOX', false)
             );
 
-            $documentoData = $resultado['data']['createDocument'] ?? $resultado;
+            // ✅ CORREÇÃO CRÍTICA: Processar resposta corretamente
+            Log::info('🔍 Analisando resposta da Autentique', [
+                'resultado_tipo' => gettype($resultado),
+                'tem_data' => isset($resultado['data']),
+                'tem_createDocument' => isset($resultado['data']['createDocument']) ?? false,
+                'keys_resultado' => is_array($resultado) ? array_keys($resultado) : 'não é array'
+            ]);
+
+            // ✅ CORRIGIR EXTRAÇÃO DOS DADOS
+            if (isset($resultado['data']['createDocument'])) {
+                // Resposta GraphQL padrão: {"data": {"createDocument": {...}}}
+                $documentoData = $resultado['data']['createDocument'];
+            } elseif (isset($resultado['createDocument'])) {
+                // Resposta já processada: {"createDocument": {...}}
+                $documentoData = $resultado['createDocument'];
+            } else {
+                // Resposta direta ou formato diferente
+                $documentoData = $resultado;
+            }
+
+            // ✅ VALIDAR SE TEM ID ANTES DE USAR
+            if (!isset($documentoData['id'])) {
+                Log::error('❌ ID não encontrado na resposta', [
+                    'documentoData' => $documentoData,
+                    'resultado_completo' => $resultado
+                ]);
+                throw new \Exception('Resposta da Autentique não contém o ID do documento');
+            }
+
             $documentId = $documentoData['id'];
             $linkAssinatura = null;
 
+            // Extrair link de assinatura
             if (isset($documentoData['signatures'][0]['link']['short_link'])) {
                 $linkAssinatura = $documentoData['signatures'][0]['link']['short_link'];
             }
+
+            // ✅ PREPARAR DADOS PARA SALVAR NO BANCO (usando dados do request)
+            $documentData = array_merge($request->all(), [
+                'numeroProposta' => $proposta->numero_proposta,
+                'nomeCliente' => $proposta->nome_cliente,
+                'consultor' => $proposta->consultor
+            ]);
+
             // Salvar documento no banco
             $document = Document::create([
-                'autentique_id' => $documentId,  // ← USAR $documentId
+                'autentique_id' => $documentId,
                 'name' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
                 'proposta_id' => $propostaId,
-                'document_data' => $request->all(),
+                'document_data' => $documentData,  // ✅ Usar dados preparados
                 'signers' => $signatarios,
                 'autentique_response' => $resultado,
                 'total_signers' => 1,
@@ -1324,7 +1374,8 @@ class DocumentController extends Controller
 
             Log::info('✅ Termo enviado para Autentique com sucesso', [
                 'proposta_id' => $propostaId,
-                'document_id' => $document->id
+                'document_id' => $document->id,
+                'autentique_id' => $documentId
             ]);
 
             return response()->json([
@@ -1332,7 +1383,7 @@ class DocumentController extends Controller
                 'message' => 'Termo enviado para assinatura com sucesso!',
                 'documento' => [
                     'id' => $document->id,
-                    'autentique_id' => $documentId,  // ← USAR $documentId
+                    'autentique_id' => $documentId,
                     'nome' => $document->name,
                     'status' => $document->status_label,
                     'link_assinatura' => $linkAssinatura,
@@ -1344,12 +1395,113 @@ class DocumentController extends Controller
         } catch (\Exception $e) {
             Log::error('❌ Erro ao enviar para Autentique', [
                 'proposta_id' => $propostaId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Erro interno ao enviar documento: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function buscarPDFOriginal(Request $request, string $propostaId): Response
+    {
+        Log::info('📄 Buscando PDF original para visualização', ['proposta_id' => $propostaId]);
+
+        try {
+            // Buscar documento da proposta
+            $documento = Document::where('proposta_id', $propostaId)
+                ->whereIn('status', [Document::STATUS_PENDING, Document::STATUS_SIGNED])
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum documento encontrado para esta proposta'
+                ], 404);
+            }
+
+            // OPÇÃO 1: Se temos o PDF salvo em storage local
+            $pdfPath = storage_path("app/documentos/{$documento->autentique_id}.pdf");
+            if (file_exists($pdfPath)) {
+                Log::info('✅ PDF encontrado localmente', ['path' => $pdfPath]);
+                
+                return response()->file($pdfPath, [
+                    'Content-Type' => 'application/pdf',
+                    'Content-Disposition' => 'inline; filename="termo_' . $documento->name . '.pdf"'
+                ]);
+            }
+
+            // OPÇÃO 2: Regenerar PDF com os dados salvos
+            if (!empty($documento->document_data)) {
+                Log::info('🔄 Regenerando PDF com dados salvos');
+                
+                $dadosDocumento = $documento->document_data;
+                
+                // Usar o mesmo serviço que gera PDF
+                if (method_exists($this, 'tentarPreenchimentoPDFtk')) {
+                    $pdfContent = $this->tentarPreenchimentoPDFtk($dadosDocumento);
+                    
+                    if ($pdfContent) {
+                        return response($pdfContent, 200, [
+                            'Content-Type' => 'application/pdf',
+                            'Content-Disposition' => 'inline; filename="termo_regenerado.pdf"'
+                        ]);
+                    }
+                }
+                
+                // Fallback: usar PDFGeneratorService
+                try {
+                    $pdfContent = $this->pdfGeneratorService->gerarTermoPreenchido($dadosDocumento);
+                    
+                    return response($pdfContent, 200, [
+                        'Content-Type' => 'application/pdf',
+                        'Content-Disposition' => 'inline; filename="termo_regenerado.pdf"'
+                    ]);
+                    
+                } catch (\Exception $e) {
+                    Log::warning('⚠️ Falha ao regenerar PDF', ['error' => $e->getMessage()]);
+                }
+            }
+
+            // OPÇÃO 3: Baixar da Autentique (se disponível)
+            try {
+                if (method_exists($this->autentiqueService, 'downloadDocument')) {
+                    $pdfContent = $this->autentiqueService->downloadDocument($documento->autentique_id);
+                    
+                    if ($pdfContent) {
+                        Log::info('✅ PDF baixado da Autentique');
+                        
+                        return response($pdfContent, 200, [
+                            'Content-Type' => 'application/pdf',
+                            'Content-Disposition' => 'inline; filename="termo_autentique.pdf"'
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::warning('⚠️ Falha ao baixar PDF da Autentique', ['error' => $e->getMessage()]);
+            }
+
+            // Se chegou até aqui, não conseguiu encontrar/gerar o PDF
+            return response()->json([
+                'success' => false,
+                'message' => 'PDF não disponível para visualização'
+            ], 404);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao buscar PDF original', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno ao buscar PDF'
             ], 500);
         }
     }

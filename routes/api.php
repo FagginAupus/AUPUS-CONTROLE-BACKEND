@@ -579,6 +579,10 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('propostas/{proposta}/pdf-temporario', [DocumentController::class, 'verificarPdfTemporario']);
 
+        Route::get('propostas/{proposta}/pdf-original', [DocumentController::class, 'buscarPDFOriginal'])
+            ->middleware(['auth:api']);
+            //->middleware('permission:prospec.view');  // Comentado temporariamente
+
         Route::post('propostas/{proposta}/gerar-termo', [DocumentController::class, 'gerarTermoAdesao'])
             ->middleware('permission:prospec.edit');
 
@@ -610,8 +614,8 @@ Route::middleware('auth:api')->group(function () {
 
     });
     
-    Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente'])
-        ->middleware('permission:prospec.edit');
+    Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente']);
+        //->middleware('permission:prospec.edit');
 
     // Rota para baixar PDF assinado  
     Route::get('/documentos/propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado']);
