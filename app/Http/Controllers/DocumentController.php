@@ -1279,14 +1279,28 @@ class DocumentController extends Controller
                 ], 400);
             }
 
-            // Preparar signatário
-            $signatarios = [[
+            $signatario = [
                 'email' => $request->emailRepresentante,
                 'action' => 'SIGN',
                 'name' => $request->nomeRepresentante
-            ]];
+            ];
+            
+            if ($request->whatsappRepresentante && $request->boolean('enviar_whatsapp', false)) {
+                // Limpar formatação do telefone
+                $telefone = preg_replace('/\D/', '', $request->whatsappRepresentante);
+                
+                // Adicionar código do Brasil se necessário
+                if (strlen($telefone) === 11 && substr($telefone, 0, 1) !== '0') {
+                    $telefone = '55' . $telefone;
+                } elseif (strlen($telefone) === 10) {
+                    $telefone = '559' . $telefone; // Adicionar 9 para celulares antigos
+                }
+                
+                $signatario['phone_number'] = $telefone;
+            }
 
-            // ✅ CORREÇÃO: Usar dados simples para a Autentique (não $dadosParaPDF)
+            $signatarios = [$signatario];
+
             $dadosDocumento = ['nome_cliente' => $proposta->nome_cliente];
 
             // Enviar para Autentique
