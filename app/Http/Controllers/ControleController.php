@@ -1206,8 +1206,26 @@ class ControleController extends Controller
                 'controle_id' => $controleId,
                 'uc_numero' => $controle->numero_unidade,
                 'calibragem_individual' => $controle->calibragem_individual,
+                'desconto_tarifa_controle' => $controle->desconto_tarifa,
+                'desconto_bandeira_controle' => $controle->desconto_bandeira,
                 'user_id' => $currentUser->id
             ]);
+
+            // ✅ LÓGICA CORRETA DOS DESCONTOS
+            // Se controle_clube NÃO tem desconto próprio (NULL), usar da proposta
+            // Se controle_clube TEM desconto próprio, usar individual
+            
+            $temDescontoIndividualTarifa = !is_null($controle->desconto_tarifa) && 
+                                        $controle->desconto_tarifa !== $controle->proposta_desconto_tarifa;
+            
+            $temDescontoIndividualBandeira = !is_null($controle->desconto_bandeira) && 
+                                            $controle->desconto_bandeira !== $controle->proposta_desconto_bandeira;
+            
+            $usaDescontoProposta = !$temDescontoIndividualTarifa && !$temDescontoIndividualBandeira;
+            
+            // Valores atuais (que estão sendo usados)
+            $descontoTarifaAtual = $controle->desconto_tarifa ?? $controle->proposta_desconto_tarifa ?? '20%';
+            $descontoBandeiraAtual = $controle->desconto_bandeira ?? $controle->proposta_desconto_bandeira ?? '20%';
 
             // ✅ PROCESSAR dados para retorno
             $dados = [
@@ -1219,7 +1237,7 @@ class ControleController extends Controller
                 
                 // Dados da UC
                 'uc_id' => $controle->uc_id,
-                'numero_uc' => $controle->numero_unidade,  // ✅ RENOMEAR PARA CONSISTÊNCIA
+                'numero_uc' => $controle->numero_unidade,
                 'apelido' => $controle->apelido,
                 'consumo_medio' => floatval($controle->consumo_medio),
                 'ligacao' => $controle->ligacao,
@@ -1229,7 +1247,7 @@ class ControleController extends Controller
                 'ug_id' => $controle->ug_id,
                 'calibragem' => floatval($controle->calibragem ?? 0),
                 
-                // ✅ CORREÇÃO PRINCIPAL: Incluir calibragem_individual
+                // ✅ CORREÇÃO: Incluir calibragem_individual
                 'calibragem_individual' => $controle->calibragem_individual ? floatval($controle->calibragem_individual) : null,
                 'calibragem_global' => \App\Models\Configuracao::getCalibragemGlobal(),
                 
@@ -1238,17 +1256,29 @@ class ControleController extends Controller
                 'data_titularidade' => $controle->data_titularidade,
                 'observacoes' => $controle->observacoes,
                 
-                // ✅ NOVOS CAMPOS: Descontos individuais do controle
-                'desconto_tarifa' => $controle->desconto_tarifa ?? $controle->proposta_desconto_tarifa ?? '20%',
-                'desconto_bandeira' => $controle->desconto_bandeira ?? $controle->proposta_desconto_bandeira ?? '20%',
+                // ✅ DESCONTOS - LÓGICA CORRIGIDA
+                // Flag que indica se está usando desconto da proposta ou individual
+                'usa_desconto_proposta' => $usaDescontoProposta,
                 
-                // Descontos da proposta original (para referência)
+                // Valores atuais sendo usados (string com %)
+                'desconto_tarifa' => $descontoTarifaAtual,
+                'desconto_bandeira' => $descontoBandeiraAtual,
+                
+                // Valores da proposta original (sempre disponíveis para referência)
                 'proposta_desconto_tarifa' => $controle->proposta_desconto_tarifa ?? '20%',
                 'proposta_desconto_bandeira' => $controle->proposta_desconto_bandeira ?? '20%',
                 
-                // Valores numéricos dos descontos (para cálculos no frontend)
-                'desconto_tarifa_numerico' => $this->extrairValorDesconto($controle->desconto_tarifa ?? $controle->proposta_desconto_tarifa ?? '20%'),
-                'desconto_bandeira_numerico' => $this->extrairValorDesconto($controle->desconto_bandeira ?? $controle->proposta_desconto_bandeira ?? '20%'),
+                // ✅ VALORES NUMÉRICOS LIMPOS (sem %) para inputs type="number"
+                'desconto_tarifa_numerico' => $this->extrairValorDesconto($descontoTarifaAtual),
+                'desconto_bandeira_numerico' => $this->extrairValorDesconto($descontoBandeiraAtual),
+                'proposta_desconto_tarifa_numerico' => $this->extrairValorDesconto($controle->proposta_desconto_tarifa ?? '20%'),
+                'proposta_desconto_bandeira_numerico' => $this->extrairValorDesconto($controle->proposta_desconto_bandeira ?? '20%'),
+                
+                // Valores individuais do controle (se existirem)
+                'controle_desconto_tarifa' => $controle->desconto_tarifa,
+                'controle_desconto_bandeira' => $controle->desconto_bandeira,
+                'controle_desconto_tarifa_numerico' => $controle->desconto_tarifa ? $this->extrairValorDesconto($controle->desconto_tarifa) : null,
+                'controle_desconto_bandeira_numerico' => $controle->desconto_bandeira ? $this->extrairValorDesconto($controle->desconto_bandeira) : null,
                 
                 'created_at' => $controle->created_at,
                 'updated_at' => $controle->updated_at
@@ -1305,8 +1335,6 @@ class ControleController extends Controller
                     uc.numero_unidade,
                     uc.apelido,
                     uc.consumo_medio,
-                    uc.desconto_fatura as uc_desconto_fatura,
-                    uc.desconto_bandeira as uc_desconto_bandeira,
                     p.desconto_tarifa as proposta_desconto_tarifa,
                     p.desconto_bandeira as proposta_desconto_bandeira
                 FROM controle_clube cc
@@ -1346,60 +1374,51 @@ class ControleController extends Controller
                 ]);
             }
 
-            // ✅ 2. Atualizar calibragem se fornecida
-            if ($request->has('calibragem')) {
-                $updateFields[] = 'calibragem = ?';
-                $updateParams[] = $request->calibragem;
-            }
-
-            // ✅ 3. NOVA FUNCIONALIDADE: Atualizar descontos individuais do controle
-            if ($request->has('desconto_tarifa')) {
-                $descontoFormatado = $this->formatarDesconto($request->desconto_tarifa);
-                $updateFields[] = 'desconto_tarifa = ?';
-                $updateParams[] = $descontoFormatado;
-
-                Log::info('Desconto de tarifa atualizado no controle', [
-                    'controle_id' => $controleId,
-                    'desconto_original' => $request->desconto_tarifa,
-                    'desconto_formatado' => $descontoFormatado
-                ]);
-            }
-
-            if ($request->has('desconto_bandeira')) {
-                $descontoFormatado = $this->formatarDesconto($request->desconto_bandeira);
-                $updateFields[] = 'desconto_bandeira = ?';
-                $updateParams[] = $descontoFormatado;
-
-                Log::info('Desconto de bandeira atualizado no controle', [
-                    'controle_id' => $controleId,
-                    'desconto_original' => $request->desconto_bandeira,
-                    'desconto_formatado' => $descontoFormatado
-                ]);
-            }
-            
-            if ($request->has('usa_calibragem_global')) {
-                if ($request->usa_calibragem_global == true) {
-                    // Usar calibragem global - limpar individual
-                    $updateFields[] = 'calibragem_individual = ?';
-                    $updateParams[] = null;
-                    
-                    Log::info('Calibragem individual removida (usar global)', [
-                        'controle_id' => $controleId
-                    ]);
+            // ✅ 2. Atualizar calibragem individual se fornecida
+            if ($request->has('calibragem_individual')) {
+                if ($request->usa_calibragem_global) {
+                    // Se marcar para usar global, limpar individual
+                    $updateFields[] = 'calibragem_individual = NULL';
                 } else {
-                    // Usar calibragem individual
-                    if ($request->has('calibragem_individual') && $request->calibragem_individual !== null) {
-                        $updateFields[] = 'calibragem_individual = ?';
-                        $updateParams[] = $request->calibragem_individual;
-                        
-                        Log::info('Calibragem individual definida', [
-                            'controle_id' => $controleId,
-                            'valor' => $request->calibragem_individual
-                        ]);
-                    }
+                    // Se desmarcar, definir valor individual
+                    $updateFields[] = 'calibragem_individual = ?';
+                    $updateParams[] = $request->calibragem_individual;
                 }
             }
 
+            // ✅ 3. LÓGICA CORRIGIDA DOS DESCONTOS
+            if ($request->has('usa_desconto_proposta')) {
+                if ($request->usa_desconto_proposta) {
+                    // ✅ USAR DESCONTO DA PROPOSTA - LIMPAR CAMPOS INDIVIDUAIS
+                    $updateFields[] = 'desconto_tarifa = NULL';
+                    $updateFields[] = 'desconto_bandeira = NULL';
+                    
+                    Log::info('Configurado para usar desconto da proposta', [
+                        'controle_id' => $controleId,
+                        'proposta_desconto_tarifa' => $controle->proposta_desconto_tarifa,
+                        'proposta_desconto_bandeira' => $controle->proposta_desconto_bandeira
+                    ]);
+                } else {
+                    // ✅ USAR DESCONTO INDIVIDUAL - SALVAR VALORES FORNECIDOS
+                    if ($request->has('desconto_tarifa')) {
+                        $descontoTarifaFormatado = $this->formatarDesconto($request->desconto_tarifa);
+                        $updateFields[] = 'desconto_tarifa = ?';
+                        $updateParams[] = $descontoTarifaFormatado;
+                    }
+                    
+                    if ($request->has('desconto_bandeira')) {
+                        $descontoBandeiraFormatado = $this->formatarDesconto($request->desconto_bandeira);
+                        $updateFields[] = 'desconto_bandeira = ?';
+                        $updateParams[] = $descontoBandeiraFormatado;
+                    }
+                    
+                    Log::info('Configurado para usar desconto individual', [
+                        'controle_id' => $controleId,
+                        'desconto_tarifa' => $request->desconto_tarifa,
+                        'desconto_bandeira' => $request->desconto_bandeira
+                    ]);
+                }
+            }
 
             // ✅ 4. Atualizar observações se fornecidas
             if ($request->has('observacoes')) {
@@ -1428,9 +1447,12 @@ class ControleController extends Controller
                     cc.*,
                     uc.numero_unidade,
                     uc.apelido,
-                    uc.consumo_medio
+                    uc.consumo_medio,
+                    p.desconto_tarifa as proposta_desconto_tarifa,
+                    p.desconto_bandeira as proposta_desconto_bandeira
                 FROM controle_clube cc
                 JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                JOIN propostas p ON cc.proposta_id = p.id
                 WHERE cc.id = ?
             ", [$controleId]);
 
@@ -1442,11 +1464,11 @@ class ControleController extends Controller
                     'numero_unidade' => $controleAtualizado->numero_unidade,
                     'apelido' => $controleAtualizado->apelido,
                     'consumo_medio' => floatval($controleAtualizado->consumo_medio),
-                    'calibragem' => floatval($controleAtualizado->calibragem),
-                    'calibragem_individual' => $controleAtualizado->calibragem_individual,
+                    'calibragem_individual' => $controleAtualizado->calibragem_individual ? floatval($controleAtualizado->calibragem_individual) : null,
                     'desconto_tarifa' => $controleAtualizado->desconto_tarifa,
                     'desconto_bandeira' => $controleAtualizado->desconto_bandeira,
-                    'observacoes' => $controleAtualizado->observacoes
+                    'observacoes' => $controleAtualizado->observacoes,
+                    'usa_desconto_proposta' => is_null($controleAtualizado->desconto_tarifa) && is_null($controleAtualizado->desconto_bandeira)
                 ]
             ]);
 
