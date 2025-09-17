@@ -577,7 +577,7 @@ class PropostaController extends Controller
                 usuario_id, recorrencia, desconto_tarifa, desconto_bandeira,
                 observacoes, beneficios, unidades_consumidoras,
                 inflacao, tarifa_tributos, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
 
             $params = [
                 $id,
