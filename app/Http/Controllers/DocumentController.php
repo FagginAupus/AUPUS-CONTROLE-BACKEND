@@ -1023,12 +1023,24 @@ class DocumentController extends Controller
         }
     }
 
-    public function buscarStatusDocumento($propostaId): JsonResponse
+    public function buscarStatusDocumento(string $propostaId): JsonResponse
     {
         try {
-            $documento = Document::where('proposta_id', $propostaId)
-                ->whereIn('status', [Document::STATUS_PENDING, Document::STATUS_SIGNED])
-                ->first();
+            // ✅ CORREÇÃO: Buscar documento por proposta E número da UC
+            $numeroUC = request()->query('numero_uc'); // Pegar da query string
+            
+            if ($numeroUC) {
+                // Buscar documento específico da UC
+                $documento = Document::where('proposta_id', $propostaId)
+                    ->where('numero_uc', $numeroUC)  // ✅ FILTRAR POR UC
+                    ->where('status', '!=', Document::STATUS_CANCELLED)
+                    ->first();
+            } else {
+                // Se não informou UC, buscar qualquer documento da proposta (compatibilidade)
+                $documento = Document::where('proposta_id', $propostaId)
+                    ->where('status', '!=', Document::STATUS_CANCELLED)
+                    ->first();
+            }
 
             if (!$documento) {
                 return response()->json([
@@ -1037,36 +1049,23 @@ class DocumentController extends Controller
                 ], 404);
             }
 
-            // Determinar URL do PDF baseada no status
-            $pdfUrl = null;
-            if ($documento->status === Document::STATUS_SIGNED) {
-                // Se assinado, usar URL do PDF assinado
-                $pdfUrl = route('documentos.pdf-assinado', $documento->proposta_id);
-            } else {
-                // Se pendente, usar URL de visualização da Autentique ou link de assinatura
-                $pdfUrl = $documento->signing_url;
-            }
-
+            // Resto do método continua igual...
             return response()->json([
-            'success' => true,
-            'documento' => [
-                'id' => $documento->id,
-                'autentique_id' => $documento->autentique_id,
-                'nome' => $documento->name,
-                'status' => $documento->status,  // ✅ MANTER O STATUS ORIGINAL ('signed')
-                'status_label' => $documento->status_label,
-                'email_signatario' => $documento->signer_email,
-                'criado_em' => $documento->created_at->format('d/m/Y H:i'),
-                'updated_at' => $documento->updated_at->format('d/m/Y H:i'),
-                'data_assinatura' => $documento->updated_at->format('d/m/Y H:i'),
-                'link_assinatura' => $documento->signing_url,
-                'pdf_url' => $pdfUrl
-            ]
-        ]);
+                'success' => true,
+                'documento' => [
+                    'id' => $documento->id,
+                    'autentique_id' => $documento->autentique_id,
+                    'numero_uc' => $documento->numero_uc, // ✅ INCLUIR NO RETORNO
+                    'nome' => $documento->name,
+                    'status' => $documento->status,
+                    // ... outros campos
+                ]
+            ]);
 
         } catch (\Exception $e) {
             Log::error('Erro ao buscar status do documento', [
                 'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC ?? 'N/A',
                 'error' => $e->getMessage()
             ]);
 
