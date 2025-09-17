@@ -412,8 +412,43 @@ class DocumentController extends Controller
             return;
         }
 
-        // Verificar se documento foi visualizado ou assinado parcialmente
+        // ✅ DETECTAR REJEIÇÃO - Verificar se rejected_count aumentou
+        $rejectedCount = $eventData['rejected_count'] ?? 0;
+        $previousRejectedCount = $fullEvent['event']['previous_attributes']['rejected_count'] ?? 0;
+        
+        // ✅ SE HOUVE REJEIÇÃO, PROCESSAR COMO REJEITADO
+        if ($rejectedCount > $previousRejectedCount) {
+            Log::info('🔍 REJEIÇÃO DETECTADA via document.updated', [
+                'document_id' => $documentId,
+                'rejected_count' => $rejectedCount,
+                'previous_rejected_count' => $previousRejectedCount
+            ]);
+            
+            // Buscar informações do signatário que rejeitou
+            $signerInfo = $this->extrairInfoRejeitante($eventData);
+            
+            // Processar como rejeição usando a mesma lógica
+            $this->processarRejeicao($localDocument, $signerInfo, $fullEvent);
+            return; // Não processar como update normal
+        }
+
+        // Verificar se documento foi finalizado (todos assinaram)
         $signedCount = $eventData['signed_count'] ?? 0;
+        $totalSigners = $localDocument->total_signers;
+        
+        if ($signedCount >= $totalSigners && $totalSigners > 0) {
+            Log::info('📋 Documento finalizado detectado via update', [
+                'document_id' => $documentId,
+                'signed_count' => $signedCount,
+                'total_signers' => $totalSigners
+            ]);
+            
+            // Processar como documento finalizado
+            $this->handleDocumentFinished($eventData, $fullEvent);
+            return;
+        }
+
+        // Verificar se documento foi visualizado ou assinado parcialmente
         $previousSignedCount = $fullEvent['event']['previous_attributes']['signed_count'] ?? 0;
 
         // Se houve mudança no contador de assinaturas, algo importante aconteceu
@@ -424,31 +459,37 @@ class DocumentController extends Controller
                 'autentique_response' => $fullEvent
             ]);
 
-            // Verificar se alguém visualizou ou assinou
-            $ultimosEventos = [];
+            // Verificar eventos recentes nas assinaturas
             if (isset($eventData['signatures'])) {
                 foreach ($eventData['signatures'] as $signature) {
                     if (isset($signature['events']) && is_array($signature['events'])) {
-                        $ultimosEventos = array_merge($ultimosEventos, $signature['events']);
+                        $ultimosEventos = $signature['events'];
+                        
+                        // Ordenar eventos por data (mais recente primeiro)
+                        usort($ultimosEventos, function($a, $b) {
+                            return strtotime($b['created_at'] ?? 0) - strtotime($a['created_at'] ?? 0);
+                        });
+                        
+                        // Verificar último evento
+                        foreach ($ultimosEventos as $evento) {
+                            if ($evento['type'] === 'viewed') {
+                                Log::info('👀 DOCUMENTO VISUALIZADO!', [
+                                    'document_id' => $documentId,
+                                    'user' => $evento['user']['name'] ?? 'N/A',
+                                    'viewed_at' => $evento['created_at'] ?? now()
+                                ]);
+                                break;
+                            } elseif ($evento['type'] === 'signed') {
+                                Log::info('✍️ ASSINATURA REALIZADA!', [
+                                    'document_id' => $documentId,
+                                    'user' => $evento['user']['name'] ?? 'N/A',
+                                    'signed_at' => $evento['created_at'] ?? now(),
+                                    'signed_count' => $signedCount
+                                ]);
+                                break;
+                            }
+                        }
                     }
-                }
-            }
-
-            // Verificar eventos recentes
-            foreach ($ultimosEventos as $evento) {
-                if ($evento['type'] === 'viewed') {
-                    Log::info('👀 DOCUMENTO VISUALIZADO!', [
-                        'document_id' => $documentId,
-                        'user' => $evento['user']['name'] ?? 'N/A',
-                        'viewed_at' => $evento['created_at'] ?? now()
-                    ]);
-                } elseif ($evento['type'] === 'signed') {
-                    Log::info('✍️ ASSINATURA REALIZADA!', [
-                        'document_id' => $documentId,
-                        'user' => $evento['user']['name'] ?? 'N/A',
-                        'signed_at' => $evento['created_at'] ?? now(),
-                        'signed_count' => $signedCount
-                    ]);
                 }
             }
         }
@@ -456,8 +497,133 @@ class DocumentController extends Controller
         Log::info('📝 Documento atualizado via webhook', [
             'document_id' => $documentId,
             'status' => $localDocument->status,
-            'signed_count' => $signedCount
+            'signed_count' => $signedCount,
+            'rejected_count' => $rejectedCount
         ]);
+    }
+
+    /**
+     * ✅ NOVA FUNÇÃO: Extrair informações de quem rejeitou
+     */
+    private function extrairInfoRejeitante(array $eventData): array
+    {
+        $signerInfo = [
+            'name' => 'Signatário',
+            'email' => null,
+            'reason' => null
+        ];
+
+        if (isset($eventData['signatures'])) {
+            foreach ($eventData['signatures'] as $signature) {
+                // Verificar se esta assinatura foi rejeitada
+                if (!empty($signature['rejected'])) {
+                    $signerInfo['name'] = $signature['user']['name'] ?? 'Signatário';
+                    $signerInfo['email'] = $signature['user']['email'] ?? null;
+                    $signerInfo['reason'] = $signature['reason'] ?? null;
+                    
+                    // Buscar no evento de rejeição mais detalhes
+                    if (isset($signature['events'])) {
+                        foreach ($signature['events'] as $evento) {
+                            if ($evento['type'] === 'rejected') {
+                                $signerInfo['reason'] = $evento['reason'] ?? $signerInfo['reason'];
+                                break;
+                            }
+                        }
+                    }
+                    
+                    break; // Parar na primeira rejeição encontrada
+                }
+            }
+        }
+
+        return $signerInfo;
+    }
+
+    /**
+     * ✅ NOVA FUNÇÃO: Processar rejeição (centralizar lógica)
+     */
+    private function processarRejeicao(Document $localDocument, array $signerInfo, array $fullEvent)
+    {
+        $localDocument->update([
+            'status' => Document::STATUS_REJECTED,
+            'rejected_count' => $localDocument->rejected_count + 1,
+            'last_checked_at' => now(),
+            'autentique_response' => $fullEvent
+        ]);
+
+        Log::info('❌ ASSINATURA REJEITADA!', [
+            'document_id' => $localDocument->autentique_id,
+            'signer_name' => $signerInfo['name'],
+            'signer_email' => $signerInfo['email'],
+            'rejection_reason' => $signerInfo['reason'],
+            'rejected_count' => $localDocument->rejected_count
+        ]);
+
+        // ✅ LÓGICA PARA ATUALIZAR UC - MESMA DO CÓDIGO ANTERIOR
+        if ($localDocument->proposta_id && $localDocument->document_data) {
+            $dadosDocumento = $localDocument->document_data;
+            $numeroUC = $dadosDocumento['numeroUC'] ?? null;
+            
+            if ($numeroUC) {
+                // Buscar proposta e alterar status da UC para "Recusada"
+                $proposta = \App\Models\Proposta::find($localDocument->proposta_id);
+                if ($proposta) {
+                    $unidadesConsumidoras = $proposta->unidades_consumidoras;
+                    if (is_string($unidadesConsumidoras)) {
+                        $unidadesConsumidoras = json_decode($unidadesConsumidoras, true);
+                    } elseif (!is_array($unidadesConsumidoras)) {
+                        $unidadesConsumidoras = [];
+                    }
+                    
+                    foreach ($unidadesConsumidoras as &$uc) {
+                        if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
+                            $statusAnterior = $uc['status'] ?? null;
+                            $uc['status'] = 'Recusada';
+                            
+                            Log::info('🔄 Status da UC alterado para Recusada via webhook', [
+                                'proposta_id' => $localDocument->proposta_id,
+                                'numero_uc' => $numeroUC,
+                                'status_anterior' => $statusAnterior,
+                                'status_novo' => 'Recusada',
+                                'documento_id' => $localDocument->autentique_id,
+                                'signatario' => $signerInfo['name']
+                            ]);
+                            
+                            break;
+                        }
+                    }
+                    
+                    // Salvar as alterações
+                    $proposta->unidades_consumidoras = json_encode($unidadesConsumidoras);
+                    $proposta->save();
+                    
+                    // ✅ REMOVER DO CONTROLE se estava em "Fechada"
+                    try {
+                        $propostaController = new \App\Http\Controllers\PropostaController();
+                        $reflection = new \ReflectionClass($propostaController);
+                        $method = $reflection->getMethod('removerDoControle');
+                        $method->setAccessible(true);
+                        $method->invoke($propostaController, $localDocument->proposta_id, $numeroUC, 'Fechada', 'Recusada');
+                        
+                        Log::info('✅ UC removida do controle automaticamente', [
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('❌ Erro ao remover UC do controle', [
+                            'error' => $e->getMessage(),
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
+                    }
+                    
+                    Log::info('💾 Proposta atualizada com UC em status Recusada', [
+                        'proposta_id' => $localDocument->proposta_id,
+                        'numero_uc' => $numeroUC
+                    ]);
+                }
+            }
+        }
     }
 
     /**
@@ -595,6 +761,179 @@ class DocumentController extends Controller
             'signer_name' => $signerName,
             'rejected_count' => $localDocument->rejected_count
         ]);
+
+        // ✅ NOVA LÓGICA: Atualizar status da UC para "Recusada"
+        if ($localDocument->proposta_id && $localDocument->document_data) {
+            $dadosDocumento = $localDocument->document_data;
+            $numeroUC = $dadosDocumento['numeroUC'] ?? null;
+            
+            if ($numeroUC) {
+                // Buscar proposta e alterar status da UC para "Recusada"
+                $proposta = \App\Models\Proposta::find($localDocument->proposta_id);
+                if ($proposta) {
+                    $unidadesConsumidoras = $proposta->unidades_consumidoras;
+                    if (is_string($unidadesConsumidoras)) {
+                        $unidadesConsumidoras = json_decode($unidadesConsumidoras, true);
+                    } elseif (!is_array($unidadesConsumidoras)) {
+                        $unidadesConsumidoras = [];
+                    }
+                    
+                    foreach ($unidadesConsumidoras as &$uc) {
+                        if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
+                            $statusAnterior = $uc['status'] ?? null;
+                            $uc['status'] = 'Recusada';
+                            
+                            Log::info('🔄 Status da UC alterado para Recusada via webhook', [
+                                'proposta_id' => $localDocument->proposta_id,
+                                'numero_uc' => $numeroUC,
+                                'status_anterior' => $statusAnterior,
+                                'status_novo' => 'Recusada',
+                                'documento_id' => $documentId,
+                                'signatario' => $signerName
+                            ]);
+                            
+                            break;
+                        }
+                    }
+                    
+                    // Salvar as alterações
+                    $proposta->unidades_consumidoras = json_encode($unidadesConsumidoras);
+                    $proposta->save();
+                    
+                    // ✅ REMOVER DO CONTROLE se estava em "Fechada"
+                    // Usar a mesma lógica do PropostaController
+                    try {
+                        $propostaController = new \App\Http\Controllers\PropostaController();
+                        $reflection = new \ReflectionClass($propostaController);
+                        $method = $reflection->getMethod('removerDoControle');
+                        $method->setAccessible(true);
+                        $method->invoke($propostaController, $localDocument->proposta_id, $numeroUC, 'Fechada', 'Recusada');
+                        
+                        Log::info('✅ UC removida do controle automaticamente', [
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('❌ Erro ao remover UC do controle', [
+                            'error' => $e->getMessage(),
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
+                    }
+                    
+                    Log::info('💾 Proposta atualizada com UC em status Recusada', [
+                        'proposta_id' => $localDocument->proposta_id,
+                        'numero_uc' => $numeroUC
+                    ]);
+                }
+            }
+        }
+    }
+
+    public function resetarDocumentoRejeitado(Request $request, $propostaId): JsonResponse
+    {
+        try {
+            Log::info('🔄 Iniciando reset de documento rejeitado', [
+                'proposta_id' => $propostaId,
+                'user_id' => auth()->id()
+            ]);
+
+            // Buscar documento rejeitado da proposta
+            $documento = Document::where('proposta_id', $propostaId)
+                ->where('status', Document::STATUS_REJECTED)
+                ->first();
+
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum documento rejeitado encontrado para esta proposta'
+                ], 404);
+            }
+
+            Log::info('📄 Documento rejeitado encontrado', [
+                'document_id' => $documento->id,
+                'autentique_id' => $documento->autentique_id,
+                'status' => $documento->status,
+                'rejected_count' => $documento->rejected_count
+            ]);
+
+            // Opcional: Cancelar o documento na Autentique
+            try {
+                $this->cancelarDocumentoNaAutentique($documento->autentique_id);
+                Log::info('✅ Documento cancelado na Autentique', [
+                    'autentique_id' => $documento->autentique_id
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('⚠️ Não foi possível cancelar documento na Autentique', [
+                    'document_id' => $documento->autentique_id,
+                    'error' => $e->getMessage()
+                ]);
+                // Não falhar o processo todo por isso
+            }
+
+            // Excluir o documento rejeitado localmente
+            $documento->delete();
+
+            Log::info('🗑️ Documento rejeitado removido do sistema', [
+                'proposta_id' => $propostaId,
+                'document_id' => $documento->autentique_id,
+                'user_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Documento rejeitado resetado com sucesso. Você pode gerar um novo termo agora.'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao resetar documento rejeitado', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'proposta_id' => $propostaId,
+                'user_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao resetar documento: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ MÉTODO AUXILIAR: Cancelar documento na Autentique
+     */
+    private function cancelarDocumentoNaAutentique($autentiqueId)
+    {
+        $mutation = '
+            mutation {
+                deleteDocument(id: "' . $autentiqueId . '") {
+                    id
+                    deleted
+                }
+            }
+        ';
+
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . env('AUTENTIQUE_API_TOKEN'),
+            'Content-Type' => 'application/json'
+        ])->post(env('AUTENTIQUE_API_URL'), [
+            'query' => $mutation
+        ]);
+
+        if (!$response->successful()) {
+            throw new \Exception('Erro ao cancelar documento na Autentique: ' . $response->body());
+        }
+
+        $result = $response->json();
+        
+        if (isset($result['errors'])) {
+            $errorMessages = collect($result['errors'])->pluck('message')->implode(', ');
+            throw new \Exception('Erro GraphQL: ' . $errorMessages);
+        }
+
+        return $result['data']['deleteDocument'] ?? null;
     }
 
     public function verificarPdfTemporario($propostaId): JsonResponse

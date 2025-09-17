@@ -601,7 +601,9 @@ Route::middleware('auth:api')->group(function () {
             //->middleware('permission:prospec.view');
 
         Route::post('propostas/{proposta}/upload-termo-assinado', [DocumentController::class, 'uploadTermoAssinadoManual']);
-            
+        
+        Route::post('propostas/{proposta}/resetar-rejeitado', [DocumentController::class, 'resetarDocumentoRejeitado']);
+        
         // Listar documentos de uma proposta
         Route::get('propostas/{proposta}', [DocumentController::class, 'listarDocumentosProposta'])
             ->middleware('permission:prospec.view');
