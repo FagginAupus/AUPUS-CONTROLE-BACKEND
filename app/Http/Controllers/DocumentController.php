@@ -138,19 +138,21 @@ class DocumentController extends Controller
             $documentoAutentique = $this->autentiqueService->enviarDocumento($pdfContent, $dadosDocumento);
 
             // ✅ CORREÇÃO: Salvar documento local COM número da UC
-            $documentoLocal = new Document([
+            $documentoLocal = Document::create([
+                'id' => (string) Str::ulid(),
                 'proposta_id' => $propostaId,
-                'numero_uc' => $numeroUC, // ✅ ADICIONAR NÚMERO DA UC
+                'numero_uc' => $numeroUC,
                 'autentique_id' => $documentoAutentique['id'],
                 'name' => $dadosDocumento['nome_documento'],
                 'status' => Document::STATUS_PENDING,
-                'status_label' => 'Pendente de Assinatura',
                 'signer_email' => $dadosDocumento['emailRepresentante'] ?? $dadosDocumento['email'] ?? '',
                 'signing_url' => $documentoAutentique['signing_url'] ?? null,
                 'signing_progress' => 0,
                 'created_at' => now(),
                 'updated_at' => now()
             ]);
+
+            
             
             $documentoLocal->save();
 
@@ -274,6 +276,7 @@ class DocumentController extends Controller
             // Salvar documento no banco local
             $document = Document::create([
                 'autentique_id' => $documento['id'], // ✅ Garantido que existe
+                'numero_uc' => $request->numeroUC,
                 'name' => $request->dados['nomeAssociado'] ? "Termo de Adesão - {$request->dados['nomeAssociado']}" : "Termo de Adesão",
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => $request->sandbox ?? env('AUTENTIQUE_SANDBOX', false),
@@ -1030,13 +1033,26 @@ class DocumentController extends Controller
             // ✅ CORREÇÃO: Buscar documento por proposta E número da UC
             $numeroUC = request()->query('numero_uc'); // Pegar da query string
             
+            // ✅ ADICIONAR LOG PARA DEBUG
+            Log::info('📋 Buscando status documento', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'query_params' => request()->query()
+            ]);
+            
             if ($numeroUC) {
                 // Buscar documento específico da UC
                 $documento = Document::where('proposta_id', $propostaId)
                     ->where('numero_uc', $numeroUC)  // ✅ FILTRAR POR UC
                     ->where('status', '!=', Document::STATUS_CANCELLED)
                     ->first();
+                    
+                Log::info('📋 Resultado da busca', [
+                    'documento_encontrado' => $documento ? $documento->id : null,
+                    'numero_uc_documento' => $documento ? $documento->numero_uc : null
+                ]);
             } else {
+                Log::warning('📋 numeroUC não fornecido na consulta');
                 // Se não informou UC, buscar qualquer documento da proposta (compatibilidade)
                 $documento = Document::where('proposta_id', $propostaId)
                     ->where('status', '!=', Document::STATUS_CANCELLED)
@@ -1050,7 +1066,6 @@ class DocumentController extends Controller
                 ], 404);
             }
 
-            // Resto do método continua igual...
             return response()->json([
                 'success' => true,
                 'documento' => [
@@ -1059,7 +1074,11 @@ class DocumentController extends Controller
                     'numero_uc' => $documento->numero_uc, // ✅ INCLUIR NO RETORNO
                     'nome' => $documento->name,
                     'status' => $documento->status,
-                    // ... outros campos
+                    'status_label' => $documento->status_label ?? $documento->status,
+                    'signing_progress' => $documento->signing_progress ?? 0,
+                    'link_assinatura' => $documento->signing_url,
+                    'signer_email' => $documento->signer_email,
+                    'criado_em' => $documento->created_at->format('d/m/Y H:i')
                 ]
             ]);
 
@@ -1112,7 +1131,7 @@ class DocumentController extends Controller
 
             // Buscar proposta
             $proposta = Proposta::findOrFail($propostaId);
-
+            $numeroUC = $request->numeroUC;
             // Verificar documento existente
             $documentoExistente = Document::where('proposta_id', $propostaId)
                 ->where('numero_uc', $numeroUC)
@@ -1712,6 +1731,7 @@ class DocumentController extends Controller
 
         try {
             $proposta = Proposta::findOrFail($propostaId);
+            $numeroUC = $request->numeroUC;
 
             // Verificar se já existe documento pendente
             $documentoExistente = Document::where('proposta_id', $propostaId)
@@ -1776,8 +1796,7 @@ class DocumentController extends Controller
                 'numeroProposta' => $proposta->numero_proposta,
                 'nomeCliente' => $proposta->nome_cliente,
                 'consultor' => $proposta->consultor,
-                'nome_cliente' => $proposta->nome_cliente,  // Para compatibilidade
-                // ✅ ADICIONAR OPÇÕES DE ENVIO ESCOLHIDAS PELO USUÁRIO
+                'nome_cliente' => $proposta->nome_cliente,
                 'opcoes_envio' => [
                     'enviar_email' => $request->boolean('enviar_email', true),
                     'enviar_whatsapp' => $request->boolean('enviar_whatsapp', false)
@@ -1883,8 +1902,8 @@ class DocumentController extends Controller
             $document = Document::create([
                 'id' => (string) Str::ulid(),
                 'autentique_id' => $documentId,
-                'numero_uc' => $request->numeroUC,
                 'name' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'numero_uc' => $numeroUC,
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
                 'proposta_id' => $propostaId,
