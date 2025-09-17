@@ -30,8 +30,14 @@ class ControleClube extends Model
         'proposta_id',
         'uc_id',
         'ug_id',
+        'calibragem',
         'calibragem_individual',
+        'desconto_tarifa',        
+        'desconto_bandeira',     
+        'valor_calibrado',
         'observacoes',
+        'status_troca',
+        'data_titularidade',
         'data_entrada_controle',
         'created_at',
         'updated_at',
@@ -46,8 +52,13 @@ class ControleClube extends Model
         'proposta_id' => 'string',
         'uc_id' => 'string',
         'ug_id' => 'string',
+        'calibragem' => 'decimal:2',
         'calibragem_individual' => 'decimal:2',
+        'desconto_tarifa' => 'string',      
+        'desconto_bandeira' => 'string',      
+        'valor_calibrado' => 'decimal:2',
         'data_entrada_controle' => 'datetime',
+        'data_titularidade' => 'date',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime'
@@ -73,6 +84,37 @@ class ControleClube extends Model
     public function proposta()
     {
         return $this->belongsTo(Proposta::class, 'proposta_id', 'id');
+    }
+
+      public function getDescontoTarifaNumericoAttribute(): float
+    {
+        if (empty($this->desconto_tarifa)) {
+            return 0.0;
+        }
+        
+        $numeroStr = str_replace(['%', ' '], '', $this->desconto_tarifa);
+        return floatval($numeroStr) ?: 0.0;
+    }
+
+    /**
+     * ✅ NOVO MÉTODO: Extrair valor numérico do desconto de bandeira
+     */
+    public function getDescontoBandeiraNumeriroAttribute(): float
+    {
+        if (empty($this->desconto_bandeira)) {
+            return 0.0;
+        }
+        
+        $numeroStr = str_replace(['%', ' '], '', $this->desconto_bandeira);
+        return floatval($numeroStr) ?: 0.0;
+    }
+
+    /**
+     * ✅ NOVO MÉTODO: Verificar se tem descontos personalizados
+     */
+    public function temDescontosPersonalizados(): bool
+    {
+        return !is_null($this->desconto_tarifa) && !is_null($this->desconto_bandeira);
     }
 
     /**

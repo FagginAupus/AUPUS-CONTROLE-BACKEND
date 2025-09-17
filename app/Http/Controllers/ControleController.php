@@ -1168,22 +1168,32 @@ class ControleController extends Controller
             ], 500);
         }
     }
-    public function getUCDetalhes(Request $request, string $controleId): JsonResponse
+    
+    public function getUCDetalhes(string $controleId): JsonResponse
     {
         try {
-            $currentUser = JWTAuth::user();
-            
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
+            $currentUser = auth()->user();
 
-            // Buscar controle com relacionamentos
-            $controle = ControleClube::with(['proposta', 'uc'])
-                ->where('id', $controleId)
-                ->first();
+            // ✅ BUSCAR controle com todos os dados necessários
+            $controle = DB::selectOne("
+                SELECT 
+                    cc.*,
+                    uc.numero_unidade,
+                    uc.apelido,
+                    uc.consumo_medio,
+                    uc.ligacao,
+                    uc.distribuidora,
+                    p.numero_proposta,
+                    p.nome_cliente,
+                    p.desconto_tarifa as proposta_desconto_tarifa,
+                    p.desconto_bandeira as proposta_desconto_bandeira,
+                    u.nome as consultor_nome
+                FROM controle_clube cc
+                JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                JOIN propostas p ON cc.proposta_id = p.id
+                LEFT JOIN usuarios u ON p.usuario_id = u.id
+                WHERE cc.id = ? AND cc.deleted_at IS NULL
+            ", [$controleId]);
 
             if (!$controle) {
                 return response()->json([
@@ -1192,45 +1202,84 @@ class ControleController extends Controller
                 ], 404);
             }
 
-            // Buscar dados da proposta e UC
-            $proposta = $controle->proposta;
-            $uc = $controle->uc;
+            Log::info('Buscando detalhes da UC no controle', [
+                'controle_id' => $controleId,
+                'uc_numero' => $controle->numero_unidade,
+                'user_id' => $currentUser->id
+            ]);
 
-            if (!$proposta || !$uc) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados da proposta ou UC não encontrados'
-                ], 404);
-            }
+            // ✅ PROCESSAR dados para retorno
+            $dados = [
+                'controle_id' => $controle->id,
+                'proposta_id' => $controle->proposta_id,
+                'numero_proposta' => $controle->numero_proposta,
+                'nome_cliente' => $controle->nome_cliente,
+                'consultor' => $controle->consultor_nome ?? 'Sem consultor',
+                
+                // Dados da UC
+                'uc_id' => $controle->uc_id,
+                'numero_unidade' => $controle->numero_unidade,
+                'apelido' => $controle->apelido,
+                'consumo_medio' => floatval($controle->consumo_medio),
+                'ligacao' => $controle->ligacao,
+                'distribuidora' => $controle->distribuidora,
+                
+                // Dados do controle
+                'ug_id' => $controle->ug_id,
+                'calibragem' => floatval($controle->calibragem ?? 0),
+                'valor_calibrado' => floatval($controle->valor_calibrado ?? 0),
+                'status_troca' => $controle->status_troca,
+                'data_titularidade' => $controle->data_titularidade,
+                'observacoes' => $controle->observacoes,
+                
+                // ✅ NOVOS CAMPOS: Descontos individuais do controle
+                'desconto_tarifa' => $controle->desconto_tarifa ?? $controle->proposta_desconto_tarifa ?? '20%',
+                'desconto_bandeira' => $controle->desconto_bandeira ?? $controle->proposta_desconto_bandeira ?? '20%',
+                
+                // Descontos da proposta original (para referência)
+                'proposta_desconto_tarifa' => $controle->proposta_desconto_tarifa ?? '20%',
+                'proposta_desconto_bandeira' => $controle->proposta_desconto_bandeira ?? '20%',
+                
+                // Valores numéricos dos descontos (para cálculos no frontend)
+                'desconto_tarifa_numerico' => $this->extrairValorDesconto($controle->desconto_tarifa ?? $controle->proposta_desconto_tarifa ?? '20%'),
+                'desconto_bandeira_numerico' => $this->extrairValorDesconto($controle->desconto_bandeira ?? $controle->proposta_desconto_bandeira ?? '20%'),
+                
+                'created_at' => $controle->created_at,
+                'updated_at' => $controle->updated_at
+            ];
 
             return response()->json([
                 'success' => true,
-                'data' => [
-                    'controle_id' => $controle->id,
-                    'numero_proposta' => $proposta->numero_proposta,
-                    'nome_cliente' => $proposta->nome_cliente,
-                    'numero_uc' => $uc->numero_unidade,
-                    'apelido' => $uc->apelido,
-                    'consumo_medio' => $uc->consumo_medio,
-                    'calibragemIndividual' => $controle->calibragem_individual ? floatval($controle->calibragem_individual) : null,
-                    'usa_calibragem_global' => $controle->isUsandoCalibragemGlobal(),
-                    'calibragem_global' => \App\Models\Configuracao::getCalibragemGlobal(),
-                    'calibragem_efetiva' => $controle->getCalibragemEfetiva()
-                ]
+                'data' => $dados
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro ao buscar detalhes da UC', [
+            Log::error('Erro ao buscar detalhes da UC no controle', [
                 'controle_id' => $controleId,
-                'user_id' => $currentUser->id ?? 'N/A',
-                'error' => $e->getMessage()
+                'user_id' => auth()->id() ?? 'N/A',
+                'error' => $e->getMessage(),
+                'line' => $e->getLine()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor'
+                'message' => 'Erro ao buscar detalhes da UC: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * ✅ Extrair valor numérico do desconto
+     */
+    private function extrairValorDesconto(?string $desconto): float
+    {
+        if (empty($desconto)) {
+            return 0.0;
+        }
+        
+        $numeroStr = str_replace(['%', ' '], '', $desconto);
+        
+        return floatval($numeroStr) ?: 0.0;
     }
 
     /**
@@ -1239,44 +1288,26 @@ class ControleController extends Controller
     public function updateUCDetalhes(Request $request, string $controleId): JsonResponse
     {
         try {
-            $currentUser = JWTAuth::user();
+            DB::beginTransaction();
+
+            $currentUser = auth()->user();
             
-            if (!$currentUser) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            // Validação
-            $validator = Validator::make($request->all(), [
-                'consumo_medio' => 'required|numeric|min:0|max:999999.99',
-                'usa_calibragem_global' => 'required|boolean',
-                'calibragem_individual' => 'nullable|numeric|min:0|max:100'
-            ], [
-                'consumo_medio.required' => 'Consumo médio é obrigatório',
-                'consumo_medio.numeric' => 'Consumo médio deve ser um número',
-                'consumo_medio.min' => 'Consumo médio deve ser maior ou igual a 0',
-                'consumo_medio.max' => 'Consumo médio deve ser menor que 1.000.000',
-                'usa_calibragem_global.required' => 'Definição de calibragem é obrigatória',
-                'usa_calibragem_global.boolean' => 'Definição de calibragem inválida',
-                'calibragem_individual.numeric' => 'Calibragem deve ser um número',
-                'calibragem_individual.min' => 'Calibragem deve ser maior ou igual a 0',
-                'calibragem_individual.max' => 'Calibragem deve ser menor ou igual a 100'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
-            // Buscar controle
-            $controle = ControleClube::with(['proposta', 'uc'])
-                ->where('id', $controleId)
-                ->first();
+            // ✅ BUSCAR controle com relacionamentos
+            $controle = DB::selectOne("
+                SELECT 
+                    cc.*,
+                    uc.numero_unidade,
+                    uc.apelido,
+                    uc.consumo_medio,
+                    uc.desconto_fatura as uc_desconto_fatura,
+                    uc.desconto_bandeira as uc_desconto_bandeira,
+                    p.desconto_tarifa as proposta_desconto_tarifa,
+                    p.desconto_bandeira as proposta_desconto_bandeira
+                FROM controle_clube cc
+                JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                JOIN propostas p ON cc.proposta_id = p.id
+                WHERE cc.id = ? AND cc.deleted_at IS NULL
+            ", [$controleId]);
 
             if (!$controle) {
                 return response()->json([
@@ -1285,52 +1316,117 @@ class ControleController extends Controller
                 ], 404);
             }
 
-            DB::beginTransaction();
-
-            // 1. Atualizar consumo médio na UC
-            $controle->uc->update([
-                'consumo_medio' => $request->consumo_medio
+            Log::info('Atualizando UC no controle', [
+                'controle_id' => $controleId,
+                'uc_numero' => $controle->numero_unidade,
+                'user_id' => $currentUser->id,
+                'request_data' => $request->all()
             ]);
 
-            // 2. Atualizar calibragem
-            if ($request->usa_calibragem_global) {
-                $controle->usarCalibragemGlobal();
-            } else {
-                $calibragemIndividual = $request->calibragem_individual;
-                if ($calibragemIndividual === null) {
-                    throw new \InvalidArgumentException('Calibragem individual é obrigatória quando não usar calibragem global');
-                }
-                $controle->definirCalibragemIndividual($calibragemIndividual);
+            $updateFields = [];
+            $updateParams = [];
+
+            // ✅ 1. Atualizar consumo médio na UC se fornecido
+            if ($request->has('consumo_medio')) {
+                DB::update("
+                    UPDATE unidades_consumidoras 
+                    SET consumo_medio = ?, updated_at = NOW() 
+                    WHERE id = ?
+                ", [$request->consumo_medio, $controle->uc_id]);
+
+                Log::info('Consumo médio atualizado na UC', [
+                    'uc_id' => $controle->uc_id,
+                    'novo_consumo' => $request->consumo_medio
+                ]);
+            }
+
+            // ✅ 2. Atualizar calibragem se fornecida
+            if ($request->has('calibragem')) {
+                $updateFields[] = 'calibragem = ?';
+                $updateParams[] = $request->calibragem;
+            }
+
+            // ✅ 3. NOVA FUNCIONALIDADE: Atualizar descontos individuais do controle
+            if ($request->has('desconto_tarifa')) {
+                $descontoFormatado = $this->formatarDesconto($request->desconto_tarifa);
+                $updateFields[] = 'desconto_tarifa = ?';
+                $updateParams[] = $descontoFormatado;
+
+                Log::info('Desconto de tarifa atualizado no controle', [
+                    'controle_id' => $controleId,
+                    'desconto_original' => $request->desconto_tarifa,
+                    'desconto_formatado' => $descontoFormatado
+                ]);
+            }
+
+            if ($request->has('desconto_bandeira')) {
+                $descontoFormatado = $this->formatarDesconto($request->desconto_bandeira);
+                $updateFields[] = 'desconto_bandeira = ?';
+                $updateParams[] = $descontoFormatado;
+
+                Log::info('Desconto de bandeira atualizado no controle', [
+                    'controle_id' => $controleId,
+                    'desconto_original' => $request->desconto_bandeira,
+                    'desconto_formatado' => $descontoFormatado
+                ]);
+            }
+
+            // ✅ 4. Atualizar observações se fornecidas
+            if ($request->has('observacoes')) {
+                $updateFields[] = 'observacoes = ?';
+                $updateParams[] = $request->observacoes;
+            }
+
+            // ✅ EXECUTAR as atualizações se houver campos para atualizar
+            if (!empty($updateFields)) {
+                $sql = "UPDATE controle_clube SET " . implode(', ', $updateFields) . ", updated_at = NOW() WHERE id = ?";
+                $updateParams[] = $controleId;
+                
+                DB::update($sql, $updateParams);
+
+                Log::info('Controle atualizado com sucesso', [
+                    'controle_id' => $controleId,
+                    'campos_atualizados' => $updateFields
+                ]);
             }
 
             DB::commit();
 
-            Log::info('UC atualizada com sucesso', [
-                'controle_id' => $controleId,
-                'user_id' => $currentUser->id,
-                'consumo_medio' => $request->consumo_medio,
-                'usa_calibragem_global' => $request->usa_calibragem_global,
-                'calibragem_individual' => $request->calibragem_individual
-            ]);
+            // ✅ BUSCAR dados atualizados para retorno
+            $controleAtualizado = DB::selectOne("
+                SELECT 
+                    cc.*,
+                    uc.numero_unidade,
+                    uc.apelido,
+                    uc.consumo_medio
+                FROM controle_clube cc
+                JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                WHERE cc.id = ?
+            ", [$controleId]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'UC atualizada com sucesso',
                 'data' => [
-                    'consumo_medio' => $controle->uc->fresh()->consumo_medio,
-                    'calibragem_individual' => $controle->fresh()->calibragem_individual,
-                    'calibragem_efetiva' => $controle->fresh()->getCalibragemEfetiva(),
-                    'usa_calibragem_global' => $controle->fresh()->isUsandoCalibragemGlobal()
+                    'controle_id' => $controleAtualizado->id,
+                    'numero_unidade' => $controleAtualizado->numero_unidade,
+                    'apelido' => $controleAtualizado->apelido,
+                    'consumo_medio' => floatval($controleAtualizado->consumo_medio),
+                    'calibragem' => floatval($controleAtualizado->calibragem),
+                    'desconto_tarifa' => $controleAtualizado->desconto_tarifa,
+                    'desconto_bandeira' => $controleAtualizado->desconto_bandeira,
+                    'observacoes' => $controleAtualizado->observacoes
                 ]
             ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
             
-            Log::error('Erro ao atualizar UC', [
+            Log::error('Erro ao atualizar UC no controle', [
                 'controle_id' => $controleId,
                 'user_id' => $currentUser->id ?? 'N/A',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'line' => $e->getLine()
             ]);
 
             return response()->json([
@@ -1339,4 +1435,14 @@ class ControleController extends Controller
             ], 500);
         }
     }
+    private function formatarDesconto($valor): string
+    {
+        if (is_string($valor) && str_ends_with($valor, '%')) {
+            return $valor; // Já está formatado
+        }
+        
+        $numeroLimpo = (float) str_replace(['%', ' '], '', $valor);
+        return number_format($numeroLimpo, 2, '.', '') . '%';
+    }
+
 }

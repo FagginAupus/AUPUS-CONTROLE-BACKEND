@@ -1420,63 +1420,54 @@ class PropostaController extends Controller
                 );
 
                 if (!$controleExistente) {
-                    // ✅ GERAR ULID PARA O CONTROLE
+
                     $controleId = \Illuminate\Support\Str::ulid()->toString();
                     
-                    // ✅ CRIAR CONTROLE
+                    // ✅ CRIAR CONTROLE COM OS DESCONTOS DA PROPOSTA
                     DB::insert("
                         INSERT INTO controle_clube (
                             id, proposta_id, uc_id, calibragem, 
+                            desconto_tarifa, desconto_bandeira,
                             data_entrada_controle, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, NOW(), NOW(), NOW())
+                        ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())
                     ", [
                         $controleId,
                         $proposta_id,
-                        $ucIdFinal,  // ✅ ID da UC (ULID)
-                        0.00
+                        $ucIdFinal, 
+                        0.00,   
+                        $proposta->desconto_tarifa,  
+                        $proposta->desconto_bandeira 
                     ]);
 
-                    // ADICIONAR AQUI A AUDITORIA:
-                    AuditoriaService::registrar('controle_clube', $controleId, 'CRIADO', [
-                        'entidade_relacionada' => 'propostas',
-                        'entidade_relacionada_id' => $proposta_id,
-                        'sub_acao' => 'CRIACAO_POR_STATUS_FECHADA',
-                        'metadados' => [
-                            'proposta_id' => $proposta_id,
-                            'uc_id' => $ucIdFinal,
-                            'numero_uc' => $numeroUC,
-                            'motivo' => 'Status alterado para Fechada - population geral'
-                        ]
-                    ]);
-
-                    Log::info('Controle criado com sucesso', [
+                    Log::info('Controle criado com descontos da proposta', [
                         'controle_id' => $controleId,
                         'proposta_id' => $proposta_id,
                         'uc_id' => $ucIdFinal,
-                        'numero_uc' => $numeroUC
+                        'numero_uc' => $numeroUC,
+                        'desconto_tarifa' => $proposta->desconto_tarifa,
+                        'desconto_bandeira' => $proposta->desconto_bandeira
                     ]);
+                    
                 } elseif ($controleExistente->deleted_at !== null) {
-                    // ✅ REATIVAR CONTROLE SOFT DELETED
+                    // ✅ REATIVAR CONTROLE SOFT DELETED E ATUALIZAR DESCONTOS
                     DB::update("
                         UPDATE controle_clube 
-                        SET deleted_at = NULL, updated_at = NOW() 
+                        SET deleted_at = NULL, 
+                            desconto_tarifa = ?,
+                            desconto_bandeira = ?,
+                            updated_at = NOW() 
                         WHERE id = ?
-                    ", [$controleExistente->id]);
-                    
-                    // ADICIONAR AQUI:
-                    AuditoriaService::registrarReativacaoControle(
-                        $proposta_id,
-                        $ucIdFinal,
-                        $controleExistente->id,
-                        'Aguardando', // status anterior
-                        'Fechada'     // status novo
-                    );
-                    
-                    Log::info('Controle reativado (removido soft delete)', [
+                    ", [
+                        $proposta->desconto_tarifa,
+                        $proposta->desconto_bandeira,
+                        $controleExistente->id
+                    ]);
+
+                    Log::info('Controle reativado com descontos atualizados', [
                         'controle_id' => $controleExistente->id,
                         'proposta_id' => $proposta_id,
-                        'uc_id' => $ucIdFinal,
-                        'numero_uc' => $numeroUC
+                        'desconto_tarifa' => $proposta->desconto_tarifa,
+                        'desconto_bandeira' => $proposta->desconto_bandeira
                     ]);
                 } else {
                     Log::info('Controle já existia ativo', [
