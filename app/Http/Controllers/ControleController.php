@@ -146,7 +146,7 @@ class ControleController extends Controller
 
             // Contar total
             $countQuery = str_replace(
-                "SELECT cc.id, cc.proposta_id, cc.uc_id, cc.ug_id, cc.calibragem, cc.valor_calibrado, cc.observacoes, cc.status_troca, cc.data_titularidade, cc.data_entrada_controle, cc.created_at, cc.updated_at, p.numero_proposta, p.nome_cliente, u_consultor.nome as consultor, p.data_proposta, p.usuario_id, uc.numero_unidade, uc.apelido, uc.consumo_medio, uc.ligacao, ug.nome_usina as ug_nome, ug.potencia_cc as ug_potencia_cc, ug.capacidade_calculada as ug_capacidade",
+                "SELECT cc.id, cc.proposta_id, cc.uc_id, cc.ug_id, cc.calibragem_individual, cc.valor_calibrado, cc.observacoes, cc.status_troca, cc.data_titularidade, cc.data_entrada_controle, cc.created_at, cc.updated_at, p.numero_proposta, p.nome_cliente, u_consultor.nome as consultor, p.data_proposta, p.usuario_id, uc.numero_unidade, uc.apelido, uc.consumo_medio, uc.ligacao, ug.nome_usina as ug_nome, ug.potencia_cc as ug_potencia_cc, ug.capacidade_calculada as ug_capacidade",
                 "SELECT COUNT(*) as total",
                 $query
             );
