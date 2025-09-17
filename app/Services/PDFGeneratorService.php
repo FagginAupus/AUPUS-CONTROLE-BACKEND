@@ -277,7 +277,7 @@ startxref
             'logradouro' => $dados['logradouroUC'] ?? '',
             'dia' => $agora->format('d'),   
             'mes' => $agora->format('m'),  
-            'economia' => (string)($dados['descontoTarifa'] ?? '0')
+            'economia' => '       ' . ($dados['descontoTarifa'] ?? '0') . '%'
         ];
 
         // ✅ LIMPAR TODOS OS DADOS PARA UTF-8
