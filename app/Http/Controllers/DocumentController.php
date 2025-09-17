@@ -10,6 +10,7 @@ use App\Models\Document;
 use App\Models\Proposta;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
 
@@ -1114,6 +1115,7 @@ class DocumentController extends Controller
 
             // Verificar documento existente
             $documentoExistente = Document::where('proposta_id', $propostaId)
+                ->where('numero_uc', $numeroUC)
                 ->where('status', Document::STATUS_PENDING)
                 ->first();
 
@@ -1171,6 +1173,7 @@ class DocumentController extends Controller
             $documentoSalvo = Document::create([
                 'proposta_id' => $proposta->id,
                 'autentique_id' => $documento['id'],
+                'numero_uc' => $request->dados['numeroUC'] ?? null,
                 'name' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'status' => Document::STATUS_PENDING,
                 'signer_email' => $request->emailRepresentante,
@@ -1351,6 +1354,7 @@ class DocumentController extends Controller
             $documentoSalvo = Document::create([
                 'proposta_id' => $request->proposta_id,
                 'autentique_id' => $documento['id'], // ✅ Garantido que existe
+                'numero_uc' => $numeroUC,
                 'name' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'status' => Document::STATUS_PENDING,
                 'signer_email' => $request->signatario['email'],
@@ -1711,6 +1715,7 @@ class DocumentController extends Controller
 
             // Verificar se já existe documento pendente
             $documentoExistente = Document::where('proposta_id', $propostaId)
+                ->where('numero_uc', $numeroUC)
                 ->where('status', '!=', Document::STATUS_CANCELLED)
                 ->first();
 
@@ -1876,7 +1881,9 @@ class DocumentController extends Controller
             ]);
 
             $document = Document::create([
+                'id' => (string) Str::ulid(),
                 'autentique_id' => $documentId,
+                'numero_uc' => $request->numeroUC,
                 'name' => "Termo de Adesão - {$proposta->numero_proposta}",
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
