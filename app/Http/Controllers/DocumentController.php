@@ -990,11 +990,28 @@ class DocumentController extends Controller
     public function verificarPdfTemporario($propostaId): JsonResponse
     {
         try {
+            // ✅ ADICIONAR SUPORTE A NUMERO_UC
+            $numeroUC = request()->query('numero_uc');
+            
             $dirTemp = storage_path('app/public/temp');
-            $pattern = "temp_termo_{$propostaId}_*.pdf";
+            
+            if ($numeroUC) {
+                // Buscar PDF específico da UC
+                $pattern = "temp_termo_{$propostaId}_UC_{$numeroUC}_*.pdf";
+            } else {
+                // Buscar PDF geral da proposta (compatibilidade)
+                $pattern = "temp_termo_{$propostaId}_*.pdf";
+            }
+            
             $arquivos = glob($dirTemp . '/' . $pattern);
             
             if (empty($arquivos)) {
+                Log::info('📭 Nenhum PDF temporário encontrado', [
+                    'proposta_id' => $propostaId,
+                    'numero_uc' => $numeroUC,
+                    'pattern' => $pattern
+                ]);
+                
                 return response()->json([
                     'success' => false,
                     'message' => 'Nenhum PDF temporário encontrado'
@@ -1009,17 +1026,30 @@ class DocumentController extends Controller
             $nomeArquivo = basename($arquivoMaisRecente);
             $timestamp = filemtime($arquivoMaisRecente);
             
+            Log::info('📄 PDF temporário encontrado', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'arquivo' => $nomeArquivo
+            ]);
+            
             return response()->json([
                 'success' => true,
                 'pdf' => [
                     'nome' => $nomeArquivo,
                     'url' => asset("storage/temp/{$nomeArquivo}"),
                     'tamanho' => filesize($arquivoMaisRecente),
-                    'gerado_em' => date('d/m/Y H:i', $timestamp)
+                    'gerado_em' => date('d/m/Y H:i', $timestamp),
+                    'numero_uc' => $numeroUC // ✅ INCLUIR NO RETORNO
                 ]
             ]);
             
         } catch (\Exception $e) {
+            Log::error('Erro ao verificar PDF temporário', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => request()->query('numero_uc'),
+                'error' => $e->getMessage()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao verificar PDF temporário'
@@ -1095,6 +1125,7 @@ class DocumentController extends Controller
             ], 500);
         }
     }
+    
 
     /**
      * ✅ GERAÇÃO TERMO - USANDO PREENCHIMENTO REAL DE FORM FIELDS
@@ -1667,8 +1698,8 @@ class DocumentController extends Controller
                 ]);
             }
 
-            // Salvar PDF temporariamente para visualização
-            $nomeArquivoTemp = "temp_termo_{$propostaId}_" . time() . ".pdf";
+            $numeroUC = $request->numeroUC;
+            $nomeArquivoTemp = "temp_termo_{$propostaId}_UC_{$numeroUC}_" . time() . ".pdf";
             $caminhoTemp = storage_path("app/public/temp/{$nomeArquivoTemp}");
             
             if (!is_dir(dirname($caminhoTemp))) {
@@ -1687,7 +1718,8 @@ class DocumentController extends Controller
                     'nome' => $nomeArquivoTemp,
                     'url' => asset("storage/temp/{$nomeArquivoTemp}"),
                     'tamanho' => strlen($pdfContent),
-                    'gerado_em' => now()->format('d/m/Y H:i')
+                    'gerado_em' => now()->format('d/m/Y H:i'),
+                    'numero_uc' => $numeroUC  
                 ]
             ]);
 
