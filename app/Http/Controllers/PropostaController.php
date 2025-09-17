@@ -482,6 +482,16 @@ class PropostaController extends Controller
             }
             DB::beginTransaction();
 
+            $consultorId = $request->consultor_id;
+            if (empty($consultorId) || $consultorId === 'null' || $consultorId === '') {
+                $consultorId = null;
+            }
+
+            // Ajustar recorrência automaticamente
+            $recorrencia = $request->recorrencia ?? '3%';
+            if ($consultorId === null && $recorrencia === '3%') {
+                $recorrencia = '0%';
+            }
             // ✅ GERAR ID E NÚMERO DA PROPOSTA
             $id = Str::uuid()->toString();
             $numeroProposta = $this->gerarNumeroProposta();
@@ -576,7 +586,7 @@ class PropostaController extends Controller
                 $request->nome_cliente,
                 $consultorId,  
                 $currentUser->id,
-                $request->recorrencia ?? '3%',
+                $recorrencia, 
                 $this->formatarDesconto($request->economia ?? 20),   
                 $this->formatarDesconto($request->bandeira ?? 20),  
                 $request->observacoes ?? '',
