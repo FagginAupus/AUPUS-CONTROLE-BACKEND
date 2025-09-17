@@ -1179,7 +1179,6 @@ class ControleController extends Controller
                 SELECT 
                     cc.*,
                     uc.numero_unidade,
-                    cc.calibragem_individual,
                     uc.apelido,
                     uc.consumo_medio,
                     uc.ligacao,
@@ -1206,6 +1205,7 @@ class ControleController extends Controller
             Log::info('Buscando detalhes da UC no controle', [
                 'controle_id' => $controleId,
                 'uc_numero' => $controle->numero_unidade,
+                'calibragem_individual' => $controle->calibragem_individual,
                 'user_id' => $currentUser->id
             ]);
 
@@ -1219,7 +1219,7 @@ class ControleController extends Controller
                 
                 // Dados da UC
                 'uc_id' => $controle->uc_id,
-                'numero_unidade' => $controle->numero_unidade,
+                'numero_uc' => $controle->numero_unidade,  // ✅ RENOMEAR PARA CONSISTÊNCIA
                 'apelido' => $controle->apelido,
                 'consumo_medio' => floatval($controle->consumo_medio),
                 'ligacao' => $controle->ligacao,
@@ -1228,6 +1228,11 @@ class ControleController extends Controller
                 // Dados do controle
                 'ug_id' => $controle->ug_id,
                 'calibragem' => floatval($controle->calibragem ?? 0),
+                
+                // ✅ CORREÇÃO PRINCIPAL: Incluir calibragem_individual
+                'calibragem_individual' => $controle->calibragem_individual ? floatval($controle->calibragem_individual) : null,
+                'calibragem_global' => \App\Models\Configuracao::getCalibragemGlobal(),
+                
                 'valor_calibrado' => floatval($controle->valor_calibrado ?? 0),
                 'status_troca' => $controle->status_troca,
                 'data_titularidade' => $controle->data_titularidade,
