@@ -1179,6 +1179,7 @@ class ControleController extends Controller
                 SELECT 
                     cc.*,
                     uc.numero_unidade,
+                    cc.calibragem_individual,
                     uc.apelido,
                     uc.consumo_medio,
                     uc.ligacao,
@@ -1370,6 +1371,30 @@ class ControleController extends Controller
                     'desconto_formatado' => $descontoFormatado
                 ]);
             }
+            
+            if ($request->has('usa_calibragem_global')) {
+                if ($request->usa_calibragem_global == true) {
+                    // Usar calibragem global - limpar individual
+                    $updateFields[] = 'calibragem_individual = ?';
+                    $updateParams[] = null;
+                    
+                    Log::info('Calibragem individual removida (usar global)', [
+                        'controle_id' => $controleId
+                    ]);
+                } else {
+                    // Usar calibragem individual
+                    if ($request->has('calibragem_individual') && $request->calibragem_individual !== null) {
+                        $updateFields[] = 'calibragem_individual = ?';
+                        $updateParams[] = $request->calibragem_individual;
+                        
+                        Log::info('Calibragem individual definida', [
+                            'controle_id' => $controleId,
+                            'valor' => $request->calibragem_individual
+                        ]);
+                    }
+                }
+            }
+
 
             // ✅ 4. Atualizar observações se fornecidas
             if ($request->has('observacoes')) {
@@ -1413,6 +1438,7 @@ class ControleController extends Controller
                     'apelido' => $controleAtualizado->apelido,
                     'consumo_medio' => floatval($controleAtualizado->consumo_medio),
                     'calibragem' => floatval($controleAtualizado->calibragem),
+                    'calibragem_individual' => $controleAtualizado->calibragem_individual,
                     'desconto_tarifa' => $controleAtualizado->desconto_tarifa,
                     'desconto_bandeira' => $controleAtualizado->desconto_bandeira,
                     'observacoes' => $controleAtualizado->observacoes
@@ -1435,6 +1461,7 @@ class ControleController extends Controller
             ], 500);
         }
     }
+
     private function formatarDesconto($valor): string
     {
         if (is_string($valor) && str_ends_with($valor, '%')) {
