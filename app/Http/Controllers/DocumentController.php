@@ -116,7 +116,11 @@ class DocumentController extends Controller
                 'signed_count' => 0,
                 'rejected_count' => 0,
                 'autentique_created_at' => now(),
-                'created_by' => auth()->id()
+                'created_by' => auth()->id(),
+                'envio_whatsapp' => $request->boolean('enviar_whatsapp', false),
+                'envio_email' => $request->boolean('enviar_email', true),
+                'signer_email' => $request->emailRepresentante,
+                'signer_name' => $request->nomeRepresentante
             ]);
 
             // Extrair links de assinatura
@@ -258,7 +262,11 @@ class DocumentController extends Controller
                 'signed_count' => 0,
                 'rejected_count' => 0,
                 'autentique_created_at' => now(),
-                'created_by' => auth()->id()
+                'created_by' => auth()->id(),
+                'envio_whatsapp' => $request->boolean('enviar_whatsapp', false),
+                'envio_email' => $request->boolean('enviar_email', true),
+                'signer_email' => $request->signatarios[0]['email'] ?? null,
+                'signer_name' => $request->signatarios[0]['name'] ?? null
             ]);
 
             // Extrair links de assinatura
@@ -1847,7 +1855,11 @@ class DocumentController extends Controller
                 'signer_name' => $request->nomeRepresentante,
                 'signing_url' => $linkAssinatura,
                 'envio_whatsapp' => $request->boolean('enviar_whatsapp', false),
-                'envio_email' => $request->boolean('enviar_email', true)
+                'envio_email' => $request->boolean('enviar_email', true),
+                'uploaded_manually' => false,
+                'uploaded_at' => null,
+                'uploaded_by' => null,
+                'manual_upload_filename' => null
             ]);
 
             // Limpar arquivo temporário se foi usado
