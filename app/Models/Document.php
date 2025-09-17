@@ -30,6 +30,7 @@ class Document extends Model
     
     protected $fillable = [
         'autentique_id',
+        'numero_uc',
         'name',
         'status',
         'is_sandbox',
@@ -117,5 +118,40 @@ class Document extends Model
     public function isRejected(): bool
     {
         return $this->status === self::STATUS_REJECTED;
+    }
+
+    public function scopePorUC($query, $numeroUC)
+    {
+        return $query->where('numero_uc', $numeroUC);
+    }
+
+    /**
+     * ✅ ESCOPO: Documentos ativos (não cancelados)
+     */
+    public function scopeAtivos($query)
+    {
+        return $query->where('status', '!=', self::STATUS_CANCELLED);
+    }
+
+    /**
+     * ✅ MÉTODO: Verificar se tem documento ativo para UC
+     */
+    public static function temDocumentoAtivoPorUC($propostaId, $numeroUC)
+    {
+        return static::where('proposta_id', $propostaId)
+                     ->where('numero_uc', $numeroUC)
+                     ->ativos()
+                     ->exists();
+    }
+
+    /**
+     * ✅ ATRIBUTO: Nome formatado do documento
+     */
+    public function getNomeFormatadoAttribute()
+    {
+        if ($this->numero_uc) {
+            return "Termo de Adesão - UC {$this->numero_uc}";
+        }
+        return $this->name ?: 'Termo de Adesão';
     }
 }

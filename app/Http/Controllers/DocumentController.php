@@ -29,142 +29,163 @@ class DocumentController extends Controller
     /**
      * Gera e envia termo de adesão para assinatura
      */
-    public function gerarTermoAdesao(Request $request, $propostaId): JsonResponse
+    public function gerarTermoAdesao(Request $request, string $propostaId): JsonResponse
     {
-        Log::info('=== INÍCIO GERAÇÃO TERMO DE ADESÃO ===', [
+        Log::info('📤 Iniciando geração de termo de adesão', [
             'proposta_id' => $propostaId,
-            'user_id' => auth()->id()
+            'numero_uc' => $request->numeroUC,
+            'apelido' => $request->apelido
         ]);
 
         try {
-            // Validação dos dados recebidos
-            $validator = Validator::make($request->all(), [
-                'nomeCliente' => 'required|string|max:255',
-                'numeroUC' => 'required',
-                'enderecoUC' => 'required|string',
-                'tipoDocumento' => 'required|in:CPF,CNPJ',
-                'nomeRepresentante' => 'required|string|max:255',
-                'enderecoRepresentante' => 'required|string',
-                'emailRepresentante' => 'required|email',
-                'whatsappRepresentante' => 'nullable|string',
-                'descontoTarifa' => 'required|numeric|min:0|max:100',
-                'logradouroUC' => 'required|string'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos para gerar o termo',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
-            // Buscar proposta
             $proposta = Proposta::findOrFail($propostaId);
             
-            // Verificar se já existe documento pendente para esta proposta
+            // ✅ CORREÇÃO PRINCIPAL: Obter dados da UC específica
+            $numeroUC = $request->numeroUC;
+            $nomeCliente = $proposta->nome_cliente ?: $request->nomeCliente;
+            
+            if (!$numeroUC) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Número da UC é obrigatório para gerar termo'
+                ], 400);
+            }
+
+            // ✅ CORREÇÃO: Verificar documento existente POR UC
             $documentoExistente = Document::where('proposta_id', $propostaId)
-                ->where('status', Document::STATUS_PENDING)
+                ->where('numero_uc', $numeroUC) // ✅ ADICIONAR FILTRO POR UC
+                ->where('status', '!=', Document::STATUS_CANCELLED)
                 ->first();
 
             if ($documentoExistente) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Já existe um termo pendente de assinatura para esta proposta',
+                    'message' => "Já existe um termo pendente para a UC {$numeroUC}. Para atualizar, cancele o atual primeiro.",
                     'documento' => [
                         'id' => $documentoExistente->id,
-                        'status' => $documentoExistente->status,
+                        'autentique_id' => $documentoExistente->autentique_id,
                         'nome' => $documentoExistente->name,
-                        'progresso' => $documentoExistente->signing_progress . '%'
+                        'status' => $documentoExistente->status_label,
+                        'progresso' => $documentoExistente->signing_progress . '%',
+                        'link_assinatura' => null,
+                        'criado_em' => $documentoExistente->created_at->format('d/m/Y H:i'),
+                        'opcoes' => [
+                            'pode_cancelar' => true,
+                            'pode_atualizar' => false
+                        ]
                     ]
                 ], 409);
             }
 
-            // Preparar dados para o PDF baseado no mapeamento fornecido
-            $dadosParaPDF = $this->prepararDadosParaPDF($request->all());
-
-            // Gerar PDF preenchido
-            $pdfContent = $this->pdfGeneratorService->gerarTermoPreenchido($dadosParaPDF);
-
-            // Preparar signatário
-            $signatarios = [
-                [
-                    'email' => $request->emailRepresentante,
-                    'action' => 'SIGN',
-                    'name' => $request->nomeRepresentante
-                ]
-            ];
-
-            // Criar documento na Autentique
-            $resultado = $this->autentiqueService->createDocumentFromProposta(
-                $dadosParaPDF,
-                $signatarios,
-                $pdfContent,
-                env('AUTENTIQUE_SANDBOX', false)
-            );
-
-            // Salvar documento no banco local
-            $document = Document::create([
-                'autentique_id' => $documento['id'],
-                'name' => $dadosParaPDF['nomeAssociado'] ? "Termo de Adesão - {$dadosParaPDF['nomeAssociado']}" : "Termo de Adesão",
-                'status' => Document::STATUS_PENDING,
-                'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
-                'proposta_id' => $propostaId,
-                'document_data' => $dadosParaPDF,
-                'signers' => $signatarios,
-                'autentique_response' => $resultado,
-                'total_signers' => count($signatarios),
-                'signed_count' => 0,
-                'rejected_count' => 0,
-                'autentique_created_at' => now(),
-                'created_by' => auth()->id(),
-                'envio_whatsapp' => $request->boolean('enviar_whatsapp', false),
-                'envio_email' => $request->boolean('enviar_email', true),
-                'signer_email' => $request->emailRepresentante,
-                'signer_name' => $request->nomeRepresentante
-            ]);
-
-            // Extrair links de assinatura
-            $linkAssinatura = null;
-            if (isset($documento['signatures'][0]['link']['short_link'])) {
-                $linkAssinatura = $documento['signatures'][0]['link']['short_link'];
+            // Obter conteúdo do PDF
+            $pdfContent = null;
+            
+            if ($request->has('pdf_base64')) {
+                $pdfContent = base64_decode($request->pdf_base64);
+                Log::info('📄 Usando PDF enviado pelo frontend');
+            } elseif ($request->has('nome_arquivo_temp')) {
+                $caminhoTemp = storage_path("app/public/temp/{$request->nome_arquivo_temp}");
+                if (file_exists($caminhoTemp)) {
+                    $pdfContent = file_get_contents($caminhoTemp);
+                    Log::info('📄 Usando PDF temporário salvo', ['arquivo' => $request->nome_arquivo_temp]);
+                }
             }
 
-            Log::info('✅ Termo de adesão gerado com sucesso', [
+            if (!$pdfContent) {
+                Log::info('📄 Gerando PDF novamente como fallback');
+                $dadosCompletos = array_merge($request->all(), [
+                    'numeroProposta' => $proposta->numero_proposta,
+                    'nomeCliente' => $proposta->nome_cliente,
+                    'consultor' => $proposta->consultor,
+                    'numeroUC' => $numeroUC,
+                    'nomeCliente' => $nomeCliente
+                ]);
+                if (method_exists($this, 'tentarPreenchimentoPDFtk')) {
+                    $pdfContent = $this->tentarPreenchimentoPDFtk($dadosCompletos);
+                }
+            }
+
+            if (!$pdfContent) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Não foi possível obter o conteúdo do PDF para envio'
+                ], 400);
+            }
+
+            $dadosDocumento = array_merge($request->all(), [
+                'numeroProposta' => $proposta->numero_proposta,
+                'nomeCliente' => $proposta->nome_cliente,
+                'consultor' => $proposta->consultor,
+                'nome_cliente' => $proposta->nome_cliente,
+                'numeroUC' => $numeroUC,
+                'nomeCliente' => $nomeCliente,
+                // ✅ CORREÇÃO: Nome do arquivo usando Nome Cliente + Número UC
+                'nome_documento' => "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}",
+                'opcoes_envio' => [
+                    'enviar_whatsapp' => $request->boolean('enviar_whatsapp', false),
+                    'enviar_email' => $request->boolean('enviar_email', true)
+                ]
+            ]);
+
+            Log::info('📤 Enviando para Autentique com dados específicos da UC', [
                 'proposta_id' => $propostaId,
-                'document_id' => $document->id,
-                'autentique_id' => $documento['id'],
-                'signatario' => $request->emailRepresentante,
-                'link_assinatura' => $linkAssinatura
+                'numero_uc' => $numeroUC,
+                'apelido' => $apelido,
+                'nome_documento' => $dadosDocumento['nome_documento']
+            ]);
+
+            $documentoAutentique = $this->autentiqueService->enviarDocumento($pdfContent, $dadosDocumento);
+
+            // ✅ CORREÇÃO: Salvar documento local COM número da UC
+            $documentoLocal = new Document([
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC, // ✅ ADICIONAR NÚMERO DA UC
+                'autentique_id' => $documentoAutentique['id'],
+                'name' => $dadosDocumento['nome_documento'],
+                'status' => Document::STATUS_PENDING,
+                'status_label' => 'Pendente de Assinatura',
+                'signer_email' => $dadosDocumento['emailRepresentante'] ?? $dadosDocumento['email'] ?? '',
+                'signing_url' => $documentoAutentique['signing_url'] ?? null,
+                'signing_progress' => 0,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+            
+            $documentoLocal->save();
+
+            Log::info('✅ Termo de adesão gerado e enviado com sucesso', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'documento_id' => $documentoLocal->id,
+                'autentique_id' => $documentoAutentique['id'],
+                'nome_arquivo' => $dadosDocumento['nome_documento']
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Termo de adesão gerado e enviado para assinatura com sucesso!',
+                'message' => "Termo de adesão gerado e enviado com sucesso para UC {$numeroUC}!",
                 'documento' => [
-                    'id' => $document->id,
-                    'autentique_id' => $documento['id'],
-                    'nome' => $document->name,
-                    'status' => $document->status_label,
-                    'progresso' => $document->signing_progress . '%',
-                    'link_assinatura' => $linkAssinatura,
-                    'signatario' => $request->nomeRepresentante,
-                    'email_signatario' => $request->emailRepresentante,
-                    'criado_em' => $document->created_at->format('d/m/Y H:i')
+                    'id' => $documentoLocal->id,
+                    'autentique_id' => $documentoAutentique['id'],
+                    'nome' => $dadosDocumento['nome_documento'],
+                    'status' => 'Pendente de Assinatura',
+                    'link_assinatura' => $documentoAutentique['signing_url'] ?? null,
+                    'email_signatario' => $documentoLocal->signer_email,
+                    'criado_em' => $documentoLocal->created_at->format('d/m/Y H:i')
                 ]
             ]);
 
         } catch (\Exception $e) {
             Log::error('❌ Erro ao gerar termo de adesão', [
                 'proposta_id' => $propostaId,
+                'numero_uc' => $request->numeroUC,
                 'error' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno ao gerar o termo: ' . $e->getMessage()
+                'message' => 'Erro interno ao gerar termo: ' . $e->getMessage()
             ], 500);
         }
     }
