@@ -9,6 +9,7 @@ use App\Services\PDFGeneratorService;
 use App\Models\Document;
 use App\Models\Proposta;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
 
@@ -628,6 +629,23 @@ class DocumentController extends Controller
                     Log::info('💾 Proposta atualizada com UC em status Recusada', [
                         'proposta_id' => $localDocument->proposta_id,
                         'numero_uc' => $numeroUC
+                    ]);
+                    try {
+                        $this->cancelarDocumentoNaAutentique($localDocument->autentique_id);
+                        Log::info('✅ Documento cancelado na Autentique', [
+                            'autentique_id' => $localDocument->autentique_id
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::warning('⚠️ Não foi possível cancelar documento rejeitado na Autentique', [
+                            'document_id' => $localDocument->autentique_id,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                    $localDocument->delete();
+                    Log::info('🗑️ DOCUMENTO REJEITADO REMOVIDO AUTOMATICAMENTE!', [
+                        'proposta_id' => $localDocument->proposta_id,
+                        'autentique_id' => $localDocument->autentique_id,
+                        'motivo' => 'Limpeza automática após rejeição'
                     ]);
                 }
             }
