@@ -63,10 +63,12 @@ class AutentiqueService
     public function createDocumentFromProposta($propostaData, $signers, $pdfContent, $sandbox = true)
     {
         $this->ensureTokenConfigured();
-        
+        $nomeDocumento = $propostaData['nome_documento'] ?? 
+                     "Procuracao e Termo de Adesao - " . ($propostaData['nome_cliente'] ?? $propostaData['nomeCliente']) . 
+                     " - UC " . ($propostaData['numeroUC'] ?? 'UC');
         // Preparar dados do documento
         $documentData = [
-            'name' => "Termo de Adesão - " . $propostaData['nome_cliente'],
+            'name' => $nomeDocumento,
             'refusable' => true,
             'sortable' => false,
             'message' => 'Documento para assinatura digital - Termo de Adesão AUPUS Energia'

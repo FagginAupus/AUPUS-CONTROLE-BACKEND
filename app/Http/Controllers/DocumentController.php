@@ -273,11 +273,15 @@ class DocumentController extends Controller
                 throw new \Exception('ID do documento não encontrado na resposta da Autentique');
             }
 
-            // Salvar documento no banco local
+            $nomeCliente = $request->dados['nomeCliente'] ?? $request->dados['nome_cliente'] ?? $request->dados['nomeAssociado'] ?? 'Cliente';
+            $numeroUC = $request->dados['numeroUC'] ?? $request->dados['numero_uc'] ?? 'UC';
+            $nomeDocumento = "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}";
+
+            // E no Document::create():
             $document = Document::create([
                 'autentique_id' => $documento['id'], // ✅ Garantido que existe
                 'numero_uc' => $request->numeroUC,
-                'name' => $request->dados['nomeAssociado'] ? "Termo de Adesão - {$request->dados['nomeAssociado']}" : "Termo de Adesão",
+                'name' => $nomeDocumento,
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => $request->sandbox ?? env('AUTENTIQUE_SANDBOX', false),
                 'proposta_id' => $request->proposta_id,
@@ -1306,12 +1310,15 @@ class DocumentController extends Controller
 
             $documento = $resultado['createDocument'] ?? $resultado;
 
-            // Salvar no banco
-            $documentoSalvo = Document::create([
+            $nomeCliente = $proposta->nome_cliente ?: $request->nomeCliente;
+            $numeroUC = $request->numeroUC;
+            $nomeDocumento = "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}";
+
+            $document = Document::create([
                 'proposta_id' => $proposta->id,
                 'autentique_id' => $documento['id'],
                 'numero_uc' => $request->dados['numeroUC'] ?? null,
-                'name' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'name' => $nomeDocumento,
                 'status' => Document::STATUS_PENDING,
                 'signer_email' => $request->emailRepresentante,
                 'signer_name' => $request->nomeRepresentante,
@@ -2082,10 +2089,14 @@ class DocumentController extends Controller
                 'consultor' => $proposta->consultor
             ]);
 
-            $document = Document::create([
+            $nomeCliente = $proposta->nome_cliente ?: $request->nomeCliente;
+            $numeroUC = $request->numeroUC;
+            $nomeDocumento = "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}";
+
+            $documentoSalvo = Document::create([
                 'id' => (string) Str::ulid(),
                 'autentique_id' => $documentId,
-                'name' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'name' => $nomeDocumento,
                 'numero_uc' => $numeroUC,
                 'status' => Document::STATUS_PENDING,
                 'is_sandbox' => env('AUTENTIQUE_SANDBOX', false),
@@ -2352,5 +2363,5 @@ class DocumentController extends Controller
             ], 500);
         }
     }
-    
+
 }
