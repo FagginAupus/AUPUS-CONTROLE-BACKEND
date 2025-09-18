@@ -2750,7 +2750,7 @@ class PropostaController extends Controller
         
         return $erros;
     }
-    private function atualizarArquivoDocumentacao($propostaId, $numeroUC, $tipoArquivo, $nomeArquivo, $acao = 'salvar')
+    public function atualizarArquivoDocumentacao($propostaId, $numeroUC, $tipoArquivo, $nomeArquivo, $acao = 'salvar')
     {
         try {
             // Buscar documentação atual
@@ -2811,7 +2811,7 @@ class PropostaController extends Controller
         }
     }
 
-    private function buscarArquivoDocumentacao($propostaId, $numeroUC, $tipoArquivo)
+    public function buscarArquivoDocumentacao($propostaId, $numeroUC, $tipoArquivo)
     {
         try {
             $proposta = DB::selectOne("SELECT documentacao FROM propostas WHERE id = ?", [$propostaId]);
