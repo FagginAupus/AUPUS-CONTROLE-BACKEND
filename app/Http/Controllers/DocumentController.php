@@ -1209,7 +1209,7 @@ class DocumentController extends Controller
 
             // ✅ 3️⃣ ENVIAR PARA AUTENTIQUE
             $resultado = $this->autentiqueService->criarDocumento([
-                'nome' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'nome_documento' => "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}",
                 'conteudo_pdf' => $pdfContent,
                 'signatarios' => [[
                     'email' => $request->emailRepresentante,
@@ -1379,7 +1379,7 @@ class DocumentController extends Controller
 
             // Enviar para Autentique
             $resultado = $this->autentiqueService->criarDocumento([
-                'nome' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'nome_documento' => "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}",
                 'conteudo_pdf' => $pdfContent,
                 'signatarios' => [[
                     'email' => $request->signatario['email'],
