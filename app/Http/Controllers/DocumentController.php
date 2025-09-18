@@ -1547,42 +1547,199 @@ class DocumentController extends Controller
     public function cancelarDocumentoPendente($propostaId): JsonResponse
     {
         try {
-            $documento = Document::where('proposta_id', $propostaId)
-                ->where('status', Document::STATUS_PENDING)
-                ->first();
+            Log::info('🚫 Iniciando cancelamento de documentos', [
+                'proposta_id' => $propostaId,
+                'user_id' => auth()->id()
+            ]);
 
-            if (!$documento) {
+            // ✅ BUSCAR TODOS OS DOCUMENTOS ATIVOS (PENDING E SIGNED MANUAL)
+            $documentosAtivos = Document::where('proposta_id', $propostaId)
+                ->where(function($query) {
+                    $query->where('status', Document::STATUS_PENDING)
+                        ->orWhere(function($subQuery) {
+                            $subQuery->where('status', Document::STATUS_SIGNED)
+                                    ->where('uploaded_manually', true);
+                        });
+                })
+                ->get();
+
+            if ($documentosAtivos->isEmpty()) {
+                Log::info('📋 Nenhum documento ativo encontrado para cancelar');
+                
                 return response()->json([
                     'success' => false,
-                    'message' => 'Nenhum documento pendente encontrado'
+                    'message' => 'Nenhum documento ativo encontrado para cancelar'
                 ], 404);
             }
 
-            // Cancelar na Autentique se necessário
-            try {
-                $this->autentiqueService->cancelDocument($documento->autentique_id);
-            } catch (\Exception $e) {
-                Log::warning('Erro ao cancelar documento na Autentique', ['error' => $e->getMessage()]);
+            $documentosCancelados = 0;
+            $erros = [];
+
+            foreach ($documentosAtivos as $documento) {
+                try {
+                    Log::info('🚫 Cancelando documento', [
+                        'document_id' => $documento->id,
+                        'status_atual' => $documento->status,
+                        'uploaded_manually' => $documento->uploaded_manually,
+                        'autentique_id' => $documento->autentique_id
+                    ]);
+
+                    // ✅ CANCELAR NA AUTENTIQUE (se for documento da Autentique)
+                    if (!$documento->uploaded_manually && $documento->autentique_id) {
+                        try {
+                            $this->autentiqueService->cancelarDocumento($documento->autentique_id);
+                            Log::info('✅ Documento cancelado na Autentique', [
+                                'autentique_id' => $documento->autentique_id
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::warning('⚠️ Erro ao cancelar na Autentique (continuando)', [
+                                'autentique_id' => $documento->autentique_id,
+                                'error' => $e->getMessage()
+                            ]);
+                        }
+                    }
+
+                    // ✅ CANCELAR LOCALMENTE (SEMPRE)
+                    $documento->update([
+                        'status' => Document::STATUS_CANCELLED,
+                        'cancelled_at' => now(),
+                        'cancelled_by' => auth()->id()
+                    ]);
+
+                    // ✅ REMOVER ARQUIVO FÍSICO (se for upload manual)
+                    if ($documento->uploaded_manually && $documento->document_data) {
+                        $dadosDoc = $documento->document_data;
+                        $nomeArquivo = $dadosDoc['nome_arquivo_salvo'] ?? null;
+                        
+                        if ($nomeArquivo) {
+                            $caminhoArquivo = storage_path("app/public/termos_assinados/{$nomeArquivo}");
+                            
+                            if (file_exists($caminhoArquivo)) {
+                                unlink($caminhoArquivo);
+                                Log::info('🗑️ Arquivo manual removido', [
+                                    'arquivo' => $nomeArquivo
+                                ]);
+                            }
+                        }
+                    }
+
+                    $documentosCancelados++;
+                    
+                    Log::info('✅ Documento cancelado com sucesso', [
+                        'document_id' => $documento->id,
+                        'tipo' => $documento->uploaded_manually ? 'manual' : 'autentique'
+                    ]);
+
+                } catch (\Exception $e) {
+                    $erros[] = "Erro ao cancelar documento {$documento->id}: " . $e->getMessage();
+                    Log::error('❌ Erro ao cancelar documento individual', [
+                        'document_id' => $documento->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
             }
 
-            // Marcar como cancelado localmente
-            $documento->update([
-                'status' => Document::STATUS_CANCELLED,
-                'cancelled_at' => now(),
-                'cancelled_by' => auth()->id()
+            // ✅ LIMPAR STATUS DA UC (voltar para Aguardando)
+            try {
+                $this->reverterStatusUCParaAguardando($propostaId);
+            } catch (\Exception $e) {
+                Log::warning('⚠️ Erro ao reverter status da UC', [
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            if ($documentosCancelados === 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum documento pôde ser cancelado',
+                    'erros' => $erros
+                ], 500);
+            }
+
+            $mensagem = $documentosCancelados === 1 
+                ? 'Documento cancelado com sucesso'
+                : "{$documentosCancelados} documentos cancelados com sucesso";
+
+            if (!empty($erros)) {
+                $mensagem .= ' (com alguns erros)';
+            }
+
+            Log::info('🎉 Cancelamento concluído', [
+                'documentos_cancelados' => $documentosCancelados,
+                'erros' => count($erros)
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Documento cancelado com sucesso'
+                'message' => $mensagem,
+                'documentos_cancelados' => $documentosCancelados,
+                'erros' => $erros
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro ao cancelar documento', ['error' => $e->getMessage()]);
+            Log::error('❌ Erro crítico no cancelamento', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao cancelar documento'
+                'message' => 'Erro interno no cancelamento'
             ], 500);
+        }
+    }
+
+    private function reverterStatusUCParaAguardando($propostaId)
+    {
+        try {
+            $proposta = Proposta::find($propostaId);
+            
+            if (!$proposta) {
+                return;
+            }
+
+            $unidadesConsumidoras = $proposta->unidades_consumidoras;
+            
+            if (is_string($unidadesConsumidoras)) {
+                $unidadesConsumidoras = json_decode($unidadesConsumidoras, true);
+            }
+            
+            if (!is_array($unidadesConsumidoras)) {
+                return;
+            }
+
+            // Alterar todas as UCs "Fechada" para "Aguardando"
+            $alteracoes = 0;
+            foreach ($unidadesConsumidoras as &$uc) {
+                if (($uc['status'] ?? null) === 'Fechada') {
+                    $uc['status'] = 'Aguardando';
+                    $alteracoes++;
+                    
+                    Log::info('🔄 UC revertida para Aguardando', [
+                        'numero_uc' => $uc['numero_unidade'] ?? $uc['numeroUC'] ?? 'N/A',
+                        'status_anterior' => 'Fechada',
+                        'status_novo' => 'Aguardando'
+                    ]);
+                }
+            }
+
+            if ($alteracoes > 0) {
+                $proposta->update([
+                    'unidades_consumidoras' => json_encode($unidadesConsumidoras)
+                ]);
+                
+                Log::info('✅ Status das UCs revertido', [
+                    'proposta_id' => $propostaId,
+                    'ucs_alteradas' => $alteracoes
+                ]);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao reverter status das UCs', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 
@@ -2385,7 +2542,9 @@ class DocumentController extends Controller
     {
         Log::info('📎 Iniciando upload manual de termo', [
             'proposta_id' => $propostaId,
-            'user_id' => auth()->id()
+            'user_id' => auth()->id(),
+            'request_files' => $request->files->count(),
+            'request_data' => $request->all()
         ]);
 
         try {
@@ -2396,6 +2555,9 @@ class DocumentController extends Controller
             ]);
 
             if ($validator->fails()) {
+                Log::warning('❌ Validação falhou', [
+                    'errors' => $validator->errors()
+                ]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Arquivo inválido',
@@ -2407,6 +2569,12 @@ class DocumentController extends Controller
             $proposta = Proposta::findOrFail($propostaId);
             $numeroUC = $request->numeroUC;
             
+            Log::info('📋 Proposta encontrada', [
+                'proposta_numero' => $proposta->numero_proposta,
+                'proposta_cliente' => $proposta->nome_cliente,
+                'numero_uc' => $numeroUC
+            ]);
+            
             // 3. VERIFICAR SE JÁ EXISTE DOCUMENTO ATIVO PARA ESTA UC
             $documentoExistente = Document::where('proposta_id', $propostaId)
                 ->where('numero_uc', $numeroUC)
@@ -2414,37 +2582,96 @@ class DocumentController extends Controller
                 ->first();
 
             if ($documentoExistente) {
+                Log::warning('⚠️ Documento já existe para UC', [
+                    'document_id' => $documentoExistente->id,
+                    'status' => $documentoExistente->status,
+                    'uploaded_manually' => $documentoExistente->uploaded_manually
+                ]);
+                
                 return response()->json([
                     'success' => false,
                     'message' => 'Já existe um documento ativo para esta UC. Cancele o atual primeiro.',
                     'documento_existente' => [
                         'id' => $documentoExistente->id,
-                        'status' => $documentoExistente->status_label
+                        'status' => $documentoExistente->status_label,
+                        'uploaded_manually' => $documentoExistente->uploaded_manually ?? false
+                    ],
+                    'debug_info' => [
+                        'proposta_id' => $propostaId,
+                        'numero_uc' => $numeroUC,
+                        'documento_status' => $documentoExistente->status
                     ]
                 ], 409);
             }
 
             // 4. PROCESSAR UPLOAD DO ARQUIVO
             $arquivo = $request->file('arquivo');
+            
+            if (!$arquivo || !$arquivo->isValid()) {
+                Log::error('❌ Arquivo inválido ou não recebido', [
+                    'arquivo_presente' => $arquivo !== null,
+                    'arquivo_valido' => $arquivo ? $arquivo->isValid() : false
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Arquivo PDF não foi recebido corretamente'
+                ], 400);
+            }
+            
             $nomeCliente = $proposta->nome_cliente ?? 'Cliente';
             $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
             $caminhoDestino = "termos_assinados/{$nomeArquivo}";
 
-            // Salvar arquivo no storage público
-            $caminhoSalvo = $arquivo->storeAs('public/' . dirname($caminhoDestino), basename($caminhoDestino));
-            
-            if (!$caminhoSalvo) {
-                throw new \Exception('Falha ao salvar arquivo no storage');
+            Log::info('📄 Processando arquivo', [
+                'arquivo_original' => $arquivo->getClientOriginalName(),
+                'arquivo_tamanho' => $arquivo->getSize(),
+                'nome_arquivo_destino' => $nomeArquivo,
+                'caminho_destino' => $caminhoDestino
+            ]);
+
+            // Criar diretório se não existir
+            $diretorioCompleto = storage_path('app/public/termos_assinados');
+            if (!file_exists($diretorioCompleto)) {
+                mkdir($diretorioCompleto, 0755, true);
+                Log::info('📁 Diretório criado', ['path' => $diretorioCompleto]);
             }
 
-            // 5. ✅ CRIAR REGISTRO NA TABELA DOCUMENTS (MESMA ESTRUTURA DA AUTENTIQUE)
-            $documentoId = (string) Str::ulid();
+            // Salvar arquivo no storage público
+            $caminhoSalvo = $arquivo->storeAs('public/termos_assinados', basename($nomeArquivo));
+            
+            if (!$caminhoSalvo) {
+                Log::error('❌ Falha ao salvar arquivo no storage');
+                throw new \Exception('Falha ao salvar arquivo no storage');
+            }
+            
+            Log::info('✅ Arquivo salvo com sucesso', [
+                'caminho_salvo' => $caminhoSalvo,
+                'caminho_fisico' => storage_path("app/{$caminhoSalvo}")
+            ]);
+
+            // 5. ✅ CRIAR REGISTRO NA TABELA DOCUMENTS
+            $documentoId = (string) \Illuminate\Support\Str::ulid();
+            
+            $dadosDocumento = [
+                'numeroUC' => $numeroUC,
+                'nomeCliente' => $nomeCliente,
+                'tipo_upload' => 'manual',
+                'nome_arquivo_salvo' => $nomeArquivo,
+                'arquivo_original' => $arquivo->getClientOriginalName()
+            ];
+            
+            Log::info('🗄️ Criando registro na tabela documents', [
+                'document_id' => $documentoId,
+                'dados_documento' => $dadosDocumento
+            ]);
+            
             $document = Document::create([
                 'id' => $documentoId,
                 'proposta_id' => $propostaId,
                 'numero_uc' => $numeroUC,
                 'name' => "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}",
-                'status' => Document::STATUS_SIGNED, // ✅ DIRETO PARA SIGNED
+                'status' => Document::STATUS_SIGNED,
                 'is_sandbox' => false,
                 
                 // ✅ CAMPOS ESPECÍFICOS DO UPLOAD MANUAL
@@ -2453,13 +2680,8 @@ class DocumentController extends Controller
                 'uploaded_by' => auth()->id(),
                 'manual_upload_filename' => $arquivo->getClientOriginalName(),
                 
-                // ✅ DADOS DO DOCUMENTO (para consistência)
-                'document_data' => [
-                    'numeroUC' => $numeroUC,
-                    'nomeCliente' => $nomeCliente,
-                    'tipo_upload' => 'manual',
-                    'nome_arquivo_salvo' => $nomeArquivo
-                ],
+                // ✅ DADOS DO DOCUMENTO
+                'document_data' => $dadosDocumento,
                 
                 // ✅ CAMPOS DA AUTENTIQUE (NULL para upload manual)
                 'autentique_id' => null,
@@ -2467,7 +2689,7 @@ class DocumentController extends Controller
                 'signer_email' => null,
                 'signer_name' => null,
                 'total_signers' => 1,
-                'signed_count' => 1, // ✅ Já está "assinado"
+                'signed_count' => 1,
                 'rejected_count' => 0,
                 
                 'created_by' => auth()->id(),
@@ -2475,30 +2697,44 @@ class DocumentController extends Controller
                 'last_checked_at' => now(),
             ]);
 
-            Log::info('📄 Documento criado na tabela documents', [
+            Log::info('✅ Documento criado na tabela documents', [
                 'document_id' => $document->id,
-                'proposta_id' => $propostaId,
-                'numero_uc' => $numeroUC,
-                'uploaded_manually' => true
+                'document_status' => $document->status
             ]);
 
-            // 6. ✅ SALVAR NO JSON DA PROPOSTA
-            app(PropostaController::class)->atualizarArquivoDocumentacao(
-                $propostaId, 
-                $numeroUC, 
-                'termoAdesao', 
-                $nomeArquivo, 
-                'salvar'
-            );
+            // 6. ✅ SALVAR NO JSON DA PROPOSTA (com try-catch)
+            try {
+                app(PropostaController::class)->atualizarArquivoDocumentacao(
+                    $propostaId, 
+                    $numeroUC, 
+                    'termoAdesao', 
+                    $nomeArquivo, 
+                    'salvar'
+                );
+                Log::info('✅ JSON da proposta atualizado com sucesso');
+            } catch (\Exception $e) {
+                Log::warning('⚠️ Erro ao atualizar JSON da proposta', [
+                    'error' => $e->getMessage()
+                ]);
+                // Continuar sem falhar - JSON não é crítico
+            }
 
-            Log::info('📋 JSON da proposta atualizado', [
-                'proposta_id' => $propostaId,
-                'numero_uc' => $numeroUC,
-                'arquivo' => $nomeArquivo
+            // 7. ✅ EXECUTAR LÓGICA DE DOCUMENTO ASSINADO (com try-catch)
+            try {
+                $this->executarLogicaDocumentoAssinado($document);
+                Log::info('✅ Lógica de documento assinado executada com sucesso');
+            } catch (\Exception $e) {
+                Log::error('❌ Erro na lógica de documento assinado', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                // Continuar - documento foi criado com sucesso
+            }
+
+            Log::info('🎉 Upload manual concluído com sucesso', [
+                'document_id' => $document->id,
+                'arquivo_url' => asset("storage/termos_assinados/{$nomeArquivo}")
             ]);
-
-            // 7. ✅ EXECUTAR A MESMA LÓGICA DO handleDocumentFinished
-            $this->executarLogicaDocumentoAssinado($document);
 
             return response()->json([
                 'success' => true,
@@ -2506,7 +2742,7 @@ class DocumentController extends Controller
                 'documento' => [
                     'id' => $document->id,
                     'nome' => $nomeArquivo,
-                    'url' => asset("storage/{$caminhoDestino}"),
+                    'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
                     'tamanho' => $arquivo->getSize(),
                     'status' => 'Assinado',
                     'uploaded_manually' => true,
@@ -2515,15 +2751,22 @@ class DocumentController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('❌ Erro no upload manual de termo', [
+            Log::error('❌ ERRO CRÍTICO no upload manual de termo', [
                 'proposta_id' => $propostaId,
                 'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao enviar termo: ' . $e->getMessage()
+                'message' => 'Erro interno no upload: ' . $e->getMessage(),
+                'debug_info' => [
+                    'error_file' => basename($e->getFile()),
+                    'error_line' => $e->getLine(),
+                    'proposta_id' => $propostaId
+                ]
             ], 500);
         }
     }
@@ -2553,16 +2796,37 @@ class DocumentController extends Controller
         }
 
         try {
-            // 1. ✅ ALTERAR STATUS DA UC PARA 'Fechada' (MESMO CÓDIGO DO handleDocumentFinished)
+            // 1. ✅ ALTERAR STATUS DA UC PARA 'Fechada'
             $proposta = Proposta::find($document->proposta_id);
             
             if ($proposta) {
-                $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                // ✅ CORREÇÃO: Verificar se já é array ou precisa decodificar
+                $unidadesConsumidoras = $proposta->unidades_consumidoras;
                 
+                if (is_string($unidadesConsumidoras)) {
+                    // Se for string, decodificar
+                    $unidadesConsumidoras = json_decode($unidadesConsumidoras, true);
+                } elseif (!is_array($unidadesConsumidoras)) {
+                    // Se não for nem string nem array, inicializar como array vazio
+                    $unidadesConsumidoras = [];
+                }
+
+                Log::info('🔍 Dados das unidades consumidoras', [
+                    'tipo_original' => gettype($proposta->unidades_consumidoras),
+                    'eh_array' => is_array($unidadesConsumidoras),
+                    'total_ucs' => is_array($unidadesConsumidoras) ? count($unidadesConsumidoras) : 0,
+                    'numero_uc_procurada' => $numeroUC
+                ]);
+                
+                // ✅ Procurar e alterar status da UC
+                $ucEncontrada = false;
                 foreach ($unidadesConsumidoras as &$uc) {
-                    if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
+                    $numeroUCProposta = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
+                    
+                    if ($numeroUCProposta == $numeroUC) {
                         $statusAnterior = $uc['status'] ?? null;
                         $uc['status'] = 'Fechada';
+                        $ucEncontrada = true;
                         
                         Log::info('✅ STATUS UC ALTERADO AUTOMATICAMENTE (UPLOAD MANUAL)', [
                             'proposta_id' => $document->proposta_id,
@@ -2575,28 +2839,55 @@ class DocumentController extends Controller
                     }
                 }
                 
-                $proposta->update([
-                    'unidades_consumidoras' => json_encode($unidadesConsumidoras)
+                if (!$ucEncontrada) {
+                    Log::warning('⚠️ UC não encontrada na proposta para alterar status', [
+                        'numero_uc_procurada' => $numeroUC,
+                        'ucs_na_proposta' => array_map(function($uc) {
+                            return $uc['numero_unidade'] ?? $uc['numeroUC'] ?? 'sem_numero';
+                        }, $unidadesConsumidoras)
+                    ]);
+                } else {
+                    // ✅ Salvar alterações no banco
+                    $proposta->update([
+                        'unidades_consumidoras' => json_encode($unidadesConsumidoras)
+                    ]);
+                    
+                    Log::info('✅ Proposta atualizada com novo status da UC');
+                }
+            } else {
+                Log::warning('⚠️ Proposta não encontrada', [
+                    'proposta_id' => $document->proposta_id
                 ]);
             }
 
-            // 2. ✅ ADICIONAR AO CONTROLE AUTOMATICAMENTE (MESMO CÓDIGO DO handleDocumentFinished)
-            app(PropostaController::class)->popularControleAutomaticoParaUC($document->proposta_id, $numeroUC);
-            
-            Log::info('🔄 UC ADICIONADA AO CONTROLE AUTOMATICAMENTE (UPLOAD MANUAL)', [
-                'proposta_id' => $document->proposta_id,
-                'numero_uc' => $numeroUC,
-                'metodo' => 'upload_manual'
-            ]);
+            // 2. ✅ ADICIONAR AO CONTROLE AUTOMATICAMENTE (com try-catch)
+            try {
+                app(PropostaController::class)->popularControleAutomaticoParaUC($document->proposta_id, $numeroUC);
+                
+                Log::info('🔄 UC ADICIONADA AO CONTROLE AUTOMATICAMENTE (UPLOAD MANUAL)', [
+                    'proposta_id' => $document->proposta_id,
+                    'numero_uc' => $numeroUC,
+                    'metodo' => 'upload_manual'
+                ]);
+            } catch (\Exception $e) {
+                Log::error('❌ Erro ao adicionar UC ao controle automaticamente', [
+                    'proposta_id' => $document->proposta_id,
+                    'numero_uc' => $numeroUC,
+                    'error' => $e->getMessage()
+                ]);
+                // Não falhar o upload por causa disso
+            }
 
         } catch (\Exception $e) {
             Log::error('❌ Erro ao processar lógica de documento assinado (upload manual)', [
                 'document_id' => $document->id,
                 'proposta_id' => $document->proposta_id,
                 'numero_uc' => $numeroUC,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
         }
     }
+        
 
 }

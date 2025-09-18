@@ -1206,45 +1206,6 @@ class PropostaController extends Controller
 
             $numeroUC = $request->get('numeroUC') ?? $request->get('numero_unidade');
 
-            if ($numeroUC && $request->has('status')) {
-                $statusNovo = $request->status;
-                $statusAnterior = null;
-                
-                // Buscar status anterior da UC específica
-                $unidadesAtuais = json_decode($proposta->unidades_consumidoras ?? '[]', true);
-                
-                foreach ($unidadesAtuais as $uc) {
-                    if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
-                        $statusAnterior = $uc['status'] ?? null;
-                        break;
-                    }
-                }
-                
-                Log::info('Verificação de mudança de status UC', [
-                    'proposta_id' => $id,
-                    'numero_uc' => $numeroUC,
-                    'status_anterior' => $statusAnterior,
-                    'status_novo' => $statusNovo
-                ]);
-                
-                // REMOVER do controle se saiu de "Fechada"
-                if ($statusAnterior === 'Fechada' && $statusNovo !== 'Fechada') {
-                    $this->removerDoControle($id, $numeroUC, $statusAnterior, $statusNovo);
-                }
-                
-                // ADICIONAR ao controle se entrou em "Fechada"
-                if ($statusNovo === 'Fechada' && $statusAnterior !== 'Fechada') {
-                    Log::info('Status alterado para Fechada - populando controle', [
-                        'proposta_id' => $id,
-                        'status_anterior' => $statusAnterior,
-                        'status_novo' => $statusNovo,
-                        'uc_especifica' => $numeroUC
-                    ]);
-                    
-                    $this->popularControleAutomaticoParaUC($id, $numeroUC);
-                }
-            }
-
             // Verificação para status geral da proposta (manter código existente)
             if ($request->has('status') && !$numeroUC && $request->status === 'Fechada') {
                 $this->popularControleAutomatico($id);
