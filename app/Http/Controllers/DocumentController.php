@@ -2174,7 +2174,7 @@ class DocumentController extends Controller
 
             Log::info('✅ Termo enviado para Autentique com sucesso', [
                 'proposta_id' => $propostaId,
-                'document_id' => $document->id,
+                'document_id' => $documentoSalvo->id,  // ✅ CORRIGIDO
                 'autentique_id' => $documentId,
                 'canais_envio' => $canaisEnvio,
                 'destinatario_exibicao' => $destinatarioExibicao
@@ -2185,24 +2185,23 @@ class DocumentController extends Controller
                 'success' => true,
                 'message' => 'Termo enviado para assinatura com sucesso!',
                 'documento' => [
-                    'id' => $document->id,
+                    'id' => $documentoSalvo->id,  // ✅ CORRIGIDO
                     'autentique_id' => $documentId,
-                    'nome' => $document->name,
-                    'status' => $document->status_label,
+                    'nome' => $documentoSalvo->name,  // ✅ CORRIGIDO
+                    'status' => $documentoSalvo->status_label,  // ✅ CORRIGIDO
                     'link_assinatura' => $linkAssinatura,
-                    // ✅ CAMPOS CORRIGIDOS PARA EXIBIÇÃO ADEQUADA
                     'email_signatario' => $destinatarioExibicao, 
                     'destinatario_exibicao' => $destinatarioExibicao,
                     'canais_envio' => $canaisEnvio,
                     'canais_envio_texto' => implode(' e ', $canaisEnvio), 
-                    'criado_em' => $document->created_at->format('d/m/Y H:i'),
-                    // ✅ Campos específicos para controle
+                    'criado_em' => $documentoSalvo->created_at->format('d/m/Y H:i'),  // ✅ CORRIGIDO
                     'envio_email' => $envioEmail,
                     'envio_whatsapp' => $envioWhatsApp,
                     'whatsapp_formatado' => $request->whatsappRepresentante ? 
                         preg_replace('/\D/', '', $request->whatsappRepresentante) : null
                 ]
             ]);
+
 
         } catch (\Exception $e) {
             Log::error('❌ Erro ao enviar para Autentique', [
