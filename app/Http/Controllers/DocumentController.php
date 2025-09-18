@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 
 class DocumentController extends Controller
@@ -2604,51 +2605,83 @@ class DocumentController extends Controller
                 ], 409);
             }
 
-            // 4. PROCESSAR UPLOAD DO ARQUIVO
+            // 4. PROCESSAR UPLOAD DO ARQUIVO - ✅ CORREÇÃO APLICADA
             $arquivo = $request->file('arquivo');
             
             if (!$arquivo || !$arquivo->isValid()) {
                 Log::error('❌ Arquivo inválido ou não recebido', [
                     'arquivo_presente' => $arquivo !== null,
-                    'arquivo_valido' => $arquivo ? $arquivo->isValid() : false
+                    'arquivo_valido' => $arquivo ? $arquivo->isValid() : false,
+                    'erro_upload' => $arquivo ? $arquivo->getError() : 'N/A'
                 ]);
-                
                 return response()->json([
                     'success' => false,
                     'message' => 'Arquivo PDF não foi recebido corretamente'
                 ], 400);
             }
-            
+
             $nomeCliente = $proposta->nome_cliente ?? 'Cliente';
             $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
-            $caminhoDestino = "termos_assinados/{$nomeArquivo}";
 
             Log::info('📄 Processando arquivo', [
                 'arquivo_original' => $arquivo->getClientOriginalName(),
                 'arquivo_tamanho' => $arquivo->getSize(),
                 'nome_arquivo_destino' => $nomeArquivo,
-                'caminho_destino' => $caminhoDestino
+                'arquivo_mime' => $arquivo->getMimeType()
             ]);
 
-            // Criar diretório se não existir
-            $diretorioCompleto = storage_path('app/public/termos_assinados');
+            // ✅ CORREÇÃO: Usar padrão igual ao PropostaController
+            $diretorio = 'termos_assinados';  // SEM 'public/' aqui
+            $diretorioCompleto = storage_path("app/public/{$diretorio}");
+            
             if (!file_exists($diretorioCompleto)) {
                 mkdir($diretorioCompleto, 0755, true);
                 Log::info('📁 Diretório criado', ['path' => $diretorioCompleto]);
             }
 
-            // Salvar arquivo no storage público
-            $caminhoSalvo = $arquivo->storeAs('public/termos_assinados', basename($nomeArquivo));
-            
-            if (!$caminhoSalvo) {
-                Log::error('❌ Falha ao salvar arquivo no storage');
-                throw new \Exception('Falha ao salvar arquivo no storage');
+            // ✅ CORREÇÃO: Salvar arquivo usando padrão do PropostaController
+            try {
+                // Usar disco 'public' como terceiro parâmetro
+                $caminhoSalvo = $arquivo->storeAs($diretorio, $nomeArquivo, 'public');
+                if (!$caminhoSalvo) {
+                    throw new \Exception('storeAs retornou false');
+                }
+
+                // ✅ VERIFICAR SE O ARQUIVO FOI REALMENTE SALVO (igual PropostaController)
+                $caminhoFisicoCompleto = Storage::disk('public')->path($caminhoSalvo);
+                if (!file_exists($caminhoFisicoCompleto)) {
+                    throw new \Exception('Arquivo não encontrado após salvamento');
+                }
+
+                $tamanhoSalvo = filesize($caminhoFisicoCompleto);
+                Log::info('✅ Arquivo salvo com sucesso', [
+                    'caminho_salvo' => $caminhoSalvo,
+                    'caminho_fisico' => $caminhoFisicoCompleto,
+                    'tamanho_original' => $arquivo->getSize(),
+                    'tamanho_salvo' => $tamanhoSalvo,
+                    'disco_usado' => 'public',
+                    'diretorio' => $diretorio,
+                    'url_publica' => asset("storage/termos_assinados/{$nomeArquivo}")
+                ]);
+
+                if ($tamanhoSalvo !== $arquivo->getSize()) {
+                    Log::warning('⚠️ Tamanho do arquivo difere após salvamento', [
+                        'tamanho_original' => $arquivo->getSize(),
+                        'tamanho_salvo' => $tamanhoSalvo
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::error('❌ Falha crítica no salvamento do arquivo', [
+                    'erro' => $e->getMessage(),
+                    'diretorio' => $diretorio,
+                    'diretorio_completo' => $diretorioCompleto,
+                    'nome_arquivo' => $nomeArquivo,
+                    'arquivo_tamanho' => $arquivo->getSize(),
+                    'disco_livre' => disk_free_space($diretorioCompleto),
+                    'permissoes_dir' => file_exists($diretorioCompleto) ? substr(sprintf('%o', fileperms($diretorioCompleto)), -4) : 'N/A'
+                ]);
+                throw new \Exception('Falha ao salvar arquivo no storage: ' . $e->getMessage());
             }
-            
-            Log::info('✅ Arquivo salvo com sucesso', [
-                'caminho_salvo' => $caminhoSalvo,
-                'caminho_fisico' => storage_path("app/{$caminhoSalvo}")
-            ]);
 
             // 5. ✅ CRIAR REGISTRO NA TABELA DOCUMENTS
             $documentoId = (string) \Illuminate\Support\Str::ulid();
