@@ -2750,4 +2750,88 @@ class PropostaController extends Controller
         
         return $erros;
     }
-} 
+    private function atualizarArquivoDocumentacao($propostaId, $numeroUC, $tipoArquivo, $nomeArquivo, $acao = 'salvar')
+    {
+        try {
+            // Buscar documentação atual
+            $proposta = DB::selectOne("SELECT documentacao FROM propostas WHERE id = ?", [$propostaId]);
+            
+            $documentacao = [];
+            if ($proposta && $proposta->documentacao) {
+                $documentacao = json_decode($proposta->documentacao, true) ?? [];
+            }
+            
+            // Inicializar estrutura da UC se não existir
+            if (!isset($documentacao[$numeroUC])) {
+                $documentacao[$numeroUC] = [];
+            }
+            
+            if (!isset($documentacao[$numeroUC]['arquivos'])) {
+                $documentacao[$numeroUC]['arquivos'] = [];
+            }
+            
+            if ($acao === 'salvar') {
+                // Salvar arquivo
+                $documentacao[$numeroUC]['arquivos'][$tipoArquivo] = $nomeArquivo;
+                $documentacao[$numeroUC]['arquivos']['data_' . $tipoArquivo] = now()->format('Y-m-d H:i:s');
+                
+            } elseif ($acao === 'remover') {
+                // Remover arquivo
+                unset($documentacao[$numeroUC]['arquivos'][$tipoArquivo]);
+                unset($documentacao[$numeroUC]['arquivos']['data_' . $tipoArquivo]);
+                
+                // Se não tem mais arquivos, limpar estrutura
+                if (empty($documentacao[$numeroUC]['arquivos'])) {
+                    unset($documentacao[$numeroUC]['arquivos']);
+                }
+            }
+            
+            // Atualizar no banco
+            DB::update(
+                "UPDATE propostas SET documentacao = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                [json_encode($documentacao, JSON_UNESCAPED_UNICODE), $propostaId]
+            );
+            
+            Log::info('Arquivo atualizado na documentação JSON', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'tipo_arquivo' => $tipoArquivo,
+                'nome_arquivo' => $nomeArquivo,
+                'acao' => $acao
+            ]);
+            
+            return true;
+            
+        } catch (\Exception $e) {
+            Log::error('Erro ao atualizar arquivo na documentação', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
+
+    private function buscarArquivoDocumentacao($propostaId, $numeroUC, $tipoArquivo)
+    {
+        try {
+            $proposta = DB::selectOne("SELECT documentacao FROM propostas WHERE id = ?", [$propostaId]);
+            
+            if (!$proposta || !$proposta->documentacao) {
+                return null;
+            }
+            
+            $documentacao = json_decode($proposta->documentacao, true);
+            
+            return $documentacao[$numeroUC]['arquivos'][$tipoArquivo] ?? null;
+            
+        } catch (\Exception $e) {
+            Log::error('Erro ao buscar arquivo na documentação', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+
+        
+    }  
+}

@@ -599,7 +599,22 @@ class DocumentController extends Controller
             $numeroUC = $dadosDocumento['numeroUC'] ?? null;
             
             if ($numeroUC) {
-                // Buscar proposta e alterar status da UC para "Recusada"
+                app(PropostaController::class)->atualizarArquivoDocumentacao(
+                    $localDocument->proposta_id, 
+                    $numeroUC, 
+                    'termo_pendente', 
+                    '', 
+                    'remover'
+                );
+                
+                app(PropostaController::class)->atualizarArquivoDocumentacao(
+                    $localDocument->proposta_id, 
+                    $numeroUC, 
+                    'termo_rejeitado', 
+                    $dadosDocumento['nome_documento'] ?? "Termo Rejeitado", 
+                    'salvar'
+                );
+
                 $proposta = \App\Models\Proposta::find($localDocument->proposta_id);
                 if ($proposta) {
                     $unidadesConsumidoras = $proposta->unidades_consumidoras;
@@ -713,7 +728,26 @@ class DocumentController extends Controller
             $numeroUC = $dadosDocumento['numeroUC'] ?? null;
             
             if ($numeroUC) {
-                // Buscar proposta e alterar status da UC
+                // ✅ NOVA SEÇÃO: Salvar nome do arquivo assinado no JSON
+                $nomeCliente = $dadosDocumento['nomeCliente'] ?? $dadosDocumento['nome_cliente'] ?? 'Cliente';
+                $nomeArquivoAssinado = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
+                
+                app(PropostaController::class)->atualizarArquivoDocumentacao(
+                    $localDocument->proposta_id, 
+                    $numeroUC, 
+                    'termo_assinado', 
+                    $nomeArquivoAssinado, 
+                    'salvar'
+                );
+                
+                // Remover status pendente
+                app(PropostaController::class)->atualizarArquivoDocumentacao(
+                    $localDocument->proposta_id, 
+                    $numeroUC, 
+                    'termo_pendente', 
+                    '', 
+                    'remover'
+                );
                 $proposta = \App\Models\Proposta::find($localDocument->proposta_id);
                 if ($proposta) {
                     $unidadesConsumidoras = $proposta->unidades_consumidoras;
@@ -925,6 +959,29 @@ class DocumentController extends Controller
             // Excluir o documento rejeitado localmente
             $documento->delete();
 
+            if ($documento->document_data) {
+                $dadosDocumento = $documento->document_data;
+                $numeroUC = $dadosDocumento['numeroUC'] ?? $documento->numero_uc;
+                
+                if ($numeroUC) {
+                    app(PropostaController::class)->atualizarArquivoDocumentacao(
+                        $propostaId, 
+                        $numeroUC, 
+                        'termo_rejeitado', 
+                        '', 
+                        'remover'
+                    );
+                    
+                    app(PropostaController::class)->atualizarArquivoDocumentacao(
+                        $propostaId, 
+                        $numeroUC, 
+                        'termo_pendente', 
+                        '', 
+                        'remover'
+                    );
+                }
+            }
+
             Log::info('🗑️ Documento rejeitado removido do sistema', [
                 'proposta_id' => $propostaId,
                 'document_id' => $documento->autentique_id,
@@ -990,34 +1047,56 @@ class DocumentController extends Controller
     public function verificarPdfTemporario($propostaId): JsonResponse
     {
         try {
-            // ✅ ADICIONAR SUPORTE A NUMERO_UC
             $numeroUC = request()->query('numero_uc');
             
-            $dirTemp = storage_path('app/public/temp');
-            
-            if ($numeroUC) {
-                // Buscar PDF específico da UC
-                if ($numeroUC) {
-                    // Buscar PDF específico da UC - novo padrão
-                    $pattern = "Procuracao e Termo de Adesao - * - UC {$numeroUC}.pdf";
-                } else {
-                    // Buscar PDF geral da proposta (compatibilidade)
-                    $pattern = "Procuracao e Termo de Adesao - *.pdf";
-                }
-            } else {
-                // Buscar PDF geral da proposta (compatibilidade)
-                $pattern = "temp_termo_{$propostaId}_*.pdf";
+            if (!$numeroUC) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Número da UC é obrigatório'
+                ], 400);
             }
             
+            // ✅ NOVA LÓGICA: Buscar primeiro no JSON
+            $nomeArquivoSalvo = app(PropostaController::class)->buscarArquivoDocumentacao(
+                $propostaId, 
+                $numeroUC, 
+                'termo_temporario'
+            );
+            
+            if ($nomeArquivoSalvo) {
+                $caminhoTemp = storage_path("app/public/temp/{$nomeArquivoSalvo}");
+                
+                if (file_exists($caminhoTemp)) {
+                    Log::info('📄 PDF temporário encontrado via JSON');
+                    
+                    return response()->json([
+                        'success' => true,
+                        'pdf' => [
+                            'nome' => $nomeArquivoSalvo,
+                            'url' => asset("storage/temp/{$nomeArquivoSalvo}"),
+                            'tamanho' => filesize($caminhoTemp),
+                            'gerado_em' => date('d/m/Y H:i', filemtime($caminhoTemp)),
+                            'numero_uc' => $numeroUC
+                        ]
+                    ]);
+                } else {
+                    // Arquivo não existe fisicamente, remover do JSON
+                    app(PropostaController::class)->atualizarArquivoDocumentacao(
+                        $propostaId, 
+                        $numeroUC, 
+                        'termo_temporario', 
+                        '', 
+                        'remover'
+                    );
+                }
+            }
+            
+            // FALLBACK: Busca atual por padrão (código existente)
+            $dirTemp = storage_path('app/public/temp');
+            $pattern = "Procuracao e Termo de Adesao - * - UC {$numeroUC}.pdf";
             $arquivos = glob($dirTemp . '/' . $pattern);
             
             if (empty($arquivos)) {
-                Log::info('📭 Nenhum PDF temporário encontrado', [
-                    'proposta_id' => $propostaId,
-                    'numero_uc' => $numeroUC,
-                    'pattern' => $pattern
-                ]);
-                
                 return response()->json([
                     'success' => false,
                     'message' => 'Nenhum PDF temporário encontrado'
@@ -1030,13 +1109,15 @@ class DocumentController extends Controller
             });
             
             $nomeArquivo = basename($arquivoMaisRecente);
-            $timestamp = filemtime($arquivoMaisRecente);
             
-            Log::info('📄 PDF temporário encontrado', [
-                'proposta_id' => $propostaId,
-                'numero_uc' => $numeroUC,
-                'arquivo' => $nomeArquivo
-            ]);
+            // ✅ NOVA LINHA: Atualizar JSON se encontrou arquivo
+            app(PropostaController::class)->atualizarArquivoDocumentacao(
+                $propostaId, 
+                $numeroUC, 
+                'termo_temporario', 
+                $nomeArquivo, 
+                'salvar'
+            );
             
             return response()->json([
                 'success' => true,
@@ -1044,8 +1125,8 @@ class DocumentController extends Controller
                     'nome' => $nomeArquivo,
                     'url' => asset("storage/temp/{$nomeArquivo}"),
                     'tamanho' => filesize($arquivoMaisRecente),
-                    'gerado_em' => date('d/m/Y H:i', $timestamp),
-                    'numero_uc' => $numeroUC // ✅ INCLUIR NO RETORNO
+                    'gerado_em' => date('d/m/Y H:i', filemtime($arquivoMaisRecente)),
+                    'numero_uc' => $numeroUC
                 ]
             ]);
             
@@ -1499,11 +1580,7 @@ class DocumentController extends Controller
     }
 
     public function baixarPDFAssinado($propostaId): JsonResponse
-    {   
-        Log::info("📋 ERRO na busca PDF", ['proposta' => $propostaId]);
-        Log::info("📋 ERRO na verificação do documento");
-        Log::info("📋 ERRO no processamento da request");
-        Log::info("📋 ERRO na busca por arquivos finalizados");
+    {
         try {
             $documento = Document::where('proposta_id', $propostaId)
                 ->where('status', Document::STATUS_SIGNED)
@@ -1516,15 +1593,42 @@ class DocumentController extends Controller
                 ], 404);
             }
 
+            // ✅ NOVA LÓGICA: Buscar primeiro no JSON
+            $numeroUC = $documento->numero_uc;
+            $nomeArquivoSalvo = app(PropostaController::class)->buscarArquivoDocumentacao(
+                $propostaId, 
+                $numeroUC, 
+                'termo_assinado'
+            );
+            
+            if ($nomeArquivoSalvo) {
+                $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivoSalvo}");
+                
+                if (file_exists($caminhoLocal)) {
+                    Log::info('📁 Arquivo encontrado via JSON + verificação física');
+                    
+                    return response()->json([
+                        'success' => true,
+                        'source' => 'json_database',
+                        'documento' => [
+                            'nome' => $nomeArquivoSalvo,
+                            'url' => asset("storage/termos_assinados/{$nomeArquivoSalvo}"),
+                            'tamanho' => filesize($caminhoLocal),
+                            'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
+                        ]
+                    ]);
+                }
+            }
+
+            // FALLBACK: Lógica de busca atual (montar nome e procurar)
             $nomeCliente = $documento->document_data['nomeCliente'] ?? 'Cliente';
-            $numeroUC = $documento->numero_uc ?? 'UC';
             $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
             $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivo}");
 
-            // TENTATIVA 1: Baixar da Autentique (se tiver autentique_id)
+            // TENTATIVA 1: Baixar da Autentique (código existente)
             if (!empty($documento->autentique_id)) {
                 try {
-                    Log::info('📥 Tentando baixar da Autentique', ['autentique_id' => $documento->autentique_id]);
+                    Log::info('📥 Tentando baixar da Autentique');
                     
                     $pdfAssinado = $this->autentiqueService->downloadSignedDocument($documento->autentique_id);
                     
@@ -1535,6 +1639,15 @@ class DocumentController extends Controller
                         }
                         
                         file_put_contents($caminhoLocal, $pdfAssinado);
+                        
+                        // ✅ NOVA LINHA: Atualizar JSON com nome real do arquivo
+                        app(PropostaController::class)->atualizarArquivoDocumentacao(
+                            $propostaId, 
+                            $numeroUC, 
+                            'termo_assinado', 
+                            $nomeArquivo, 
+                            'salvar'
+                        );
 
                         return response()->json([
                             'success' => true,
@@ -1552,9 +1665,18 @@ class DocumentController extends Controller
                 }
             }
 
-            // TENTATIVA 2: Verificar se já existe arquivo local
+            // TENTATIVA 2: Verificar se já existe arquivo local (código existente)
             if (file_exists($caminhoLocal)) {
                 Log::info('📁 Usando arquivo local existente');
+                
+                // ✅ NOVA LINHA: Atualizar JSON se não estava registrado
+                app(PropostaController::class)->atualizarArquivoDocumentacao(
+                    $propostaId, 
+                    $numeroUC, 
+                    'termo_assinado', 
+                    $nomeArquivo, 
+                    'salvar'
+                );
                 
                 return response()->json([
                     'success' => true,
@@ -1568,18 +1690,11 @@ class DocumentController extends Controller
                 ]);
             }
 
-            // TENTATIVA 3: Documento histórico - precisa de upload manual
-            Log::info('📋 Documento histórico - upload manual necessário');
-            
+            // TENTATIVA 3: Documento histórico (código existente)
             return response()->json([
                 'success' => false,
                 'needs_manual_upload' => true,
-                'message' => 'Documento assinado não encontrado - upload manual necessário',
-                'documento_info' => [
-                    'id' => $documento->id,
-                    'nome' => $documento->name,
-                    'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
-                ]
+                'message' => 'Documento assinado não encontrado - upload manual necessário'
             ], 404);
 
         } catch (\Exception $e) {
@@ -1611,14 +1726,24 @@ class DocumentController extends Controller
 
             $arquivo = $request->file('arquivo');
             $nomeCliente = $documento->document_data['nomeCliente'] ?? 
-                        $documento->document_data['nome_cliente'] ?? 
-                        'Cliente';
+                      $documento->document_data['nome_cliente'] ?? 
+                      'Cliente';
             $numeroUC = $documento->numero_uc ?? 'UC';
+            
             $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
             $caminhoDestino = "termos_assinados/{$nomeArquivo}";
 
             // Salvar arquivo no storage público
             $arquivo->storeAs('public/' . dirname($caminhoDestino), basename($caminhoDestino));
+
+            // ✅ NOVA LINHA: Salvar no JSON também
+            app(PropostaController::class)->atualizarArquivoDocumentacao(
+                $propostaId, 
+                $numeroUC, 
+                'termo_assinado', 
+                $nomeArquivo, 
+                'salvar'
+            );
 
             // Atualizar documento com informação de upload manual
             $documento->update([
@@ -1627,6 +1752,7 @@ class DocumentController extends Controller
                 'uploaded_by' => auth()->id(),
                 'manual_upload_filename' => $arquivo->getClientOriginalName()
             ]);
+
 
             Log::info('📄 Upload manual realizado', [
                 'documento_id' => $documento->id,
@@ -1724,10 +1850,19 @@ class DocumentController extends Controller
             }
             
             file_put_contents($caminhoTemp, $pdfContent);
-
+            
+            // ✅ NOVA LINHA: Salvar nome do arquivo temporário no JSON
+            app(PropostaController::class)->atualizarArquivoDocumentacao(
+                $propostaId, 
+                $numeroUC, 
+                'termo_temporario', 
+                $nomeArquivoTemp, 
+                'salvar'
+            );
+            
             // Limpar arquivos temporários antigos
             $this->limparArquivosTemporarios();
-
+            
             return response()->json([
                 'success' => true,
                 'message' => 'PDF gerado com sucesso!',
@@ -1739,7 +1874,6 @@ class DocumentController extends Controller
                     'numero_uc' => $numeroUC  
                 ]
             ]);
-
         } catch (\Exception $e) {
             Log::error('❌ Erro ao gerar PDF apenas', [
                 'proposta_id' => $propostaId,
@@ -1981,8 +2115,25 @@ class DocumentController extends Controller
                 if (file_exists($caminhoTemp)) {
                     unlink($caminhoTemp);
                     Log::info('🗑️ Arquivo temporário removido após envio');
+                    
+                    // ✅ NOVA LINHA: Remover entrada temporária do JSON
+                    app(PropostaController::class)->atualizarArquivoDocumentacao(
+                        $propostaId, 
+                        $numeroUC, 
+                        'termo_temporario', 
+                        '', 
+                        'remover'
+                    );
                 }
             }
+
+            app(PropostaController::class)->atualizarArquivoDocumentacao(
+                $propostaId, 
+                $numeroUC, 
+                'termo_pendente', 
+                $dadosDocumento['nome_documento'] ?? "Termo de Adesão - {$proposta->numero_proposta}", 
+                'salvar'
+            );
 
             // ✅ PREPARAR INFORMAÇÕES DE ENVIO PARA RESPOSTA
             $envioEmail = $request->boolean('enviar_email', true);
@@ -2155,4 +2306,51 @@ class DocumentController extends Controller
             ], 500);
         }
     }
+
+    public function listarArquivosTermoUC($propostaId, $numeroUC): JsonResponse
+    {
+        try {
+            $arquivos = [];
+            
+            // Buscar todos os tipos de arquivo da UC
+            $tiposArquivo = ['termo_temporario', 'termo_pendente', 'termo_assinado', 'termo_rejeitado'];
+            
+            foreach ($tiposArquivo as $tipo) {
+                $nomeArquivo = app(PropostaController::class)->buscarArquivoDocumentacao(
+                    $propostaId, 
+                    $numeroUC, 
+                    $tipo
+                );
+                
+                if ($nomeArquivo) {
+                    $pasta = $tipo === 'termo_temporario' ? 'temp' : 'termos_assinados';
+                    $caminho = storage_path("app/public/{$pasta}/{$nomeArquivo}");
+                    
+                    $arquivos[] = [
+                        'tipo' => $tipo,
+                        'nome' => $nomeArquivo,
+                        'exists' => file_exists($caminho),
+                        'size' => file_exists($caminho) ? filesize($caminho) : 0,
+                        'url' => asset("storage/{$pasta}/{$nomeArquivo}"),
+                        'modified' => file_exists($caminho) ? date('d/m/Y H:i', filemtime($caminho)) : null
+                    ];
+                }
+            }
+            
+            return response()->json([
+                'success' => true,
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'arquivos' => $arquivos,
+                'total' => count($arquivos)
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao listar arquivos: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
 }
