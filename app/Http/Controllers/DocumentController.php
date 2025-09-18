@@ -1586,126 +1586,144 @@ class DocumentController extends Controller
         }
     }
 
-    public function baixarPDFAssinado($propostaId): JsonResponse
+    public function baixarPDFAssinado(Request $request, $propostaId): JsonResponse
     {
+        Log::info('📥 Buscando PDF assinado', ['proposta_id' => $propostaId]);
+        
         try {
-            $documento = Document::where('proposta_id', $propostaId)
-                ->where('status', Document::STATUS_SIGNED)
-                ->first();
-
-            if (!$documento) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Nenhum documento assinado encontrado'
-                ], 404);
-            }
-
-            // ✅ NOVA LÓGICA: Buscar primeiro no JSON
-            $numeroUC = $documento->numero_uc;
-            $nomeArquivoSalvo = app(PropostaController::class)->buscarArquivoDocumentacao(
-                $propostaId, 
-                $numeroUC, 
-                'termo_assinado'
-            );
+            $numeroUC = $request->query('numero_uc');
             
-            if ($nomeArquivoSalvo) {
-                $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivoSalvo}");
-                
-                if (file_exists($caminhoLocal)) {
-                    Log::info('📁 Arquivo encontrado via JSON + verificação física');
-                    
-                    return response()->json([
-                        'success' => true,
-                        'source' => 'json_database',
-                        'documento' => [
-                            'nome' => $nomeArquivoSalvo,
-                            'url' => asset("storage/termos_assinados/{$nomeArquivoSalvo}"),
-                            'tamanho' => filesize($caminhoLocal),
-                            'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
-                        ]
-                    ]);
-                }
+            // ✅ 1. BUSCAR DOCUMENTO NA TABELA (AUTENTIQUE OU MANUAL)
+            $query = Document::where('proposta_id', $propostaId)
+                ->where('status', Document::STATUS_SIGNED);
+            
+            if ($numeroUC) {
+                $query->where('numero_uc', $numeroUC);
             }
-
-            // FALLBACK: Lógica de busca atual (montar nome e procurar)
-            $nomeCliente = $documento->document_data['nomeCliente'] ?? 'Cliente';
-            $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
-            $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivo}");
-
-            // TENTATIVA 1: Baixar da Autentique (código existente)
-            if (!empty($documento->autentique_id)) {
-                try {
-                    Log::info('📥 Tentando baixar da Autentique');
+            
+            $documento = $query->first();
+            
+            if ($documento) {
+                Log::info('📄 Documento encontrado', [
+                    'document_id' => $documento->id,
+                    'uploaded_manually' => $documento->uploaded_manually,
+                    'numero_uc' => $documento->numero_uc
+                ]);
+                
+                // ✅ UPLOAD MANUAL - Usar arquivo direto do storage
+                if ($documento->uploaded_manually) {
+                    $dadosDocumento = $documento->document_data;
+                    $nomeArquivo = $dadosDocumento['nome_arquivo_salvo'] ?? null;
                     
-                    $pdfAssinado = $this->autentiqueService->downloadSignedDocument($documento->autentique_id);
-                    
-                    if ($pdfAssinado) {
-                        // Salvar localmente
-                        if (!is_dir(dirname($caminhoLocal))) {
-                            mkdir(dirname($caminhoLocal), 0755, true);
+                    if ($nomeArquivo) {
+                        $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivo}");
+                        
+                        if (file_exists($caminhoLocal)) {
+                            return response()->json([
+                                'success' => true,
+                                'source' => 'upload_manual',
+                                'documento' => [
+                                    'nome' => $nomeArquivo,
+                                    'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
+                                    'tamanho' => filesize($caminhoLocal),
+                                    'data_upload' => $documento->uploaded_at->format('d/m/Y H:i'),
+                                    'tipo' => 'upload_manual'
+                                ]
+                            ]);
+                        } else {
+                            Log::warning('⚠️ Arquivo de upload manual não encontrado', [
+                                'caminho' => $caminhoLocal,
+                                'document_id' => $documento->id
+                            ]);
                         }
+                    }
+                }
+                // ✅ AUTENTIQUE - Usar lógica existente
+                else if ($documento->autentique_id) {
+                    // Tentar baixar da Autentique primeiro
+                    try {
+                        $pdfAssinado = $this->autentiqueService->baixarDocumentoAssinado($documento->autentique_id);
                         
-                        file_put_contents($caminhoLocal, $pdfAssinado);
+                        if ($pdfAssinado) {
+                            $dadosDocumento = $documento->document_data;
+                            $nomeCliente = $dadosDocumento['nomeCliente'] ?? $dadosDocumento['nome_cliente'] ?? 'Cliente';
+                            $numeroUCDoc = $dadosDocumento['numeroUC'] ?? 'UC';
+                            $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUCDoc}.pdf";
+                            $caminhoDestino = storage_path("app/public/termos_assinados/{$nomeArquivo}");
+                            
+                            // Salvar arquivo localmente para cache
+                            if (!file_exists(dirname($caminhoDestino))) {
+                                mkdir(dirname($caminhoDestino), 0755, true);
+                            }
+                            
+                            file_put_contents($caminhoDestino, $pdfAssinado);
+                            
+                            // ✅ SALVAR NO JSON TAMBÉM (se ainda não estava)
+                            app(PropostaController::class)->atualizarArquivoDocumentacao(
+                                $propostaId, 
+                                $numeroUCDoc, 
+                                'termoAdesao', 
+                                $nomeArquivo, 
+                                'salvar'
+                            );
+                            
+                            return response()->json([
+                                'success' => true,
+                                'source' => 'autentique',
+                                'documento' => [
+                                    'nome' => $nomeArquivo,
+                                    'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
+                                    'tamanho' => strlen($pdfAssinado),
+                                    'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
+                                ]
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::warning('⚠️ Falha ao baixar da Autentique', ['error' => $e->getMessage()]);
+                    }
+                    
+                    // ✅ VERIFICAR SE JÁ EXISTE CACHE LOCAL
+                    $dadosDocumento = $documento->document_data;
+                    $nomeCliente = $dadosDocumento['nomeCliente'] ?? $dadosDocumento['nome_cliente'] ?? 'Cliente';
+                    $numeroUCDoc = $dadosDocumento['numeroUC'] ?? 'UC';
+                    $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUCDoc}.pdf";
+                    $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivo}");
+                    
+                    if (file_exists($caminhoLocal)) {
+                        Log::info('📁 Usando arquivo local existente (cache)');
                         
-                        // ✅ NOVA LINHA: Atualizar JSON com nome real do arquivo
-                        app(PropostaController::class)->atualizarArquivoDocumentacao(
-                            $propostaId, 
-                            $numeroUC, 
-                            'termo_assinado', 
-                            $nomeArquivo, 
-                            'salvar'
-                        );
-
                         return response()->json([
                             'success' => true,
-                            'source' => 'autentique',
+                            'source' => 'local_cache',
                             'documento' => [
                                 'nome' => $nomeArquivo,
                                 'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
-                                'tamanho' => strlen($pdfAssinado),
+                                'tamanho' => filesize($caminhoLocal),
                                 'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
                             ]
                         ]);
                     }
-                } catch (\Exception $e) {
-                    Log::warning('⚠️ Falha ao baixar da Autentique', ['error' => $e->getMessage()]);
                 }
             }
 
-            // TENTATIVA 2: Verificar se já existe arquivo local (código existente)
-            if (file_exists($caminhoLocal)) {
-                Log::info('📁 Usando arquivo local existente');
-                
-                // ✅ NOVA LINHA: Atualizar JSON se não estava registrado
-                app(PropostaController::class)->atualizarArquivoDocumentacao(
-                    $propostaId, 
-                    $numeroUC, 
-                    'termo_assinado', 
-                    $nomeArquivo, 
-                    'salvar'
-                );
-                
-                return response()->json([
-                    'success' => true,
-                    'source' => 'local_cache',
-                    'documento' => [
-                        'nome' => $nomeArquivo,
-                        'url' => asset("storage/termos_assinados/{$nomeArquivo}"),
-                        'tamanho' => filesize($caminhoLocal),
-                        'data_assinatura' => $documento->updated_at->format('d/m/Y H:i')
-                    ]
-                ]);
-            }
-
-            // TENTATIVA 3: Documento histórico (código existente)
+            // ✅ DOCUMENTO NÃO ENCONTRADO OU SEM ARQUIVO
             return response()->json([
                 'success' => false,
-                'needs_manual_upload' => true,
-                'message' => 'Documento assinado não encontrado - upload manual necessário'
+                'message' => 'Documento assinado não encontrado',
+                'debug_info' => [
+                    'proposta_id' => $propostaId,
+                    'numero_uc' => $numeroUC,
+                    'documento_existe' => $documento ? true : false,
+                    'documento_manual' => $documento ? $documento->uploaded_manually : null
+                ]
             ], 404);
 
         } catch (\Exception $e) {
-            Log::error('❌ Erro ao buscar PDF assinado', ['error' => $e->getMessage()]);
+            Log::error('❌ Erro ao buscar PDF assinado', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Erro interno ao buscar documento assinado'
@@ -2360,6 +2378,224 @@ class DocumentController extends Controller
                 'success' => false,
                 'message' => 'Erro ao listar arquivos: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    public function uploadTermoManual(Request $request, $propostaId): JsonResponse
+    {
+        Log::info('📎 Iniciando upload manual de termo', [
+            'proposta_id' => $propostaId,
+            'user_id' => auth()->id()
+        ]);
+
+        try {
+            // 1. VALIDAÇÕES
+            $validator = Validator::make($request->all(), [
+                'arquivo' => 'required|mimes:pdf|max:10240', // 10MB máximo
+                'numeroUC' => 'required|string'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Arquivo inválido',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // 2. BUSCAR PROPOSTA
+            $proposta = Proposta::findOrFail($propostaId);
+            $numeroUC = $request->numeroUC;
+            
+            // 3. VERIFICAR SE JÁ EXISTE DOCUMENTO ATIVO PARA ESTA UC
+            $documentoExistente = Document::where('proposta_id', $propostaId)
+                ->where('numero_uc', $numeroUC)
+                ->whereIn('status', [Document::STATUS_PENDING, Document::STATUS_SIGNED])
+                ->first();
+
+            if ($documentoExistente) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Já existe um documento ativo para esta UC. Cancele o atual primeiro.',
+                    'documento_existente' => [
+                        'id' => $documentoExistente->id,
+                        'status' => $documentoExistente->status_label
+                    ]
+                ], 409);
+            }
+
+            // 4. PROCESSAR UPLOAD DO ARQUIVO
+            $arquivo = $request->file('arquivo');
+            $nomeCliente = $proposta->nome_cliente ?? 'Cliente';
+            $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
+            $caminhoDestino = "termos_assinados/{$nomeArquivo}";
+
+            // Salvar arquivo no storage público
+            $caminhoSalvo = $arquivo->storeAs('public/' . dirname($caminhoDestino), basename($caminhoDestino));
+            
+            if (!$caminhoSalvo) {
+                throw new \Exception('Falha ao salvar arquivo no storage');
+            }
+
+            // 5. ✅ CRIAR REGISTRO NA TABELA DOCUMENTS (MESMA ESTRUTURA DA AUTENTIQUE)
+            $documentoId = (string) Str::ulid();
+            $document = Document::create([
+                'id' => $documentoId,
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'name' => "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}",
+                'status' => Document::STATUS_SIGNED, // ✅ DIRETO PARA SIGNED
+                'is_sandbox' => false,
+                
+                // ✅ CAMPOS ESPECÍFICOS DO UPLOAD MANUAL
+                'uploaded_manually' => true,
+                'uploaded_at' => now(),
+                'uploaded_by' => auth()->id(),
+                'manual_upload_filename' => $arquivo->getClientOriginalName(),
+                
+                // ✅ DADOS DO DOCUMENTO (para consistência)
+                'document_data' => [
+                    'numeroUC' => $numeroUC,
+                    'nomeCliente' => $nomeCliente,
+                    'tipo_upload' => 'manual',
+                    'nome_arquivo_salvo' => $nomeArquivo
+                ],
+                
+                // ✅ CAMPOS DA AUTENTIQUE (NULL para upload manual)
+                'autentique_id' => null,
+                'signing_url' => null,
+                'signer_email' => null,
+                'signer_name' => null,
+                'total_signers' => 1,
+                'signed_count' => 1, // ✅ Já está "assinado"
+                'rejected_count' => 0,
+                
+                'created_by' => auth()->id(),
+                'autentique_created_at' => null,
+                'last_checked_at' => now(),
+            ]);
+
+            Log::info('📄 Documento criado na tabela documents', [
+                'document_id' => $document->id,
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'uploaded_manually' => true
+            ]);
+
+            // 6. ✅ SALVAR NO JSON DA PROPOSTA
+            app(PropostaController::class)->atualizarArquivoDocumentacao(
+                $propostaId, 
+                $numeroUC, 
+                'termoAdesao', 
+                $nomeArquivo, 
+                'salvar'
+            );
+
+            Log::info('📋 JSON da proposta atualizado', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC,
+                'arquivo' => $nomeArquivo
+            ]);
+
+            // 7. ✅ EXECUTAR A MESMA LÓGICA DO handleDocumentFinished
+            $this->executarLogicaDocumentoAssinado($document);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Termo assinado enviado com sucesso! Status da UC alterado para "Fechada" e adicionada ao controle automaticamente.',
+                'documento' => [
+                    'id' => $document->id,
+                    'nome' => $nomeArquivo,
+                    'url' => asset("storage/{$caminhoDestino}"),
+                    'tamanho' => $arquivo->getSize(),
+                    'status' => 'Assinado',
+                    'uploaded_manually' => true,
+                    'data_upload' => now()->format('d/m/Y H:i')
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro no upload manual de termo', [
+                'proposta_id' => $propostaId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao enviar termo: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ EXECUTAR A MESMA LÓGICA DO handleDocumentFinished (REUTILIZAR CÓDIGO)
+     */
+    private function executarLogicaDocumentoAssinado(Document $document)
+    {
+        Log::info('🔄 Executando lógica de documento assinado', [
+            'document_id' => $document->id,
+            'proposta_id' => $document->proposta_id,
+            'uploaded_manually' => $document->uploaded_manually
+        ]);
+
+        // Buscar dados do documento
+        $dadosDocumento = $document->document_data;
+        $numeroUC = $dadosDocumento['numeroUC'] ?? null;
+        
+        if (!$numeroUC || !$document->proposta_id) {
+            Log::warning('⚠️ Dados insuficientes para processar documento assinado', [
+                'document_id' => $document->id,
+                'numero_uc' => $numeroUC,
+                'proposta_id' => $document->proposta_id
+            ]);
+            return;
+        }
+
+        try {
+            // 1. ✅ ALTERAR STATUS DA UC PARA 'Fechada' (MESMO CÓDIGO DO handleDocumentFinished)
+            $proposta = Proposta::find($document->proposta_id);
+            
+            if ($proposta) {
+                $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                
+                foreach ($unidadesConsumidoras as &$uc) {
+                    if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
+                        $statusAnterior = $uc['status'] ?? null;
+                        $uc['status'] = 'Fechada';
+                        
+                        Log::info('✅ STATUS UC ALTERADO AUTOMATICAMENTE (UPLOAD MANUAL)', [
+                            'proposta_id' => $document->proposta_id,
+                            'numero_uc' => $numeroUC,
+                            'status_anterior' => $statusAnterior,
+                            'status_novo' => 'Fechada',
+                            'metodo' => 'upload_manual'
+                        ]);
+                        break;
+                    }
+                }
+                
+                $proposta->update([
+                    'unidades_consumidoras' => json_encode($unidadesConsumidoras)
+                ]);
+            }
+
+            // 2. ✅ ADICIONAR AO CONTROLE AUTOMATICAMENTE (MESMO CÓDIGO DO handleDocumentFinished)
+            app(PropostaController::class)->popularControleAutomaticoParaUC($document->proposta_id, $numeroUC);
+            
+            Log::info('🔄 UC ADICIONADA AO CONTROLE AUTOMATICAMENTE (UPLOAD MANUAL)', [
+                'proposta_id' => $document->proposta_id,
+                'numero_uc' => $numeroUC,
+                'metodo' => 'upload_manual'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao processar lógica de documento assinado (upload manual)', [
+                'document_id' => $document->id,
+                'proposta_id' => $document->proposta_id,
+                'numero_uc' => $numeroUC,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 

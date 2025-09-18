@@ -596,6 +596,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('propostas/{proposta}/status', [DocumentController::class, 'buscarStatusDocumento']);
             //->middleware('permission:prospec.view');
         
+        Route::post('propostas/{proposta}/upload-termo-manual', [DocumentController::class, 'uploadTermoManual']);
+        
         Route::get('propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado'])
             ->name('documentos.pdf-assinado');
             //->middleware('permission:prospec.view');
