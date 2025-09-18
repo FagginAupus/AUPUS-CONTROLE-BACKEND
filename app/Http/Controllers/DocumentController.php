@@ -997,7 +997,13 @@ class DocumentController extends Controller
             
             if ($numeroUC) {
                 // Buscar PDF específico da UC
-                $pattern = "temp_termo_{$propostaId}_UC_{$numeroUC}_*.pdf";
+                if ($numeroUC) {
+                    // Buscar PDF específico da UC - novo padrão
+                    $pattern = "Procuracao e Termo de Adesao - * - UC {$numeroUC}.pdf";
+                } else {
+                    // Buscar PDF geral da proposta (compatibilidade)
+                    $pattern = "Procuracao e Termo de Adesao - *.pdf";
+                }
             } else {
                 // Buscar PDF geral da proposta (compatibilidade)
                 $pattern = "temp_termo_{$propostaId}_*.pdf";
@@ -1376,6 +1382,10 @@ class DocumentController extends Controller
             }
 
             $proposta = Proposta::findOrFail($request->proposta_id);
+            
+            // ✅ DEFINIR VARIÁVEIS QUE ESTAVAM FALTANDO
+            $nomeCliente = $request->dados['nomeCliente'] ?? $request->dados['nome_cliente'] ?? 'Cliente';
+            $numeroUC = $request->dados['numeroUC'] ?? $request->dados['numero_uc'] ?? 'UC';
 
             // Enviar para Autentique
             $resultado = $this->autentiqueService->criarDocumento([
@@ -1403,9 +1413,9 @@ class DocumentController extends Controller
             // Salvar no banco
             $documentoSalvo = Document::create([
                 'proposta_id' => $request->proposta_id,
-                'autentique_id' => $documento['id'], // ✅ Garantido que existe
+                'autentique_id' => $documento['id'],
                 'numero_uc' => $numeroUC,
-                'name' => "Termo de Adesão - {$proposta->numero_proposta}",
+                'name' => "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}",
                 'status' => Document::STATUS_PENDING,
                 'signer_email' => $request->signatario['email'],
                 'signer_name' => $request->signatario['nome'],
@@ -1506,7 +1516,9 @@ class DocumentController extends Controller
                 ], 404);
             }
 
-            $nomeArquivo = "termo_assinado_{$documento->id}.pdf";
+            $nomeCliente = $documento->document_data['nomeCliente'] ?? 'Cliente';
+            $numeroUC = $documento->numero_uc ?? 'UC';
+            $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
             $caminhoLocal = storage_path("app/public/termos_assinados/{$nomeArquivo}");
 
             // TENTATIVA 1: Baixar da Autentique (se tiver autentique_id)
@@ -1598,7 +1610,11 @@ class DocumentController extends Controller
             ]);
 
             $arquivo = $request->file('arquivo');
-            $nomeArquivo = "termo_assinado_{$documento->id}.pdf";
+            $nomeCliente = $documento->document_data['nomeCliente'] ?? 
+                        $documento->document_data['nome_cliente'] ?? 
+                        'Cliente';
+            $numeroUC = $documento->numero_uc ?? 'UC';
+            $nomeArquivo = "Assinado - Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
             $caminhoDestino = "termos_assinados/{$nomeArquivo}";
 
             // Salvar arquivo no storage público
@@ -1698,8 +1714,9 @@ class DocumentController extends Controller
                 ]);
             }
 
+            $nomeCliente = $request->nomeCliente;
             $numeroUC = $request->numeroUC;
-            $nomeArquivoTemp = "temp_termo_{$propostaId}_UC_{$numeroUC}_" . time() . ".pdf";
+            $nomeArquivoTemp = "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}.pdf";
             $caminhoTemp = storage_path("app/public/temp/{$nomeArquivoTemp}");
             
             if (!is_dir(dirname($caminhoTemp))) {
@@ -1742,12 +1759,12 @@ class DocumentController extends Controller
             $dirTemp = storage_path('app/public/temp');
             if (!is_dir($dirTemp)) return;
 
-            $arquivos = glob($dirTemp . '/temp_termo_*.pdf');
+            $arquivos = glob($dirTemp . '/Procuracao e Termo de Adesao - *.pdf');
             $agora = time();
             
             foreach ($arquivos as $arquivo) {
                 // Remove arquivos com mais de 1 hora
-                if (filemtime($arquivo) < $agora - 3600) {
+                if (filemtime($arquivo) < $agora - 172800) {
                     unlink($arquivo);
                     Log::info('🗑️ Arquivo temporário removido', ['arquivo' => basename($arquivo)]);
                 }
