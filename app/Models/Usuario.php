@@ -11,14 +11,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
+use Spatie\Permission\Traits\HasPermissions;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
-use Spatie\Permission\Traits\HasPermissions;
 
 class Usuario extends Authenticatable implements JWTSubject
 {
-    use HasFactory, HasUuids, SoftDeletes, Notifiable, HasRoles;
+    use HasFactory, HasUuids, SoftDeletes, Notifiable;
     use HasRoles, HasPermissions;
     protected $table = 'usuarios';
 
@@ -276,7 +276,6 @@ class Usuario extends Authenticatable implements JWTSubject
 
     public function can($permission, $guardName = null): bool
     {
-        // Usar o Spatie para verificar permissões
         return $this->hasPermissionTo($permission, $guardName ?? 'api');
     }
 

@@ -657,6 +657,9 @@ class UsuarioController extends Controller implements HasMiddleware
     // Métodos auxiliares para verificação de permissões
     private function canViewUser(Usuario $currentUser, Usuario $targetUser): bool
     {
+        // Usar permissão Spatie + lógica de negócio
+        if (!$currentUser->can('usuarios.view')) return false;
+        
         if ($currentUser->isAdmin()) return true;
         if ($currentUser->id === $targetUser->id) return true;
         
@@ -671,6 +674,10 @@ class UsuarioController extends Controller implements HasMiddleware
     private function canEditUser(Usuario $currentUser, Usuario $targetUser = null): bool
     {
         if (!$targetUser) return false;
+        
+        // Usar permissão Spatie + lógica de negócio
+        if (!$currentUser->can('usuarios.edit')) return false;
+        
         if ($currentUser->isAdmin()) return true;
         if ($currentUser->id === $targetUser->id) return true;
         
@@ -682,16 +689,23 @@ class UsuarioController extends Controller implements HasMiddleware
         if (!$targetUser) return false;
         if ($currentUser->id === $targetUser->id) return false; // Não pode deletar a si mesmo
         
+        // Usar permissão Spatie + lógica de negócio
+        if (!$currentUser->can('usuarios.delete')) return false;
+        
         return $currentUser->isAdmin() && $targetUser->role !== 'admin';
     }
 
     private function canActivateDeactivateUser(Usuario $currentUser, Usuario $targetUser): bool
     {
+        // Usar permissão edit como base
         return $this->canEditUser($currentUser, $targetUser);
     }
 
     private function canCreateRole(Usuario $currentUser, string $role): bool
     {
+        // Usar permissão Spatie + lógica de negócio  
+        if (!$currentUser->can('usuarios.create')) return false;
+        
         if ($currentUser->isAdmin()) return true;
         
         if ($currentUser->isConsultor()) {
@@ -714,18 +728,7 @@ class UsuarioController extends Controller implements HasMiddleware
         
         return $this->canCreateRole($currentUser, $newRole);
     }
-
-    private function getHierarchyLevelByRole(string $role): int
-    {
-        switch ($role) {
-            case 'admin': return 1;
-            case 'consultor': return 2;
-            case 'gerente': return 3;
-            case 'vendedor': return 4;
-            default: return 5;
-        }
-    }
-
+    
     public function invalidateTeamCache(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();

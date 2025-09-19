@@ -20,6 +20,12 @@ class UnidadeConsumidoraController extends Controller
     public function index(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();
+        if (!$currentUser->can('unidades.create')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para criar unidades'
+            ], 403);
+        }
 
         if (!$currentUser) {
             return response()->json([
@@ -352,6 +358,12 @@ class UnidadeConsumidoraController extends Controller
     public function update(Request $request, string $id): JsonResponse
     {
         $currentUser = JWTAuth::user();
+        if (!$currentUser->can('unidades.edit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para editar unidades'
+            ], 403);
+        }
 
         if (!$currentUser) {
             return response()->json([
@@ -461,6 +473,12 @@ class UnidadeConsumidoraController extends Controller
     public function destroy(string $id): JsonResponse
     {
         $currentUser = JWTAuth::user();
+        if (!$currentUser->can('unidades.delete')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para excluir unidades'
+            ], 403);
+        }
 
         if (!$currentUser) {
             return response()->json([

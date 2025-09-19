@@ -19,9 +19,15 @@ class ControleController extends Controller
      * ✅ LISTAR CONTROLES COM FILTROS E PAGINAÇÃO + DADOS EXPANDIDOS
      */
     public function index(Request $request): JsonResponse
-    {
+    {   
+        $currentUser = JWTAuth::user();
+        if (!$currentUser->can('controle.view')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para visualizar controles'
+            ], 403);
+        }
         try {
-            $currentUser = JWTAuth::user();
             
             if (!$currentUser) {
                 return response()->json([
@@ -766,8 +772,14 @@ class ControleController extends Controller
      * ✅ CRIAR NOVO CONTROLE
      */
     public function store(Request $request): JsonResponse
-    {
+    {   
         $currentUser = JWTAuth::user();
+        if (!$currentUser->can('controle.create')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para criar controles'
+            ], 403);
+        }
         
         if (!$currentUser) {
             return response()->json([
@@ -902,8 +914,15 @@ class ControleController extends Controller
      * ✅ ATUALIZAR CONTROLE (principalmente para UG e calibragem)
      */
     public function update(Request $request, string $id): JsonResponse
-    {
+    {   
         $currentUser = JWTAuth::user();
+        if (!$currentUser->can('controle.edit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para editar controles'
+            ], 403);
+        }
+        
         
         if (!$currentUser) {
             return response()->json([
@@ -1136,7 +1155,7 @@ class ControleController extends Controller
             }
 
             // Verificar permissões (apenas admin pode deletar)
-            if ($currentUser->role !== 'admin') {
+            if (!$currentUser->can('controle.delete') || !$currentUser->isAdmin()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Apenas administradores podem excluir controles'

@@ -413,8 +413,8 @@ Route::middleware('auth:api')->group(function () {
                         'statistics' => [
                             'propostas' => [
                                 'total' => \App\Models\Proposta::count(),
-                                'fechadas' => \App\Models\Proposta::where('status', 'Fechado')->count(),
-                                'aguardando' => \App\Models\Proposta::where('status', 'Aguardando')->count(),
+                                'fechadas' => \App\Models\Proposta::whereRaw("unidades_consumidoras::text LIKE '%\"status\":\"Fechada\"%'")->count(),
+                                'aguardando' => \App\Models\Proposta::whereRaw("unidades_consumidoras::text LIKE '%\"status\":\"Aguardando\"%'")->count(),
                             ],
                             'controle' => [
                                 'total' => \App\Models\ControleClube::count(),

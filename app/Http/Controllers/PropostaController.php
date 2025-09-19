@@ -38,7 +38,15 @@ class PropostaController extends Controller
             $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
             $params = [];
 
-            if ($currentUser->role !== 'admin') {
+            if (!$currentUser->can('propostas.view')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sem permissão para visualizar propostas'
+                ], 403);
+            }
+
+            // Admin vê todas, outros seguem hierarquia
+            if (!$currentUser->isAdmin()) {
                 if ($currentUser->role === 'consultor') {
                     // Consultor vê:
                     // 1. Propostas que ele criou (usuario_id)
@@ -443,15 +451,21 @@ class PropostaController extends Controller
      * Adicionar esta validação ANTES de inserir no banco
      */
     public function store(Request $request): JsonResponse
-    {
+    {   
+        $currentUser = JWTAuth::user();
+        if (!$currentUser->can('propostas.create')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para criar propostas'
+            ], 403);
+        }
         Log::info('=== DEBUG REQUEST CONSULTOR ===', [
             'consultor_id_request' => $request->consultor_id ?? 'não encontrado',
             'consultor_request' => $request->consultor ?? 'não encontrado',
             'all_request' => $request->all()
         ]);
         try {
-            $currentUser = JWTAuth::user();
-            
+
             if (!$currentUser) {
                 return response()->json([
                     'success' => false,
@@ -692,7 +706,14 @@ class PropostaController extends Controller
             $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
 
             // Se não for admin, verificar se é proposta do usuário
-            if ($currentUser->role !== 'admin') {
+            if (!$currentUser->can('propostas.view')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sem permissão para visualizar esta proposta'
+                ], 403);
+            }
+
+            if (!$currentUser->isAdmin()) {
                 if ($currentUser->role === 'consultor') {
                     $subordinados = $currentUser->getAllSubordinates();
                     $subordinadosIds = array_column($subordinados, 'id');
@@ -841,7 +862,14 @@ class PropostaController extends Controller
             $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.id = ? AND p.deleted_at IS NULL";
             $params = [$id];
 
-            if ($currentUser->role !== 'admin') {
+            if (!$currentUser->can('propostas.edit')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sem permissão para editar propostas'
+                ], 403);
+            }
+
+            if (!$currentUser->isAdmin()) {
                 $query .= " AND p.usuario_id = ?";
                 $params[] = $currentUser->id;
             }
@@ -2354,7 +2382,13 @@ class PropostaController extends Controller
      * ✅ EXCLUIR PROPOSTA (SOFT DELETE)
      */
     public function destroy(string $id): JsonResponse
-    {
+    {   
+        if (!$currentUser->can('propostas.delete')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para excluir propostas'
+            ], 403);
+        }
         try {
             $currentUser = JWTAuth::user();
             

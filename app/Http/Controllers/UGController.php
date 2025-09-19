@@ -65,6 +65,12 @@ class UGController extends Controller
     public function index(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();
+        if (!$currentUser->can('ugs.view')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para visualizar UGs'
+            ], 403);
+        }
 
         if (!$currentUser) {
             return response()->json([
@@ -168,6 +174,12 @@ class UGController extends Controller
     public function store(Request $request): JsonResponse
     {
         $currentUser = JWTAuth::user();
+        if (!$currentUser->can('ugs.create')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para criar UGs'
+            ], 403);
+        }
 
         if (!$currentUser) {
             return response()->json([
@@ -364,6 +376,12 @@ class UGController extends Controller
     public function update(Request $request, $id): JsonResponse
     {
         $currentUser = JWTAuth::user();
+        if (!$currentUser->can('ugs.edit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para editar UGs'
+            ], 403);
+        }
 
         if (!$currentUser) {
             return response()->json([
@@ -485,6 +503,12 @@ class UGController extends Controller
     public function destroy($id): JsonResponse
     {
         $currentUser = JWTAuth::user();
+                if (!$currentUser->can('ugs.delete')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sem permissão para excluir UGs'
+            ], 403);
+        }
 
         if (!$currentUser) {
             return response()->json([
