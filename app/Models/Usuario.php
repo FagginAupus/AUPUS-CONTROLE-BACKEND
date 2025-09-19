@@ -14,11 +14,12 @@ use Spatie\Permission\Traits\HasRoles;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
+use Spatie\Permission\Traits\HasPermissions;
 
 class Usuario extends Authenticatable implements JWTSubject
 {
     use HasFactory, HasUuids, SoftDeletes, Notifiable, HasRoles;
-
+    use HasRoles, HasPermissions;
     protected $table = 'usuarios';
 
     // ==========================================
@@ -37,9 +38,11 @@ class Usuario extends Authenticatable implements JWTSubject
     }
 
     protected $fillable = [
+        'id',
+        'concessionaria_atual_id',
+        'organizacao_atual_id',
         'nome',
         'email',
-        'senha',
         'telefone',
         'instagram',
         'status',
@@ -47,21 +50,24 @@ class Usuario extends Authenticatable implements JWTSubject
         'cidade',
         'estado',
         'endereco',
+        'pix',
         'cep',
-        'pix', // ADICIONADO CAMPO PIX
+        'senha',
+        'remember_token',
         'role',
         'manager_id',
-        'is_active',
-        'concessionaria_atual_id',
-        'organizacao_atual_id'
+        'is_active'
     ];
 
     protected $hidden = [
         'senha',
-        'remember_token'
+        'remember_token',
+        'deleted_at'
     ];
 
     protected $casts = [
+        'id' => 'string',
+        'telefone' => 'integer',
         'is_active' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -70,18 +76,11 @@ class Usuario extends Authenticatable implements JWTSubject
 
     protected $attributes = [
         'status' => 'Ativo',
-        'role' => 'vendedor',
         'is_active' => true
     ];
 
-    // ==========================================
-    // MUTATORS - IMPORTANTE: SEM AUTO-HASH
-    // ==========================================
-    
-    /**
-     * IMPORTANTE: Removido o hash automático aqui
-     * O hash será feito explicitamente nos controllers
-     */
+     protected $guard_name = 'api';
+
     public function setSenhaAttribute($value)
     {
         // Se já é um hash, não hashear novamente
@@ -159,7 +158,7 @@ class Usuario extends Authenticatable implements JWTSubject
     // SCOPES
     // ==========================================
 
-    public function scopeAtivos($query)
+     public function scopeAtivos($query)
     {
         return $query->where('is_active', true);
     }
@@ -227,7 +226,6 @@ class Usuario extends Authenticatable implements JWTSubject
             });
         }
         
-        // Vendedor só vê a si mesmo
         return $query->where('id', $usuario->id);
     }
 
@@ -237,27 +235,34 @@ class Usuario extends Authenticatable implements JWTSubject
 
     public function isAdmin(): bool
     {
-        return $this->role === 'admin';
+        // ✅ NOVA LÓGICA: Pode usar tanto role quanto Spatie
+        return $this->role === 'admin' || $this->hasRole('admin');
     }
 
     public function isConsultor(): bool
     {
-        return $this->role === 'consultor';
+        return $this->role === 'consultor' || $this->hasRole('consultor');
     }
 
     public function isGerente(): bool
     {
-        return $this->role === 'gerente';
+        return $this->role === 'gerente' || $this->hasRole('gerente');
     }
 
     public function isVendedor(): bool
     {
-        return $this->role === 'vendedor';
+        return $this->role === 'vendedor' || $this->hasRole('vendedor');
     }
 
-    public function hasRole($role): bool
+    public function hasRole($role, $guard = null): bool
     {
-        return $this->role === $role;
+        // Verificar no campo role primeiro (compatibilidade)
+        if ($this->role === $role) {
+            return true;
+        }
+        
+        // Verificar no Spatie (novo sistema)
+        return parent::hasRole($role, $guard);
     }
 
     public function canManage(Usuario $otherUser): bool
@@ -267,6 +272,12 @@ class Usuario extends Authenticatable implements JWTSubject
         if ($this->isGerente() && $otherUser->isVendedor()) return true;
         
         return false;
+    }
+
+    public function can($permission, $guardName = null): bool
+    {
+        // Usar o Spatie para verificar permissões
+        return $this->hasPermissionTo($permission, $guardName ?? 'api');
     }
 
     // ==========================================
@@ -393,6 +404,7 @@ class Usuario extends Authenticatable implements JWTSubject
         }
     }
 
+
     /**
      * Verifica se pode gerenciar outro usuário
      */
@@ -413,6 +425,12 @@ class Usuario extends Authenticatable implements JWTSubject
         return false;
     }
 
+    public function getStatusDisplayAttribute(): string
+    {
+        return $this->is_active ? 'Ativo' : 'Inativo';
+    }
+
+
     // ==========================================
     // JWT METHODS
     // ==========================================
@@ -427,7 +445,8 @@ class Usuario extends Authenticatable implements JWTSubject
         return [
             'role' => $this->role,
             'nome' => $this->nome,
-            'is_active' => $this->is_active
+            'is_active' => $this->is_active,
+            'permissions' => $this->getAllPermissions()->pluck('name')->toArray()
         ];
     }
 

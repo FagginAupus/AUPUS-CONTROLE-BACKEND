@@ -34,17 +34,20 @@ class CheckPermission
                 ], 403);
             }
 
-            // Admin sempre tem acesso
+            // ✅ NOVA LÓGICA SIMPLIFICADA - USAR SPATIE
+            
+            // Admin sempre tem acesso (compatibilidade)
             if ($user->isAdmin()) {
                 return $next($request);
             }
 
-            // Verificar permissões específicas
+            // Verificar permissões específicas usando Spatie
             if (!empty($permissions)) {
                 $hasPermission = false;
                 
                 foreach ($permissions as $permission) {
-                    if ($this->userHasPermission($user, $permission)) {
+                    // ✅ USAR MÉTODO DO SPATIE
+                    if ($user->can($permission)) {
                         $hasPermission = true;
                         break;
                     }
@@ -53,9 +56,10 @@ class CheckPermission
                 if (!$hasPermission) {
                     \Log::warning('Acesso negado por falta de permissão', [
                         'user_id' => $user->id,
-                        'permissions_required' => $permissions,
                         'user_role' => $user->role,
-                        'route' => $request->route()->getName(),
+                        'permissions_required' => $permissions,
+                        'user_permissions' => $user->getAllPermissions()->pluck('name')->toArray(),
+                        'route' => $request->route() ? $request->route()->getName() : 'unknown',
                         'ip' => $request->ip()
                     ]);
                     
@@ -82,55 +86,4 @@ class CheckPermission
         }
     }
 
-    /**
-     * Verificar se usuário tem permissão específica
-     */
-    private function userHasPermission($user, string $permission): bool
-    {
-        // Mapeamento de permissões por role baseado no sistema atual
-        $rolePermissions = [
-            'admin' => [
-                // Admin tem todas as permissões
-                'dashboard.view', 'usuarios.view', 'usuarios.create', 'usuarios.edit', 'usuarios.delete',
-                'propostas.view', 'propostas.create', 'propostas.edit', 'propostas.delete', 'propostas.change_status',
-                'unidades.view', 'unidades.create', 'unidades.edit', 'unidades.delete', 'unidades.convert_ug',
-                'prospec.view', 'prospec.create', 'prospec.edit', 'prospec.delete',
-                'controle.view', 'controle.create', 'controle.edit', 'controle.calibragem', 'controle.manage_ug',
-                'configuracoes.view', 'configuracoes.edit', 'relatorios.view', 'relatorios.export',
-                'notificacoes.view'
-            ],
-            
-            'consultor' => [
-                'dashboard.view', 'usuarios.view', 'usuarios.create', 'usuarios.edit',
-                'propostas.view', 'propostas.create', 'propostas.edit', 'propostas.change_status',
-                'unidades.view', 'unidades.create', 'unidades.edit', 'unidades.convert_ug',
-                'controle.view', 'controle.create', 'controle.edit', 'controle.calibragem', 'controle.manage_ug',
-                'prospec.view', 'prospec.create', 'prospec.edit',
-                'configuracoes.view', 'relatorios.view', 'relatorios.export',
-                'notificacoes.view'
-            ],
-            
-            'gerente' => [
-                'dashboard.view', 'usuarios.view', 'usuarios.create',
-                'propostas.view', 'propostas.create', 'propostas.edit',
-                'unidades.view', 'unidades.create', 'unidades.edit',
-                'prospec.view', 'prospec.create', 'prospec.edit',
-                'controle.view', 'relatorios.view',
-                'notificacoes.view'
-            ],
-            
-            'vendedor' => [
-                'dashboard.view', 'usuarios.view',
-                'propostas.view', 'propostas.create', 'propostas.edit',
-                'unidades.view', 'unidades.create', 'unidades.edit',
-                'prospec.view', 'prospec.create', 'prospec.edit',
-                'controle.view', 'relatorios.view',
-                'notificacoes.view'
-            ]
-        ];
-
-        $userPermissions = $rolePermissions[$user->role] ?? [];
-        
-        return in_array($permission, $userPermissions);
-    }
 }

@@ -1,0 +1,320 @@
+[90m= [39m[34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5606
+    [34mall[39m: [
+      [34;4mApp\Models\Usuario[39;24m {#6053
+        [34mid[39m: "[32m01K3NW8PB2YMH3CN8VJH8YKQJ0[39m",
+        [34mnome[39m: "[32mAilton Garcia Barbosa Filho[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#6073
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5653
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#6062
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3NW8PB2YMH3CN8VJH8YKQJ0[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6052
+        [34mid[39m: "[32m01K3NW8JBE1S7XFWP73GQGR3QR[39m",
+        [34mnome[39m: "[32mJuruna Mocó Lima[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5607
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5652
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5600
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3NW8JBE1S7XFWP73GQGR3QR[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6051
+        [34mid[39m: "[32m01K3NW8K4M6TXHNY3E485CQ57K[39m",
+        [34mnome[39m: "[32mPaulo César Tavares[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5610
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5651
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5598
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3NW8K4M6TXHNY3E485CQ57K[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6050
+        [34mid[39m: "[32m01K3NW8NHDVCYDG09AAWSHRZC8[39m",
+        [34mnome[39m: "[32mRubens consorte filho[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#6054
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5650
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5596
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3NW8NHDVCYDG09AAWSHRZC8[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6049
+        [34mid[39m: "[32m01K3W79FK7WP39PFH8GDGSRZPC[39m",
+        [34mnome[39m: "[32mDaniel Freitas Amorim[39m",
+        [34mrole[39m: "[32mgerente[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5608
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5654
+              [34mid[39m: [35m8[39m,
+              [34mname[39m: "[32mgerente[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#6063
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3W79FK7WP39PFH8GDGSRZPC[39m",
+                [34mrole_id[39m: [35m8[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6048
+        [34mid[39m: "[32m01K45GGSJ5D64FDA8NTVP8YCY4[39m",
+        [34mnome[39m: "[32mAna Luiza Vieira Prado Borges[39m",
+        [34mrole[39m: "[32mvendedor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5609
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5656
+              [34mid[39m: [35m9[39m,
+              [34mname[39m: "[32mvendedor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#6069
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K45GGSJ5D64FDA8NTVP8YCY4[39m",
+                [34mrole_id[39m: [35m9[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6047
+        [34mid[39m: "[32m01K3RZ36QCJG099FRW6A3PYRW6[39m",
+        [34mnome[39m: "[32mLuciana de Lima Santana[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5611
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5649
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5597
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3RZ36QCJG099FRW6A3PYRW6[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6046
+        [34mid[39m: "[32m01K45RAHVW5V8F1WYGZNG4MZA7[39m",
+        [34mnome[39m: "[32mAmanda Vieira Rocha[39m",
+        [34mrole[39m: "[32mvendedor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5612
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5655
+              [34mid[39m: [35m9[39m,
+              [34mname[39m: "[32mvendedor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#6068
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K45RAHVW5V8F1WYGZNG4MZA7[39m",
+                [34mrole_id[39m: [35m9[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6045
+        [34mid[39m: "[32m01K2CPBYE07B3HWW0CZHHB3ZCR[39m",
+        [34mnome[39m: "[32mAdministrador[39m",
+        [34mrole[39m: "[32madmin[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5613
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5640
+              [34mid[39m: [35m2[39m,
+              [34mname[39m: "[32madmin[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-07-28 17:23:16[39m",
+              [34mupdated_at[39m: "[32m2025-07-28 17:23:16[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5641
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K2CPBYE07B3HWW0CZHHB3ZCR[39m",
+                [34mrole_id[39m: [35m2[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6044
+        [34mid[39m: "[32m01K3NW8KY7MGR6TDP2XQGJ09AC[39m",
+        [34mnome[39m: "[32mThales Porfirio Norinho[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5614
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5648
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5595
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3NW8KY7MGR6TDP2XQGJ09AC[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6043
+        [34mid[39m: "[32m01K48D109PCJH6W96D00PDFS2T[39m",
+        [34mnome[39m: "[32mFiuza Consultoria[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5615
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5647
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5592
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K48D109PCJH6W96D00PDFS2T[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6042
+        [34mid[39m: "[32m01K3NW8MQVSDG2FEBH996FYMHC[39m",
+        [34mnome[39m: "[32mPablo Cardoso Ribeiro[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5616
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5646
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5593
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3NW8MQVSDG2FEBH996FYMHC[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6041
+        [34mid[39m: "[32m01K3NW8Q4M6NDEF9XX73TMFGC7[39m",
+        [34mnome[39m: "[32mPatrick Morais Rocha[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5617
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5645
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5591
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K3NW8Q4M6NDEF9XX73TMFGC7[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6040
+        [34mid[39m: "[32m01K4MVV86M2QBN5CYVTGM6FM8X[39m",
+        [34mnome[39m: "[32mAlexia Rodrigues Resplandes[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5618
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5644
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5594
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K4MVV86M2QBN5CYVTGM6FM8X[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+      [34;4mApp\Models\Usuario[39;24m {#6039
+        [34mid[39m: "[32m01K47TKZNJFH63EV8ST36J162T[39m",
+        [34mnome[39m: "[32mArthur Faggin Barros[39m",
+        [34mrole[39m: "[32mconsultor[39m",
+        [34mroles[39m: [34;4mIlluminate\Database\Eloquent\Collection[39;24m {#5619
+          [34mall[39m: [
+            [34;4mSpatie\Permission\Models\Role[39;24m {#5643
+              [34mid[39m: [35m7[39m,
+              [34mname[39m: "[32mconsultor[39m",
+              [34mguard_name[39m: "[32mapi[39m",
+              [34mcreated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mupdated_at[39m: "[32m2025-09-19 14:56:02[39m",
+              [34mpivot[39m: [34;4mIlluminate\Database\Eloquent\Relations\MorphPivot[39;24m {#5590
+                [34mmodel_type[39m: "[32mApp\Models\Usuario[39m",
+                [34mmodel_id[39m: "[32m01K47TKZNJFH63EV8ST36J162T[39m",
+                [34mrole_id[39m: [35m7[39m,
+              },
+            },
+          ],
+        },
+      },
+    ],
+  }
+
