@@ -312,6 +312,8 @@ Route::middleware('auth:api')->group(function () {
         Route::patch('{id}/remover-ug', [ControleController::class, 'removerUg']); 
         Route::get('{id}/uc-detalhes', [ControleController::class, 'getUCDetalhes']);
         Route::put('{id}/uc-detalhes', [ControleController::class, 'updateUCDetalhes']);;
+
+        Route::get('buscar-por-uc/{numeroUC}', [ControleController::class, 'buscarPorUC']);
         
         // Rotas genéricas por último
         Route::get('{id}', [ControleController::class, 'show']);

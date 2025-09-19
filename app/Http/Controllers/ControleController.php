@@ -1318,6 +1318,102 @@ class ControleController extends Controller
         return floatval($numeroStr) ?: 0.0;
     }
 
+    public function buscarPorUC(string $numeroUC): JsonResponse
+    {
+        try {
+            $currentUser = JWTAuth::user();
+            
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            Log::info('Buscando controle por número da UC', [
+                'numero_uc' => $numeroUC,
+                'user_id' => $currentUser->id
+            ]);
+
+            // Buscar controle pela UC com data_entrada_controle
+            $controle = DB::selectOne("
+                SELECT 
+                    cc.id,
+                    cc.data_entrada_controle,
+                    cc.proposta_id,
+                    cc.uc_id,
+                    uc.numero_unidade,
+                    uc.apelido,
+                    p.numero_proposta,
+                    p.nome_cliente
+                FROM controle_clube cc
+                JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                LEFT JOIN propostas p ON cc.proposta_id = p.id
+                WHERE uc.numero_unidade = ? 
+                AND cc.deleted_at IS NULL
+                ORDER BY cc.data_entrada_controle DESC
+                LIMIT 1
+            ", [$numeroUC]);
+
+            if (!$controle) {
+                Log::info('Nenhum controle encontrado para a UC', [
+                    'numero_uc' => $numeroUC
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum controle encontrado para esta UC',
+                    'data' => null
+                ], 404);
+            }
+
+            // Verificar permissão do usuário
+            if ($currentUser->role === 'vendedor') {
+                // Para vendedores, verificar se podem ver esta proposta
+                $proposta = DB::selectOne("SELECT usuario_id FROM propostas WHERE id = ?", [$controle->proposta_id]);
+                
+                if ($proposta && $proposta->usuario_id !== $currentUser->id) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Sem permissão para ver este controle'
+                    ], 403);
+                }
+            }
+
+            Log::info('Controle encontrado para UC', [
+                'numero_uc' => $numeroUC,
+                'controle_id' => $controle->id,
+                'data_entrada_controle' => $controle->data_entrada_controle
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'id' => $controle->id,
+                    'data_entrada_controle' => $controle->data_entrada_controle,
+                    'proposta_id' => $controle->proposta_id,
+                    'uc_id' => $controle->uc_id,
+                    'numero_unidade' => $controle->numero_unidade,
+                    'apelido' => $controle->apelido,
+                    'numero_proposta' => $controle->numero_proposta,
+                    'nome_cliente' => $controle->nome_cliente
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao buscar controle por UC', [
+                'numero_uc' => $numeroUC,
+                'user_id' => $currentUser->id ?? 'N/A',
+                'error' => $e->getMessage(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor: ' . $e->getMessage()
+            ], 500);
+        }
+    }
     /**
      * ✅ ATUALIZAR DADOS DA UC (CONSUMO MÉDIO E CALIBRAGEM)
      */
