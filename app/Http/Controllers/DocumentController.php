@@ -136,7 +136,21 @@ class DocumentController extends Controller
                 'nome_documento' => $dadosDocumento['nome_documento']
             ]);
 
-            $documentoAutentique = $this->autentiqueService->enviarDocumento($pdfContent, $dadosDocumento);
+            // Preparar signatários
+            $signatario = [
+                'email' => $dadosDocumento['emailRepresentante'] ?? $dadosDocumento['email'],
+                'action' => 'SIGN',
+                'name' => $dadosDocumento['nomeRepresentante'] ?? $dadosDocumento['nome'] ?? $nomeCliente
+            ];
+
+            $signatarios = [$signatario];
+
+            $documentoAutentique = $this->autentiqueService->createDocumentFromProposta(
+                $dadosDocumento,
+                $signatarios,
+                $pdfContent,
+                env('AUTENTIQUE_SANDBOX', false)
+            );
 
             // ✅ CORREÇÃO: Salvar documento local COM número da UC
             $documentoLocal = Document::create([
@@ -1588,7 +1602,7 @@ class DocumentController extends Controller
                     // ✅ CANCELAR NA AUTENTIQUE (se for documento da Autentique)
                     if (!$documento->uploaded_manually && $documento->autentique_id) {
                         try {
-                            $this->autentiqueService->cancelarDocumento($documento->autentique_id);
+                            $this->autentiqueService->cancelDocument($documento->autentique_id);
                             Log::info('✅ Documento cancelado na Autentique', [
                                 'autentique_id' => $documento->autentique_id
                             ]);
@@ -1800,7 +1814,7 @@ class DocumentController extends Controller
                 else if ($documento->autentique_id) {
                     // Tentar baixar da Autentique primeiro
                     try {
-                        $pdfAssinado = $this->autentiqueService->baixarDocumentoAssinado($documento->autentique_id);
+                        $pdfAssinado = $this->autentiqueService->downloadSignedDocument($documento->autentique_id);
                         
                         if ($pdfAssinado) {
                             $dadosDocumento = $documento->document_data;
@@ -2457,8 +2471,8 @@ class DocumentController extends Controller
 
             // OPÇÃO 3: Baixar da Autentique (se disponível)
             try {
-                if (method_exists($this->autentiqueService, 'downloadDocument')) {
-                    $pdfContent = $this->autentiqueService->downloadDocument($documento->autentique_id);
+                if (method_exists($this->autentiqueService, 'downloadSignedDocument')) {
+                    $pdfContent = $this->autentiqueService->downloadSignedDocument($documento->autentique_id);
                     
                     if ($pdfContent) {
                         Log::info('✅ PDF baixado da Autentique');
