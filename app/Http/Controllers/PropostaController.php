@@ -1666,7 +1666,6 @@ class PropostaController extends Controller
             'proposta_id' => $id,
             'timestamp' => now(),
             'user_id' => auth()->id(),
-            'request_size' => strlen(serialize($request->all())),
             'memory_usage' => memory_get_usage(true) . ' bytes',
             'request_data' => [
                 'numeroUC' => $request->input('numeroUC'),
