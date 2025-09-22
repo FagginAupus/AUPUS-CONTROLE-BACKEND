@@ -1661,21 +1661,27 @@ class PropostaController extends Controller
     
     public function uploadDocumento(Request $request, $id)
     {
-        try {
-            // ✅ LOG INICIAL PARA DEBUG
-            Log::info('Iniciando upload de documento', [
-                'proposta_id' => $id,
-                'request_data' => [
-                    'numeroUC' => $request->input('numeroUC'),
-                    'tipoDocumento' => $request->input('tipoDocumento'),
-                    'arquivo_nome' => $request->file('arquivo')?->getClientOriginalName(),
-                    'arquivo_tamanho' => $request->file('arquivo')?->getSize(),
-                    'arquivo_tipo' => $request->file('arquivo')?->getMimeType(),
-                ],
-                'user_id' => auth()->id(),
-                'user_nome' => auth()->user()->nome ?? 'Sistema'
-            ]);
+        // ✅ LOG INICIAL DETALHADO
+        Log::info('=== INÍCIO UPLOAD DOCUMENTO ===', [
+            'proposta_id' => $id,
+            'timestamp' => now(),
+            'user_id' => auth()->id(),
+            'request_size' => strlen(serialize($request->all())),
+            'memory_usage' => memory_get_usage(true) . ' bytes',
+            'request_data' => [
+                'numeroUC' => $request->input('numeroUC'),
+                'tipoDocumento' => $request->input('tipoDocumento'),
+            ],
+            'arquivo_info' => $request->file('arquivo') ? [
+                'nome' => $request->file('arquivo')->getClientOriginalName(),
+                'tamanho' => $request->file('arquivo')->getSize(),
+                'mime_type' => $request->file('arquivo')->getMimeType(),
+                'is_valid' => $request->file('arquivo')->isValid(),
+                'error_code' => $request->file('arquivo')->getError()
+            ] : 'Nenhum arquivo'
+        ]);
 
+        try {
             // ✅ VERIFICAR SE A PROPOSTA EXISTE
             $proposta = DB::selectOne(
                 "SELECT id, numero_proposta, documentacao FROM propostas WHERE id = ? AND deleted_at IS NULL", 
@@ -1683,25 +1689,41 @@ class PropostaController extends Controller
             );
             
             if (!$proposta) {
-                Log::error('Proposta não encontrada para upload', ['proposta_id' => $id]);
+                Log::error('Proposta não encontrada', ['proposta_id' => $id]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Proposta não encontrada'
+                    'message' => 'Proposta não encontrada',
+                    'debug_info' => [
+                        'proposta_id' => $id,
+                        'timestamp' => now()
+                    ]
                 ], 404);
             }
+
+            Log::info('Proposta encontrada', [
+                'proposta_id' => $id,
+                'numero_proposta' => $proposta->numero_proposta
+            ]);
 
             // ✅ VALIDAR ARQUIVO
             $arquivo = $request->file('arquivo');
             if (!$arquivo || !$arquivo->isValid()) {
-                Log::error('Arquivo inválido ou não enviado', [
+                Log::error('Arquivo inválido', [
                     'proposta_id' => $id,
-                    'arquivo_presente' => !!$arquivo,
-                    'arquivo_valido' => $arquivo?->isValid()
+                    'arquivo_presente' => !is_null($arquivo),
+                    'arquivo_valido' => $arquivo?->isValid(),
+                    'erro_upload' => $arquivo?->getError()
                 ]);
                 
                 return response()->json([
                     'success' => false,
-                    'message' => 'Nenhum arquivo válido foi enviado'
+                    'message' => 'Nenhum arquivo válido foi enviado',
+                    'debug_info' => [
+                        'arquivo_presente' => !is_null($arquivo),
+                        'arquivo_valido' => $arquivo?->isValid(),
+                        'erro_upload' => $arquivo?->getError(),
+                        'timestamp' => now()
+                    ]
                 ], 400);
             }
 
@@ -1713,7 +1735,11 @@ class PropostaController extends Controller
                 Log::error('Tipo de documento não informado', ['proposta_id' => $id]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Tipo de documento é obrigatório'
+                    'message' => 'Tipo de documento é obrigatório',
+                    'debug_info' => [
+                        'proposta_id' => $id,
+                        'timestamp' => now()
+                    ]
                 ], 400);
             }
 
@@ -1721,35 +1747,76 @@ class PropostaController extends Controller
                 Log::error('Número UC não informado para fatura', ['proposta_id' => $id]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Número da UC é obrigatório para faturas'
+                    'message' => 'Número da UC é obrigatório para faturas',
+                    'debug_info' => [
+                        'proposta_id' => $id,
+                        'tipo_documento' => $tipoDocumento,
+                        'timestamp' => now()
+                    ]
                 ], 400);
             }
 
-            // ✅ VALIDAR TIPO E TAMANHO DO ARQUIVO
+            // ✅ VALIDAÇÕES DE ARQUIVO (como nas correções anteriores)
             $extensao = strtolower($arquivo->getClientOriginalExtension());
+            $mimeType = $arquivo->getMimeType();
             $tamanhoMaximo = 10 * 1024 * 1024; // 10MB
             
-            if (!in_array($extensao, ['pdf', 'jpg', 'jpeg', 'png'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Apenas arquivos PDF, JPG e PNG são permitidos'
-                ], 400);
-            }
+            $extensoesPermitidas = ['pdf', 'jpg', 'jpeg', 'png'];
+            $mimeTypesPermitidos = [
+                'application/pdf',
+                'image/jpeg',
+                'image/jpg',
+                'image/pjpeg',
+                'image/png',
+                'image/x-png'
+            ];
             
-            if ($arquivo->getSize() > $tamanhoMaximo) {
+            if (!in_array($extensao, $extensoesPermitidas)) {
+                Log::error('Extensão não permitida', [
+                    'extensao' => $extensao,
+                    'permitidas' => $extensoesPermitidas
+                ]);
+                
                 return response()->json([
                     'success' => false,
-                    'message' => 'Arquivo muito grande. Tamanho máximo: 10MB'
+                    'message' => "Extensão não permitida: .{$extensao}",
+                    'debug_info' => [
+                        'extensao' => $extensao,
+                        'permitidas' => $extensoesPermitidas,
+                        'timestamp' => now()
+                    ]
                 ], 400);
             }
 
-            // ✅ GERAR NOME ÚNICO DO ARQUIVO
+            if ($arquivo->getSize() > $tamanhoMaximo) {
+                Log::error('Arquivo muito grande', [
+                    'tamanho_bytes' => $arquivo->getSize(),
+                    'limite_bytes' => $tamanhoMaximo
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Arquivo muito grande. Tamanho máximo: 10MB',
+                    'debug_info' => [
+                        'tamanho_mb' => round($arquivo->getSize() / 1024 / 1024, 2),
+                        'limite_mb' => 10,
+                        'timestamp' => now()
+                    ]
+                ], 400);
+            }
+
+            Log::info('Validações passaram', [
+                'extensao' => $extensao,
+                'mime_type' => $mimeType,
+                'tamanho_mb' => round($arquivo->getSize() / 1024 / 1024, 2)
+            ]);
+
+            // ✅ GERAR NOME E SALVAR ARQUIVO
             $timestamp = time();
             $ano = date('Y');
             $mes = date('m');
             $numeroProposta = $proposta->numero_proposta;
             
-            // Determinar diretório e nome baseado no tipo
             if ($tipoDocumento === 'faturaUC') {
                 $nomeArquivo = "{$ano}_{$mes}_{$numeroProposta}_{$numeroUC}_fatura_{$timestamp}.{$extensao}";
                 $diretorio = 'propostas/faturas';
@@ -1758,69 +1825,70 @@ class PropostaController extends Controller
                 $diretorio = 'propostas/documentos';
             }
 
-            Log::info('Preparando para salvar arquivo', [
+            Log::info('Tentando salvar arquivo', [
                 'nome_arquivo' => $nomeArquivo,
                 'diretorio' => $diretorio,
-                'disco' => 'public'
+                'tamanho_original' => $arquivo->getSize()
             ]);
 
-            // ✅ GARANTIR QUE O DIRETÓRIO EXISTE
+            // ✅ CRIAR DIRETÓRIO SE NÃO EXISTIR
             $caminhoCompleto = storage_path("app/public/{$diretorio}");
-            if (!is_dir($caminhoCompleto)) {
-                Log::info('Criando diretório', ['caminho' => $caminhoCompleto]);
-                if (!mkdir($caminhoCompleto, 0755, true)) {
-                    throw new \Exception("Não foi possível criar o diretório: {$caminhoCompleto}");
+            if (!file_exists($caminhoCompleto)) {
+                mkdir($caminhoCompleto, 0755, true);
+                Log::info('Diretório criado', ['path' => $caminhoCompleto]);
+            }
+
+            // ✅ SALVAR ARQUIVO COM VERIFICAÇÃO DETALHADA
+            try {
+                $caminhoArquivo = $arquivo->storeAs($diretorio, $nomeArquivo, 'public');
+                
+                if (!$caminhoArquivo) {
+                    throw new \Exception('storeAs retornou false');
                 }
-            }
 
-            // ✅ SALVAR O ARQUIVO
-            $caminhoArquivo = $arquivo->storeAs($diretorio, $nomeArquivo, 'public');
+                // Verificar se arquivo foi realmente salvo
+                $caminhoFisicoCompleto = Storage::disk('public')->path($caminhoArquivo);
+                if (!file_exists($caminhoFisicoCompleto)) {
+                    throw new \Exception('Arquivo não encontrado após salvamento');
+                }
 
-            if (!$caminhoArquivo) {
-                throw new \Exception('Falha ao salvar arquivo no storage');
-            }
-
-            // ✅ VERIFICAR SE O ARQUIVO FOI REALMENTE SALVO
-            $caminhoFisicoCompleto = Storage::disk('public')->path($caminhoArquivo);
-            if (!file_exists($caminhoFisicoCompleto)) {
-                throw new \Exception('Arquivo não encontrado após salvamento');
-            }
-
-            Log::info('Arquivo salvo com sucesso', [
-                'proposta_id' => $id,
-                'nome_arquivo' => $nomeArquivo,
-                'caminho_relativo' => $caminhoArquivo,
-                'caminho_absoluto' => $caminhoFisicoCompleto,
-                'tamanho_final' => filesize($caminhoFisicoCompleto),
-                'disco_usado' => 'public',
-                'diretorio' => $diretorio
-            ]);
-
-            // ✅ ATUALIZAR DOCUMENTAÇÃO JSON NA PROPOSTA
-            $resultado = $this->atualizarDocumentacaoProposta($id, $numeroUC, $tipoDocumento, $nomeArquivo);
-            
-            if (!$resultado) {
-                Log::error('Falha ao atualizar documentação da proposta', [
-                    'proposta_id' => $id,
-                    'arquivo_salvo' => $nomeArquivo
+                $tamanhoSalvo = filesize($caminhoFisicoCompleto);
+                
+                Log::info('Arquivo salvo com sucesso', [
+                    'caminho_salvo' => $caminhoArquivo,
+                    'caminho_fisico' => $caminhoFisicoCompleto,
+                    'tamanho_original' => $arquivo->getSize(),
+                    'tamanho_salvo' => $tamanhoSalvo,
+                    'url_publica' => Storage::disk('public')->url($caminhoArquivo)
                 ]);
-                // Não falhar aqui, arquivo já foi salvo
+
+            } catch (\Exception $saveError) {
+                Log::error('Erro crítico ao salvar arquivo', [
+                    'error' => $saveError->getMessage(),
+                    'diretorio' => $diretorio,
+                    'nome_arquivo' => $nomeArquivo,
+                    'espaco_livre' => disk_free_space($caminhoCompleto)
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erro ao salvar arquivo: ' . $saveError->getMessage(),
+                    'debug_info' => [
+                        'erro_salvamento' => $saveError->getMessage(),
+                        'timestamp' => now()
+                    ]
+                ], 500);
             }
 
-            // ✅ LOG FINAL
-            Log::info('Upload de documento concluído com sucesso', [
-                'proposta_id' => $id,
-                'numero_proposta' => $proposta->numero_proposta,
-                'numero_uc' => $numeroUC,
-                'tipo_documento' => $tipoDocumento,
-                'nome_arquivo' => $nomeArquivo,
-                'tamanho' => $arquivo->getSize(),
-                'usuario' => auth()->user()->nome ?? 'Sistema',
-                'caminho_final' => $caminhoFisicoCompleto
-            ]);
+            // ✅ ATUALIZAR DOCUMENTAÇÃO
+            $atualizouDocumentacao = $this->atualizarDocumentacaoProposta($id, $numeroUC, $tipoDocumento, $nomeArquivo);
+            
+            if (!$atualizouDocumentacao) {
+                Log::warning('Falha ao atualizar documentação, mas arquivo foi salvo');
+            }
 
-            // ✅ RESPOSTA DE SUCESSO
-            return response()->json([
+            // ✅ RESPOSTA DE SUCESSO COM LOGS DETALHADOS
+            $responseData = [
                 'success' => true,
                 'nomeArquivo' => $nomeArquivo,
                 'caminhoCompleto' => $caminhoArquivo,
@@ -1830,31 +1898,82 @@ class PropostaController extends Controller
                 'tamanho' => filesize($caminhoFisicoCompleto),
                 'message' => $tipoDocumento === 'faturaUC' 
                     ? 'Fatura da UC enviada com sucesso' 
-                    : 'Documento enviado com sucesso'
+                    : 'Documento enviado com sucesso',
+                'debug_info' => [
+                    'proposta_id' => $id,
+                    'numero_proposta' => $proposta->numero_proposta,
+                    'documentacao_atualizada' => $atualizouDocumentacao,
+                    'timestamp' => now()
+                ]
+            ];
+
+            Log::info('=== SUCESSO UPLOAD DOCUMENTO ===', [
+                'proposta_id' => $id,
+                'nome_arquivo' => $nomeArquivo,
+                'tamanho_final' => filesize($caminhoFisicoCompleto),
+                'response_keys' => array_keys($responseData),
+                'memory_final' => memory_get_usage(true) . ' bytes'
             ]);
 
+            // ✅ GARANTIR QUE A RESPOSTA SEJA JSON VÁLIDA
+            $response = response()->json($responseData, 200);
+            
+            // Log da resposta antes de enviá-la
+            Log::info('Resposta JSON gerada', [
+                'response_size' => strlen(json_encode($responseData)),
+                'json_valid' => json_last_error() === JSON_ERROR_NONE,
+                'json_error' => json_last_error_msg()
+            ]);
+
+            return $response;
+
         } catch (\Exception $e) {
-            Log::error('Erro crítico no upload de documento', [
+            Log::error('=== ERRO CRÍTICO UPLOAD DOCUMENTO ===', [
                 'error' => $e->getMessage(),
                 'proposta_id' => $id,
                 'tipo_documento' => $request->input('tipoDocumento') ?? 'N/A',
                 'numero_uc' => $request->input('numeroUC') ?? 'N/A',
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
                 'trace' => $e->getTraceAsString(),
-                'request_data' => $request->all(),
-                'arquivo_info' => $request->file('arquivo') ? [
-                    'nome' => $request->file('arquivo')->getClientOriginalName(),
-                    'tamanho' => $request->file('arquivo')->getSize(),
-                    'tipo' => $request->file('arquivo')->getMimeType(),
-                    'valido' => $request->file('arquivo')->isValid()
-                ] : 'Nenhum arquivo'
+                'memory_usage' => memory_get_usage(true) . ' bytes',
+                'timestamp' => now()
             ]);
 
-            return response()->json([
+            // ✅ RESPOSTA DE ERRO ESTRUTURADA
+            $errorResponse = [
                 'success' => false,
                 'message' => 'Erro interno no upload: ' . $e->getMessage(),
-                'error_type' => 'upload_error'
-            ], 500);
+                'error_type' => 'upload_error',
+                'debug_info' => [
+                    'proposta_id' => $id,
+                    'error_line' => $e->getLine(),
+                    'error_file' => basename($e->getFile()),
+                    'timestamp' => now()
+                ]
+            ];
+
+            return response()->json($errorResponse, 500);
         }
+    }
+
+    /**
+     * ✅ NOVO MÉTODO AUXILIAR: Converter código de erro de upload para mensagem
+     */
+    private function getUploadErrorMessage($errorCode)
+    {
+        $errors = [
+            UPLOAD_ERR_OK => 'Sem erro',
+            UPLOAD_ERR_INI_SIZE => 'Arquivo maior que upload_max_filesize no php.ini',
+            UPLOAD_ERR_FORM_SIZE => 'Arquivo maior que MAX_FILE_SIZE no formulário',
+            UPLOAD_ERR_PARTIAL => 'Upload foi interrompido',
+            UPLOAD_ERR_NO_FILE => 'Nenhum arquivo foi enviado',
+            UPLOAD_ERR_NO_TMP_DIR => 'Pasta temporária não encontrada',
+            UPLOAD_ERR_CANT_WRITE => 'Falha ao escrever arquivo no disco',
+            UPLOAD_ERR_EXTENSION => 'Extensão do PHP bloqueou o upload'
+        ];
+
+        return $errors[$errorCode] ?? "Erro desconhecido: {$errorCode}";
     }
 
     /**

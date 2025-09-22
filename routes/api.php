@@ -10,6 +10,7 @@ use App\Http\Controllers\ControleController;
 use App\Http\Controllers\ConfiguracaoController;
 use App\Http\Controllers\NotificacaoController;
 use App\Http\Controllers\DocumentController;
+use Tymon\JWTAuth\Facades\JWTAuth;
 
 /*
 |--------------------------------------------------------------------------
