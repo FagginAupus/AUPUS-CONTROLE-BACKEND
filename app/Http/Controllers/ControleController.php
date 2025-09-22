@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
@@ -1234,6 +1235,7 @@ class ControleController extends Controller
                 'status_troca' => $controle->status_troca,
                 'data_titularidade' => $controle->data_titularidade,
                 'observacoes' => $controle->observacoes,
+                'documentacao_troca_titularidade' => $controle->documentacao_troca_titularidade,
                 
                 // ✅ DESCONTOS CORRETOS
                 // Valores ORIGINAIS da proposta (imutáveis)
@@ -1468,6 +1470,17 @@ class ControleController extends Controller
                 $updateParams[] = $request->observacoes;
             }
 
+            // ✅ 5. Documentação de Troca de Titularidade
+            if ($request->has('documentacao_troca_titularidade')) {
+                $updateFields[] = 'documentacao_troca_titularidade = ?';
+                $updateParams[] = $request->documentacao_troca_titularidade;
+
+                Log::info('Atualizando documentação', [
+                    'controle_id' => $controleId,
+                    'arquivo' => $request->documentacao_troca_titularidade
+                ]);
+            }
+
             // ✅ EXECUTAR atualizações
             if (!empty($updateFields)) {
                 $sql = "UPDATE controle_clube SET " . implode(', ', $updateFields) . ", updated_at = NOW() WHERE id = ?";
@@ -1527,6 +1540,197 @@ class ControleController extends Controller
         }
         
         return $valor;
+    }
+
+    /**
+     * ✅ UPLOAD DE DOCUMENTAÇÃO PARA UC
+     */
+    public function uploadDocumento(Request $request): JsonResponse
+    {
+        try {
+            Log::info('Upload de documento iniciado', [
+                'request_data' => $request->all(),
+                'files' => $request->files->all()
+            ]);
+
+            $validator = Validator::make($request->all(), [
+                'documento' => 'required|file|mimes:pdf,jpeg,jpg,png|max:10240', // 10MB
+                'controle_id' => 'required|exists:controle_clube,id',
+                'tipo' => 'required|string'
+            ]);
+
+            if ($validator->fails()) {
+                Log::error('Validação falhou no upload', [
+                    'errors' => $validator->errors()
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados inválidos',
+                    'errors' => $validator->errors()
+                ], 400);
+            }
+
+            $file = $request->file('documento');
+            $controleId = $request->controle_id;
+            $tipo = $request->tipo;
+
+            // Garantir que o diretório existe usando Storage facade
+            if (!Storage::disk('public')->exists('controle')) {
+                Storage::disk('public')->makeDirectory('controle');
+            }
+
+            // Gerar nome único para o arquivo
+            $extension = $file->getClientOriginalExtension();
+            $nomeArquivo = $controleId . '_' . $tipo . '_' . time() . '.' . $extension;
+
+            // Salvar arquivo usando Storage facade
+            $path = $file->storeAs('controle', $nomeArquivo, 'public');
+
+            if (!$path) {
+                Log::error('Falha ao salvar arquivo', [
+                    'controle_id' => $controleId,
+                    'nome_arquivo' => $nomeArquivo,
+                    'directory_exists' => Storage::disk('public')->exists('controle'),
+                    'directory_writable' => is_writable(storage_path('app/public/controle'))
+                ]);
+                throw new \Exception('Erro ao salvar arquivo');
+            }
+
+            // Atualizar banco de dados
+            $controle = ControleClube::findOrFail($controleId);
+
+            // Remover arquivo anterior se existir
+            if ($controle->documentacao_troca_titularidade) {
+                Storage::disk('public')->delete('controle/' . $controle->documentacao_troca_titularidade);
+            }
+
+            $controle->documentacao_troca_titularidade = $nomeArquivo;
+            $controle->save();
+
+            Log::info('Documento de controle salvo', [
+                'controle_id' => $controleId,
+                'arquivo' => $nomeArquivo,
+                'tipo' => $tipo
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Documento enviado com sucesso',
+                'nome_arquivo' => $nomeArquivo
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro no upload de documento do controle', [
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->all()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ VISUALIZAR DOCUMENTO DE CONTROLE
+     */
+    public function visualizarDocumento(string $nomeArquivo)
+    {
+        try {
+            Log::info('Tentativa de visualizar documento', [
+                'arquivo' => $nomeArquivo,
+                'path' => storage_path('app/public/controle/' . $nomeArquivo)
+            ]);
+
+            $caminhoArquivo = storage_path('app/public/controle/' . $nomeArquivo);
+
+            if (!file_exists($caminhoArquivo)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Documento não encontrado'
+                ], 404);
+            }
+
+            // Determinar tipo de conteúdo
+            $extension = pathinfo($caminhoArquivo, PATHINFO_EXTENSION);
+            $contentType = match(strtolower($extension)) {
+                'pdf' => 'application/pdf',
+                'jpg', 'jpeg' => 'image/jpeg',
+                'png' => 'image/png',
+                default => 'application/octet-stream'
+            };
+
+            return response()->file($caminhoArquivo, [
+                'Content-Type' => $contentType,
+                'Content-Disposition' => 'inline; filename="' . $nomeArquivo . '"'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao visualizar documento do controle', [
+                'arquivo' => $nomeArquivo,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function removerDocumento(string $id): JsonResponse
+    {
+        try {
+            Log::info('Iniciando remoção de documento', [
+                'controle_id' => $id
+            ]);
+
+            $controle = ControleClube::findOrFail($id);
+
+            if (!$controle->documentacao_troca_titularidade) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum documento encontrado para remover'
+                ], 404);
+            }
+
+            $nomeArquivo = $controle->documentacao_troca_titularidade;
+
+            // Remover arquivo físico do storage
+            $arquivoRemovido = Storage::disk('public')->delete('controle/' . $nomeArquivo);
+
+            // Atualizar banco de dados
+            $controle->documentacao_troca_titularidade = null;
+            $controle->save();
+
+            Log::info('Documento removido com sucesso', [
+                'controle_id' => $id,
+                'arquivo_removido' => $nomeArquivo,
+                'arquivo_deletado_fisicamente' => $arquivoRemovido
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Documento removido com sucesso'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao remover documento do controle', [
+                'controle_id' => $id,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine(),
+                'file' => $e->getFile()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
 }

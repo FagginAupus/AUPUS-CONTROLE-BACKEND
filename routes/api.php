@@ -312,7 +312,12 @@ Route::middleware('auth:api')->group(function () {
         Route::post('{id}/atribuir-ug', [ControleController::class, 'atribuirUg']);
         Route::patch('{id}/remover-ug', [ControleController::class, 'removerUg']); 
         Route::get('{id}/uc-detalhes', [ControleController::class, 'getUCDetalhes']);
-        Route::put('{id}/uc-detalhes', [ControleController::class, 'updateUCDetalhes']);;
+        Route::put('{id}/uc-detalhes', [ControleController::class, 'updateUCDetalhes']);
+
+        // ✅ NOVAS ROTAS PARA DOCUMENTAÇÃO
+        Route::post('upload-documento', [ControleController::class, 'uploadDocumento']);
+        Route::get('documento/{arquivo}', [ControleController::class, 'visualizarDocumento'])->where('arquivo', '.*');
+        Route::delete('{id}/documento', [ControleController::class, 'removerDocumento']);
 
         Route::get('buscar-por-uc/{numeroUC}', [ControleController::class, 'buscarPorUC']);
         
