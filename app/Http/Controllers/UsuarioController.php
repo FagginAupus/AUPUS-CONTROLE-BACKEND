@@ -36,7 +36,7 @@ class UsuarioController extends Controller implements HasMiddleware
             $query = Usuario::query()->with(['manager', 'subordinados']);
 
             // Aplicar filtros hierárquicos
-            if (!$currentUser->isAdmin() && !$currentUser->isAnalista()) {
+            if (!$currentUser->isAdminOrAnalista()) {
                 if ($currentUser->isConsultor()) {
                     // Consultor vê apenas: subordinados diretos + ele mesmo
                     $query->where(function($q) use ($currentUser) {
@@ -142,7 +142,7 @@ class UsuarioController extends Controller implements HasMiddleware
         $currentUser = JWTAuth::user();
 
         // Verificar permissões
-        if (!$currentUser->isAdmin() && !$currentUser->isAnalista() && !$currentUser->isConsultor() && !$currentUser->isGerente()) {
+        if (!$currentUser->isAdminOrAnalista() && !$currentUser->isConsultor() && !$currentUser->isGerente()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Acesso negado para criar usuários'
@@ -219,12 +219,12 @@ class UsuarioController extends Controller implements HasMiddleware
                     }
                 } elseif ($request->role === 'gerente') {
                     // Gerentes criados por consultor/admin têm eles como manager
-                    if ($currentUser->isConsultor() || $currentUser->isAdmin()) {
+                    if ($currentUser->isConsultor() || $currentUser->isAdminOrAnalista()) {
                         $managerId = $currentUser->id;
                     }
                 } elseif ($request->role === 'consultor') {
                     // Consultores podem ter manager se especificado por admin
-                    if ($currentUser->isAdmin() && $request->manager_id) {
+                    if ($currentUser->isAdminOrAnalista() && $request->manager_id) {
                         $managerId = $request->manager_id;
                     }
                 }
@@ -495,7 +495,7 @@ class UsuarioController extends Controller implements HasMiddleware
         try {
             $equipe = collect();
 
-            if ($currentUser->isAdmin()) {
+            if ($currentUser->isAdminOrAnalista()) {
                 // Admin vê todos os consultores
                 $equipe = Usuario::where('role', 'consultor')
                             ->where('is_active', true)
@@ -563,7 +563,7 @@ class UsuarioController extends Controller implements HasMiddleware
         $currentUser = JWTAuth::user();
 
         // Apenas admin pode acessar
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Acesso negado'
@@ -657,7 +657,7 @@ class UsuarioController extends Controller implements HasMiddleware
     // Métodos auxiliares para verificação de permissões
     private function canViewUser(Usuario $currentUser, Usuario $targetUser): bool
     {
-        if ($currentUser->isAdmin()) return true;
+        if ($currentUser->isAdminOrAnalista()) return true;
         if ($currentUser->id === $targetUser->id) return true;
         
         if ($currentUser->isConsultor()) {
@@ -671,7 +671,7 @@ class UsuarioController extends Controller implements HasMiddleware
     private function canEditUser(Usuario $currentUser, Usuario $targetUser = null): bool
     {
         if (!$targetUser) return false;
-        if ($currentUser->isAdmin()) return true;
+        if ($currentUser->isAdminOrAnalista()) return true;
         if ($currentUser->id === $targetUser->id) return true;
         
         return $currentUser->canManageUser($targetUser);
@@ -682,7 +682,7 @@ class UsuarioController extends Controller implements HasMiddleware
         if (!$targetUser) return false;
         if ($currentUser->id === $targetUser->id) return false; // Não pode deletar a si mesmo
         
-        return $currentUser->isAdmin() && $targetUser->role !== 'admin';
+        return $currentUser->isAdminOrAnalista() && !in_array($targetUser->role, ['admin', 'analista']);
     }
 
     private function canActivateDeactivateUser(Usuario $currentUser, Usuario $targetUser): bool
@@ -692,7 +692,7 @@ class UsuarioController extends Controller implements HasMiddleware
 
     private function canCreateRole(Usuario $currentUser, string $role): bool
     {
-        if ($currentUser->isAdmin()) return true;
+        if ($currentUser->isAdminOrAnalista()) return true;
 
         if ($currentUser->isAnalista()) return true;
 
@@ -736,7 +736,7 @@ class UsuarioController extends Controller implements HasMiddleware
         cache()->forget("team_cache_{$currentUser->id}");
         
         // Se for admin, limpar cache geral
-        if ($currentUser->isAdmin()) {
+        if ($currentUser->isAdminOrAnalista()) {
             cache()->flush();
         }
         

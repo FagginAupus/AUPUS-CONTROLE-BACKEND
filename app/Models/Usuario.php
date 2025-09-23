@@ -255,6 +255,11 @@ class Usuario extends Authenticatable implements JWTSubject
         return $this->role === 'analista';
     }
 
+    public function isAdminOrAnalista(): bool
+    {
+        return in_array($this->role, ['admin', 'analista']);
+    }
+
     public function isGerente(): bool
     {
         return $this->role === 'gerente';
@@ -272,7 +277,7 @@ class Usuario extends Authenticatable implements JWTSubject
 
     public function canManage(Usuario $otherUser): bool
     {
-        if ($this->isAdmin()) return true;
+        if ($this->isAdminOrAnalista()) return true;
         if ($this->isAnalista()) return true;
         if ($this->isConsultor() && in_array($otherUser->role, ['gerente', 'vendedor'])) return true;
         if ($this->isGerente() && $otherUser->isVendedor()) return true;
@@ -425,7 +430,7 @@ class Usuario extends Authenticatable implements JWTSubject
      */
     public function canManageUser(Usuario $otherUser): bool
     {
-        if ($this->isAdmin()) return true;
+        if ($this->isAdminOrAnalista()) return true;
         
         // Consultor pode gerenciar gerentes e vendedores
         if ($this->isConsultor() && in_array($otherUser->role, ['gerente', 'vendedor'])) {

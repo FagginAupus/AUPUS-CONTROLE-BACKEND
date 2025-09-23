@@ -25,7 +25,7 @@ class ConfiguracaoController extends Controller
         }
 
         // Apenas admins podem visualizar configurações
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem acessar configurações'
@@ -116,7 +116,7 @@ class ConfiguracaoController extends Controller
         }
 
         // Apenas admins podem visualizar configurações
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem acessar configurações'
@@ -250,7 +250,7 @@ class ConfiguracaoController extends Controller
         }
 
         // Apenas admins podem criar configurações
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem criar configurações'
@@ -369,7 +369,7 @@ class ConfiguracaoController extends Controller
         }
 
         // Apenas admins podem editar configurações
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem editar configurações'
@@ -507,7 +507,7 @@ class ConfiguracaoController extends Controller
         }
 
         // Apenas admins podem editar configurações
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem editar configurações'
@@ -664,7 +664,7 @@ class ConfiguracaoController extends Controller
         }
 
         // Apenas admins podem resetar configurações
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem resetar configurações'
@@ -740,7 +740,7 @@ class ConfiguracaoController extends Controller
         }
 
         // Apenas admins podem exportar configurações
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem exportar configurações'
@@ -791,7 +791,7 @@ class ConfiguracaoController extends Controller
         }
 
         // Apenas admins podem limpar cache
-        if (!$currentUser->isAdmin()) {
+        if (!$currentUser->isAdminOrAnalista()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Apenas administradores podem limpar cache'

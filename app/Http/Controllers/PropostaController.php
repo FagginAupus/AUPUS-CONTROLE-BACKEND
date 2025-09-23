@@ -2512,7 +2512,7 @@ class PropostaController extends Controller
             $params = [$id];
 
             // Se não for admin, verificar se é proposta do usuário
-            if (!$currentUser->isAdmin()) {
+            if (!$currentUser->isAdminOrAnalista()) {
                 if ($currentUser->isConsultor()) {
                     // Consultor vê suas propostas + propostas dos subordinados + propostas com seu nome
                     $subordinados = $currentUser->getAllSubordinates();

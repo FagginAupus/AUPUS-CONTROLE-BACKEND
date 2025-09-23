@@ -394,7 +394,7 @@ class AuthController extends Controller
         if (config('app.env') === 'production') {
             $currentUser = JWTAuth::parseToken()->authenticate();
             
-            if (!$currentUser || !$currentUser->isAdmin()) {
+            if (!$currentUser || !$currentUser->isAdminOrAnalista()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Apenas administradores podem registrar usuários'

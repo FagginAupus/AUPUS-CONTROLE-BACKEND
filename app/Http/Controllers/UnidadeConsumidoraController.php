@@ -34,7 +34,7 @@ class UnidadeConsumidoraController extends Controller
                                     ->whereNull('deleted_at');
 
             // Filtros baseados no papel do usuário
-            if (!$currentUser->isAdmin()) {
+            if (!$currentUser->isAdminOrAnalista()) {
                 if ($currentUser->isGerente()) {
                     $query->where('concessionaria_id', $currentUser->concessionaria_atual_id);
                 } else {
@@ -121,7 +121,7 @@ class UnidadeConsumidoraController extends Controller
                                     ->whereNull('deleted_at');
 
             // Filtros baseados no papel do usuário
-            if (!$currentUser->isAdmin()) {
+            if (!$currentUser->isAdminOrAnalista()) {
                 if ($currentUser->isGerente()) {
                     $query->where('concessionaria_id', $currentUser->concessionaria_atual_id);
                 } else {
@@ -622,7 +622,7 @@ class UnidadeConsumidoraController extends Controller
 
     private function canViewUnidade(Usuario $user, UnidadeConsumidora $unidade): bool
     {
-        if ($user->isAdmin()) {
+        if ($user->isAdminOrAnalista()) {
             return true;
         }
 
@@ -635,7 +635,7 @@ class UnidadeConsumidoraController extends Controller
 
     private function canEditUnidade(Usuario $user, UnidadeConsumidora $unidade): bool
     {
-        if ($user->isAdmin()) {
+        if ($user->isAdminOrAnalista()) {
             return true;
         }
 
@@ -644,7 +644,7 @@ class UnidadeConsumidoraController extends Controller
 
     private function canDeleteUnidade(Usuario $user, UnidadeConsumidora $unidade): bool
     {
-        return $user->isAdmin();
+        return $user->isAdminOrAnalista();
     }
 
     // ========================================

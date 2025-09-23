@@ -34,8 +34,8 @@ class CheckPermission
                 ], 403);
             }
 
-            // Admin sempre tem acesso
-            if ($user->isAdmin()) {
+            // Admin e Analista sempre têm acesso
+            if ($user->isAdminOrAnalista()) {
                 return $next($request);
             }
 
