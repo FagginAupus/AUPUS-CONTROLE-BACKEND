@@ -806,7 +806,7 @@ class UsuarioController extends Controller implements HasMiddleware
             $analista = Usuario::create([
                 'nome' => $nomeFormatado,
                 'email' => $emailCompleto,
-                'senha' => Hash::make('00000000'), // Senha padrão
+                'senha' => '00000000', // Senha padrão - sem Hash aqui pois o model tem mutator
                 'cpf_cnpj' => $request->cpf_cnpj,
                 'endereco' => $request->endereco,
                 'cidade' => $request->cidade,
@@ -814,8 +814,8 @@ class UsuarioController extends Controller implements HasMiddleware
                 'cep' => $request->cep,
                 'role' => 'analista',
                 'status' => 'Ativo',
-                'is_active' => true,
-                'manager_id' => null // Analistas não têm manager
+                'is_active' => true
+                // manager_id omitido - será null por padrão
             ]);
 
             Log::info('Analista criado com sucesso', [

@@ -7,12 +7,25 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Carbon\Carbon;
+use Illuminate\Support\Str;
 
 class Notificacao extends Model
 {
     use HasFactory, HasUuids;
 
     protected $table = 'notificacoes';
+
+    // ULID configuration
+    public $incrementing = false;
+    protected $keyType = 'string';
+
+    /**
+     * Generate a new ULID for the model.
+     */
+    public function newUniqueId(): string
+    {
+        return (string) Str::ulid();
+    }
 
     protected $fillable = [
         'usuario_id',
