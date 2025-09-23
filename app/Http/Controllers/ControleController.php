@@ -618,11 +618,11 @@ class ControleController extends Controller
                 ], 401);
             }
 
-            // Verificar se é admin
-            if ($currentUser->role !== 'admin') {
+            // Verificar se é admin ou analista
+            if (!in_array($currentUser->role, ['admin', 'analista'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Apenas administradores podem gerenciar UGs'
+                    'message' => 'Apenas administradores e analistas podem gerenciar UGs'
                 ], 403);
             }
 
@@ -1136,11 +1136,11 @@ class ControleController extends Controller
                 ], 404);
             }
 
-            // Verificar permissões (apenas admin pode deletar)
-            if ($currentUser->role !== 'admin') {
+            // Verificar permissões (apenas admin e analista podem deletar)
+            if (!in_array($currentUser->role, ['admin', 'analista'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Apenas administradores podem excluir controles'
+                    'message' => 'Apenas administradores e analistas podem excluir controles'
                 ], 403);
             }
 

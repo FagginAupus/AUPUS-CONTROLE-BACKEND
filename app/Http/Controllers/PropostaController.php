@@ -38,7 +38,7 @@ class PropostaController extends Controller
             $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
             $params = [];
 
-            if ($currentUser->role !== 'admin') {
+            if (!in_array($currentUser->role, ['admin', 'analista'])) {
                 if ($currentUser->role === 'consultor') {
                     // Consultor vê:
                     // 1. Propostas que ele criou (usuario_id)
@@ -471,8 +471,8 @@ class PropostaController extends Controller
             } elseif ($request->has('consultor') && $request->consultor) {
                 // Buscar por nome se não vier ID
                 $consultorEncontrado = DB::selectOne("
-                    SELECT id FROM usuarios 
-                    WHERE nome = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                    SELECT id FROM usuarios
+                    WHERE nome = ? AND role IN ('admin', 'analista', 'consultor', 'gerente', 'vendedor')
                     AND deleted_at IS NULL
                 ", [$request->consultor]);
                 
@@ -691,8 +691,8 @@ class PropostaController extends Controller
 
             $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
 
-            // Se não for admin, verificar se é proposta do usuário
-            if ($currentUser->role !== 'admin') {
+            // Se não for admin ou analista, verificar se é proposta do usuário
+            if (!in_array($currentUser->role, ['admin', 'analista'])) {
                 if ($currentUser->role === 'consultor') {
                     $subordinados = $currentUser->getAllSubordinates();
                     $subordinadosIds = array_column($subordinados, 'id');
@@ -841,7 +841,7 @@ class PropostaController extends Controller
             $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.id = ? AND p.deleted_at IS NULL";
             $params = [$id];
 
-            if ($currentUser->role !== 'admin') {
+            if (!in_array($currentUser->role, ['admin', 'analista'])) {
                 $query .= " AND p.usuario_id = ?";
                 $params[] = $currentUser->id;
             }
@@ -918,8 +918,8 @@ class PropostaController extends Controller
                     ]);
                 } else {
                     $consultorExiste = DB::selectOne("
-                        SELECT id FROM usuarios 
-                        WHERE id = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                        SELECT id FROM usuarios
+                        WHERE id = ? AND role IN ('admin', 'analista', 'consultor', 'gerente', 'vendedor')
                         AND deleted_at IS NULL
                     ", [$consultorId]);
                     
@@ -951,8 +951,8 @@ class PropostaController extends Controller
                     ]);
                 } else {
                     $consultorEncontrado = DB::selectOne("
-                        SELECT id FROM usuarios 
-                        WHERE nome = ? AND role IN ('admin', 'consultor', 'gerente', 'vendedor')
+                        SELECT id FROM usuarios
+                        WHERE nome = ? AND role IN ('admin', 'analista', 'consultor', 'gerente', 'vendedor')
                         AND deleted_at IS NULL
                     ", [$consultorNome]);
                     
