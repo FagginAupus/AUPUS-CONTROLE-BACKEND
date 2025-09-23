@@ -2442,7 +2442,7 @@ class PropostaController extends Controller
                         'tipo' => 'faturaUC',
                         'numero_uc' => $numeroUC,
                         'nome_arquivo' => $nomeArquivo,
-                        'url' => asset("Storage/propostas/faturas/{$nomeArquivo}"),
+                        'url' => asset("storage/propostas/faturas/{$nomeArquivo}"),
                         'descricao' => "Fatura da UC {$numeroUC}"
                     ];
                 }
@@ -2463,7 +2463,7 @@ class PropostaController extends Controller
                         'tipo' => $tipo,
                         'numero_uc' => null,
                         'nome_arquivo' => $documentacao[$tipo],
-                        'url' => asset("Storage/propostas/documentos/{$documentacao[$tipo]}"),
+                        'url' => asset("storage/propostas/documentos/{$documentacao[$tipo]}"),
                         'descricao' => $descricao
                     ];
                 }

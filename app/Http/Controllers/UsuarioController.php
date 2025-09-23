@@ -36,7 +36,7 @@ class UsuarioController extends Controller implements HasMiddleware
             $query = Usuario::query()->with(['manager', 'subordinados']);
 
             // Aplicar filtros hierárquicos
-            if (!$currentUser->isAdmin()) {
+            if (!$currentUser->isAdmin() && !$currentUser->isAnalista()) {
                 if ($currentUser->isConsultor()) {
                     // Consultor vê apenas: subordinados diretos + ele mesmo
                     $query->where(function($q) use ($currentUser) {
@@ -142,7 +142,7 @@ class UsuarioController extends Controller implements HasMiddleware
         $currentUser = JWTAuth::user();
 
         // Verificar permissões
-        if (!$currentUser->isAdmin() && !$currentUser->isConsultor() && !$currentUser->isGerente()) {
+        if (!$currentUser->isAdmin() && !$currentUser->isAnalista() && !$currentUser->isConsultor() && !$currentUser->isGerente()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Acesso negado para criar usuários'
@@ -153,7 +153,7 @@ class UsuarioController extends Controller implements HasMiddleware
             'nome' => 'required|string|min:3|max:200',
             'email' => 'required|email|unique:usuarios,email',
             'password' => 'required|string|min:8', // Mudou para 8 caracteres mínimo
-            'role' => 'required|in:admin,consultor,gerente,vendedor',
+            'role' => 'required|in:admin,analista,consultor,gerente,vendedor',
             'telefone' => 'required|string|max:20', // Agora obrigatório
             'cidade' => 'required|string|max:100', // Agora obrigatório
             'estado' => 'required|string|max:2', // Agora obrigatório
@@ -693,15 +693,17 @@ class UsuarioController extends Controller implements HasMiddleware
     private function canCreateRole(Usuario $currentUser, string $role): bool
     {
         if ($currentUser->isAdmin()) return true;
-        
+
+        if ($currentUser->isAnalista()) return true;
+
         if ($currentUser->isConsultor()) {
-            return !in_array($role, ['admin', 'consultor']);
+            return !in_array($role, ['admin', 'analista', 'consultor']);
         }
-        
+
         if ($currentUser->isGerente()) {
             return $role === 'vendedor';
         }
-        
+
         return false;
     }
 
@@ -742,5 +744,115 @@ class UsuarioController extends Controller implements HasMiddleware
             'success' => true,
             'message' => 'Cache da equipe invalidado'
         ]);
+    }
+
+    /**
+     * Criar analista com campos específicos
+     */
+    public function criarAnalista(Request $request): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+
+        // Apenas admins podem criar analistas
+        if (!$currentUser->hasPermission('create_analista')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Acesso negado para criar analistas'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'nome' => 'required|string|min:3|max:200',
+            'email_prefix' => 'required|string|max:50|regex:/^[a-zA-Z0-9._%+-]+$/',
+            'cpf_cnpj' => 'required|string|max:20',
+            'endereco' => 'required|string|max:255',
+            'cidade' => 'required|string|max:100',
+            'estado' => 'required|string|max:2',
+            'cep' => 'required|string|max:10'
+        ], [
+            'nome.required' => 'Nome completo é obrigatório',
+            'email_prefix.required' => 'Prefixo do email é obrigatório',
+            'email_prefix.regex' => 'Prefixo do email deve conter apenas letras, números e pontos',
+            'cpf_cnpj.required' => 'CPF é obrigatório',
+            'endereco.required' => 'Endereço é obrigatório',
+            'cidade.required' => 'Cidade é obrigatória',
+            'estado.required' => 'Estado é obrigatório',
+            'cep.required' => 'CEP é obrigatório'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dados de validação inválidos',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        // Construir email completo
+        $emailCompleto = $request->email_prefix . '@aupusenergia.com.br';
+
+        // Verificar se email já existe
+        if (Usuario::where('email', $emailCompleto)->exists()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Este email já está em uso'
+            ], 422);
+        }
+
+        try {
+            // Padronizar nome (primeira letra maiúscula)
+            $nomeFormatado = ucwords(strtolower(trim($request->nome)));
+
+            $analista = Usuario::create([
+                'nome' => $nomeFormatado,
+                'email' => $emailCompleto,
+                'senha' => Hash::make('00000000'), // Senha padrão
+                'cpf_cnpj' => $request->cpf_cnpj,
+                'endereco' => $request->endereco,
+                'cidade' => $request->cidade,
+                'estado' => strtoupper($request->estado),
+                'cep' => $request->cep,
+                'role' => 'analista',
+                'status' => 'Ativo',
+                'is_active' => true,
+                'manager_id' => null // Analistas não têm manager
+            ]);
+
+            Log::info('Analista criado com sucesso', [
+                'analista_id' => $analista->id,
+                'created_by' => $currentUser->id,
+                'email' => $emailCompleto
+            ]);
+
+            // Criar notificação de sucesso
+            Notificacao::create([
+                'usuario_id' => $currentUser->id,
+                'titulo' => 'Analista criado',
+                'descricao' => "Analista {$analista->nome} foi criado com sucesso!",
+                'tipo' => 'sucesso',
+                'link' => "/usuarios/{$analista->id}"
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Analista criado com sucesso',
+                'data' => [
+                    'usuario' => $analista->load(['manager', 'subordinados']),
+                    'senha_padrao' => '00000000'
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao criar analista', [
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id,
+                'data' => $request->all()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor ao criar analista'
+            ], 500);
+        }
     }
 }

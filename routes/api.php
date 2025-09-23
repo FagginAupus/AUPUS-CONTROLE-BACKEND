@@ -259,7 +259,10 @@ Route::middleware('auth:api')->group(function () {
         Route::put('{id}', [UsuarioController::class, 'update']);
         Route::patch('{id}/toggle-active', [UsuarioController::class, 'toggleActive']);
         Route::delete('{id}', [UsuarioController::class, 'destroy']);
-        
+
+        // Rota específica para criar analistas
+        Route::post('criar-analista', [UsuarioController::class, 'criarAnalista']);
+
         // MANTER ESTAS ROTAS (corrigi apenas o caminho):
         Route::post('invalidate-cache', [UsuarioController::class, 'invalidateTeamCache']); // ← SEM /usuarios/
         

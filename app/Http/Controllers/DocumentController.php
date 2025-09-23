@@ -8,6 +8,7 @@ use App\Services\AutentiqueService;
 use App\Services\PDFGeneratorService;
 use App\Models\Document;
 use App\Models\Proposta;
+use App\Models\Notificacao;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -700,6 +701,26 @@ class DocumentController extends Controller
                             'error' => $e->getMessage()
                         ]);
                     }
+
+                    // Enviar notificação para admins e analistas
+                    try {
+                        $nomeCliente = $dadosDocumento['nomeCliente'] ?? $dadosDocumento['nome_cliente'] ?? 'Cliente';
+                        $motivo = $signerInfo['reason'] ?? '';
+                        Notificacao::criarDocumentoRejeitado($nomeCliente, $numeroUC, $motivo);
+                        Log::info('📢 Notificação de documento rejeitado enviada', [
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC,
+                            'nome_cliente' => $nomeCliente,
+                            'motivo' => $motivo
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('❌ Erro ao enviar notificação de documento rejeitado', [
+                            'error' => $e->getMessage(),
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
+                    }
+
                     $localDocument->delete();
                     Log::info('🗑️ DOCUMENTO REJEITADO REMOVIDO AUTOMATICAMENTE!', [
                         'proposta_id' => $localDocument->proposta_id,
@@ -804,6 +825,22 @@ class DocumentController extends Controller
                         ]);
                     } catch (\Exception $e) {
                         Log::error('❌ Erro ao adicionar UC ao controle automaticamente', [
+                            'error' => $e->getMessage(),
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
+                    }
+
+                    // Enviar notificação para admins e analistas
+                    try {
+                        Notificacao::criarDocumentoAssinado($nomeCliente, $numeroUC);
+                        Log::info('📢 Notificação de documento assinado enviada', [
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC,
+                            'nome_cliente' => $nomeCliente
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('❌ Erro ao enviar notificação de documento assinado', [
                             'error' => $e->getMessage(),
                             'proposta_id' => $localDocument->proposta_id,
                             'numero_uc' => $numeroUC
@@ -929,6 +966,25 @@ class DocumentController extends Controller
                         'proposta_id' => $localDocument->proposta_id,
                         'numero_uc' => $numeroUC
                     ]);
+
+                    // Enviar notificação para admins e analistas
+                    try {
+                        $nomeCliente = $dadosDocumento['nomeCliente'] ?? $dadosDocumento['nome_cliente'] ?? 'Cliente';
+                        $motivo = $eventData['reason'] ?? '';
+                        Notificacao::criarDocumentoRejeitado($nomeCliente, $numeroUC, $motivo);
+                        Log::info('📢 Notificação de documento rejeitado enviada', [
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC,
+                            'nome_cliente' => $nomeCliente,
+                            'motivo' => $motivo
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('❌ Erro ao enviar notificação de documento rejeitado', [
+                            'error' => $e->getMessage(),
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
+                    }
                 }
             }
         }

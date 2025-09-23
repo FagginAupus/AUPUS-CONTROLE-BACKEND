@@ -276,7 +276,7 @@ startxref
             'numeroUnidade' => (string)($dados['numeroUC'] ?? ''),
             'logradouro' => $dados['logradouroUC'] ?? '',
             'dia' => $agora->format('d'),   
-            'mes' => $agora->format('m'),  
+            'mes' => $this->getMesPortugues($agora->format('n')),  
             'economia' => '       ' . ($dados['descontoTarifa'] ?? '0') . '%'
         ];
 
@@ -348,6 +348,29 @@ startxref
         $textoLimpo = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $textoLimpo);
         
         return $textoLimpo;
+    }
+
+    /**
+     * ✅ CONVERTER NÚMERO DO MÊS PARA NOME EM PORTUGUÊS
+     */
+    private function getMesPortugues(int $numeroMes): string
+    {
+        $meses = [
+            1 => 'janeiro',
+            2 => 'fevereiro',
+            3 => 'março',
+            4 => 'abril',
+            5 => 'maio',
+            6 => 'junho',
+            7 => 'julho',
+            8 => 'agosto',
+            9 => 'setembro',
+            10 => 'outubro',
+            11 => 'novembro',
+            12 => 'dezembro'
+        ];
+
+        return $meses[$numeroMes] ?? 'janeiro';
     }
 
     // Compatibilidade

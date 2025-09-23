@@ -296,6 +296,26 @@ class Notificacao extends Model
         return self::notificarMultiplos($usuarioIds, $titulo, $descricao, $tipo, $link);
     }
 
+    // Métodos para notificações de documentos Autentique
+    public static function criarDocumentoAssinado(string $nomeCliente, string $numeroUC): array
+    {
+        $titulo = 'Documento assinado via Autentique';
+        $descricao = "Termo de adesão do cliente {$nomeCliente} (UC: {$numeroUC}) foi assinado com sucesso";
+
+        return self::notificarHierarquia(['admin', 'analista'], $titulo, $descricao, 'sucesso', '/controle');
+    }
+
+    public static function criarDocumentoRejeitado(string $nomeCliente, string $numeroUC, string $motivo = ''): array
+    {
+        $titulo = 'Documento rejeitado via Autentique';
+        $descricao = "Termo de adesão do cliente {$nomeCliente} (UC: {$numeroUC}) foi rejeitado";
+        if ($motivo) {
+            $descricao .= ". Motivo: {$motivo}";
+        }
+
+        return self::notificarHierarquia(['admin', 'analista'], $titulo, $descricao, 'erro', '/controle');
+    }
+
     // Método para limpar notificações antigas
     public static function limparAntigas(int $diasParaManter = 30): int
     {

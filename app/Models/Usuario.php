@@ -184,6 +184,11 @@ class Usuario extends Authenticatable implements JWTSubject
         return $query->where('role', 'consultor');
     }
 
+    public function scopeAnalistas($query)
+    {
+        return $query->where('role', 'analista');
+    }
+
     public function scopeGerentes($query)
     {
         return $query->where('role', 'gerente');
@@ -245,6 +250,11 @@ class Usuario extends Authenticatable implements JWTSubject
         return $this->role === 'consultor';
     }
 
+    public function isAnalista(): bool
+    {
+        return $this->role === 'analista';
+    }
+
     public function isGerente(): bool
     {
         return $this->role === 'gerente';
@@ -263,9 +273,10 @@ class Usuario extends Authenticatable implements JWTSubject
     public function canManage(Usuario $otherUser): bool
     {
         if ($this->isAdmin()) return true;
+        if ($this->isAnalista()) return true;
         if ($this->isConsultor() && in_array($otherUser->role, ['gerente', 'vendedor'])) return true;
         if ($this->isGerente() && $otherUser->isVendedor()) return true;
-        
+
         return false;
     }
 
@@ -279,6 +290,20 @@ class Usuario extends Authenticatable implements JWTSubject
         
         switch ($this->role) {
             case 'admin':
+                $basePermissions = [
+                    'all',
+                    'manage_users',
+                    'manage_proposals',
+                    'manage_ugs',
+                    'manage_calibration',
+                    'view_all_data',
+                    'manage_system',
+                    'export_data',
+                    'create_analista'
+                ];
+                break;
+
+            case 'analista':
                 $basePermissions = [
                     'all',
                     'manage_users',
@@ -381,6 +406,8 @@ class Usuario extends Authenticatable implements JWTSubject
     {
         switch ($this->role) {
             case 'admin':
+                return 1;
+            case 'analista':
                 return 1;
             case 'consultor':
                 return 2;
