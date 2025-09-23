@@ -1010,49 +1010,69 @@ class PropostaController extends Controller
                 $updateParams[] = json_encode($request->beneficios, JSON_UNESCAPED_UNICODE);
             }
             
+            // ✅ VALIDAR CAMPOS OBRIGATÓRIOS APENAS SE STATUS ESTÁ MUDANDO PARA FECHADO
             if ($request->has('status') && ($request->status === 'Fechado' || $request->status === 'Fechada')) {
-                $documentacao = $request->documentacao ?? [];
-                $erros = [];
-                
-                // Campos básicos obrigatórios
-                if (empty($request->nomeCliente)) $erros[] = 'Nome do Cliente';
-                if (empty($request->apelido)) $erros[] = 'Apelido UC';
-                if (empty($numeroUC)) $erros[] = 'Número UC';
-                
-                // Campos de documentação obrigatórios
-                if (empty($documentacao['enderecoUC'])) {
-                    $erros[] = 'Endereço da UC';
-                }
-                
-                if (empty($documentacao['enderecoRepresentante'])) {
-                    $erros[] = 'Endereço do Representante';
-                }
-                
-                if (empty($documentacao['nomeRepresentante'])) {
-                    $erros[] = 'Nome do Representante';
-                }
-                
-                // Validação específica por tipo de documento
-                if (($documentacao['tipoDocumento'] ?? '') === 'CPF') {
-                    if (empty($documentacao['cpf'])) {
-                        $erros[] = 'CPF é obrigatório para pessoa física';
-                    }
-                } else if (($documentacao['tipoDocumento'] ?? '') === 'CNPJ') {
-                    if (empty($documentacao['razaoSocial'])) {
-                        $erros[] = 'Razão Social é obrigatória para pessoa jurídica';
-                    }
-                    if (empty($documentacao['cnpj'])) {
-                        $erros[] = 'CNPJ é obrigatório para pessoa jurídica';
+                // Verificar se o status está realmente mudando
+                $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+                $ucAtual = null;
+
+                // Encontrar a UC atual e seu status
+                foreach ($unidadesConsumidoras as $uc) {
+                    if (($uc['numero_unidade'] ?? $uc['numeroUC'] ?? '') === $numeroUC) {
+                        $ucAtual = $uc;
+                        break;
                     }
                 }
-                
-                // Se há erros, retornar antes de processar
-                if (!empty($erros)) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Para fechar a proposta, corrija os seguintes campos:',
-                        'errors' => $erros
-                    ], 422);
+
+                $statusAtual = $ucAtual['status'] ?? 'Aguardando';
+
+                // ✅ SÓ VALIDAR SE STATUS ESTÁ MUDANDO PARA FECHADO
+                if ($statusAtual !== 'Fechado' && $statusAtual !== 'Fechada') {
+                    $documentacao = $request->documentacao ?? [];
+                    $erros = [];
+
+                    // Campos básicos obrigatórios - usar nome_cliente do request ou da proposta
+                    $nomeCliente = $request->nomeCliente ?? $request->nome_cliente ?? $proposta->nome_cliente;
+                    if (empty($nomeCliente)) $erros[] = 'Nome do Cliente';
+                    if (empty($request->apelido)) $erros[] = 'Apelido UC';
+                    if (empty($numeroUC)) $erros[] = 'Número UC';
+
+                    // Campos de documentação obrigatórios
+                    if (empty($documentacao['enderecoUC'])) {
+                        $erros[] = 'Endereço da UC';
+                    }
+
+                    // ✅ ENDEREÇO DO REPRESENTANTE NÃO É MAIS OBRIGATÓRIO
+                    // if (empty($documentacao['enderecoRepresentante'])) {
+                    //     $erros[] = 'Endereço do Representante';
+                    // }
+
+                    if (empty($documentacao['nomeRepresentante'])) {
+                        $erros[] = 'Nome do Representante';
+                    }
+
+                    // Validação específica por tipo de documento
+                    if (($documentacao['tipoDocumento'] ?? '') === 'CPF') {
+                        if (empty($documentacao['cpf'])) {
+                            $erros[] = 'CPF é obrigatório para pessoa física';
+                        }
+                    } else if (($documentacao['tipoDocumento'] ?? '') === 'CNPJ') {
+                        if (empty($documentacao['razaoSocial'])) {
+                            $erros[] = 'Razão Social é obrigatória para pessoa jurídica';
+                        }
+                        if (empty($documentacao['cnpj'])) {
+                            $erros[] = 'CNPJ é obrigatório para pessoa jurídica';
+                        }
+                    }
+
+                    // Se há erros, retornar antes de processar
+                    if (!empty($erros)) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Para fechar a proposta, corrija os seguintes campos:',
+                            'errors' => $erros
+                        ], 422);
+                    }
                 }
             }
 
@@ -2808,15 +2828,16 @@ class PropostaController extends Controller
     private function validarCamposObrigatoriosParaFechamento($dadosProposta, $documentacao)
     {
         $erros = [];
-        
+
         // Campos básicos
         if (empty($dadosProposta['nomeCliente'])) $erros[] = 'Nome do Cliente';
         if (empty($dadosProposta['apelido'])) $erros[] = 'Apelido UC';
         if (empty($dadosProposta['numeroUC'])) $erros[] = 'Número UC';
-        
+
         // Documentação
         if (empty($documentacao['enderecoUC'])) $erros[] = 'Endereço da UC';
-        if (empty($documentacao['enderecoRepresentante'])) $erros[] = 'Endereço do Representante';
+        // ✅ ENDEREÇO DO REPRESENTANTE NÃO É MAIS OBRIGATÓRIO
+        // if (empty($documentacao['enderecoRepresentante'])) $erros[] = 'Endereço do Representante';
         if (empty($documentacao['nomeRepresentante'])) $erros[] = 'Nome do Representante';
         
         // Tipo de documento específico

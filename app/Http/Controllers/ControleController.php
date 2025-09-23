@@ -1144,16 +1144,54 @@ class ControleController extends Controller
                 ], 403);
             }
 
+            // ✅ VOLTAR STATUS DA UC PARA PENDENTE NO JSON
+            if ($controle->proposta_id) {
+                // Buscar a UC no controle para obter o número
+                $uc = DB::selectOne("
+                    SELECT numero_unidade
+                    FROM unidades_consumidoras
+                    WHERE id = ? AND deleted_at IS NULL
+                ", [$controle->uc_id]);
+
+                if ($uc) {
+                    $numeroUC = $uc->numero_unidade;
+
+                    // Atualizar o status da UC específica no JSON
+                    DB::update("
+                        UPDATE propostas
+                        SET unidades_consumidoras = (
+                            SELECT jsonb_agg(
+                                CASE
+                                    WHEN uc_data->>'numero_unidade' = ? OR uc_data->>'numeroUC' = ?
+                                    THEN jsonb_set(uc_data, '{status}', '\"Pendente\"')
+                                    ELSE uc_data
+                                END
+                            )
+                            FROM jsonb_array_elements(unidades_consumidoras::jsonb) as uc_data
+                        )
+                        WHERE id = ?
+                    ", [$numeroUC, $numeroUC, $controle->proposta_id]);
+
+                    Log::info('Status da UC atualizado para Pendente no JSON', [
+                        'proposta_id' => $controle->proposta_id,
+                        'numero_uc' => $numeroUC,
+                        'controle_id' => $id
+                    ]);
+                }
+            }
+
+            // ✅ SOFT DELETE DO CONTROLE
             $controle->delete();
 
             Log::info('Controle excluído com sucesso', [
                 'controle_id' => $id,
+                'proposta_id' => $controle->proposta_id,
                 'user_id' => $currentUser->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Controle excluído com sucesso'
+                'message' => 'UC removida do controle com sucesso. Status da UC voltou para Pendente.'
             ]);
 
         } catch (\Exception $e) {
