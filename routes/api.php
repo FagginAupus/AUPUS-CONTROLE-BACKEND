@@ -10,6 +10,7 @@ use App\Http\Controllers\ControleController;
 use App\Http\Controllers\ConfiguracaoController;
 use App\Http\Controllers\NotificacaoController;
 use App\Http\Controllers\DocumentController;
+use App\Http\Controllers\AuditoriaController;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 /*
@@ -634,10 +635,21 @@ Route::middleware('auth:api')->group(function () {
             ->middleware('permission:prospec.delete');
 
     });
-    
+
     Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente']);
         //->middleware('permission:prospec.edit');
-    
+
+    // ==========================================
+    // AUDITORIA - Sistema de log de eventos
+    // ==========================================
+    Route::prefix('auditoria')->group(function () {
+        Route::get('/', [AuditoriaController::class, 'index']);
+        Route::get('eventos-criticos', [AuditoriaController::class, 'eventosCriticos']);
+        Route::get('modulo/{modulo}', [AuditoriaController::class, 'eventosPorModulo']);
+        Route::get('historico/{entidade}/{entidadeId}', [AuditoriaController::class, 'historicoEntidade']);
+        Route::get('estatisticas', [AuditoriaController::class, 'estatisticas']);
+    });
+
 });
 
 // Webhook da Autentique (público - sem autenticação)

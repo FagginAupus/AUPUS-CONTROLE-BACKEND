@@ -10,6 +10,7 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
+use App\Services\AuditoriaService;
 
 class UGController extends Controller
 {
@@ -261,6 +262,17 @@ class UGController extends Controller
             \Log::info('✅ UG criada com sucesso', [
                 'ug_id' => $ug->id,
                 'nome_usina' => $ug->nome_usina
+            ]);
+
+            // Registrar evento de auditoria para criação de UG
+            AuditoriaService::registrarCriacaoUG($ug->id, [
+                'nome_usina' => $ug->nome_usina,
+                'numero_unidade' => $ug->numero_unidade,
+                'potencia_cc' => $ug->potencia_cc,
+                'potencia_ca' => $ug->potencia_ca,
+                'localizacao' => $ug->localizacao,
+                'numero_uc' => $request->numero_uc,
+                'cnpj' => $request->cnpj
             ]);
 
             // Transformar para frontend - CALCULADO DINAMICAMENTE

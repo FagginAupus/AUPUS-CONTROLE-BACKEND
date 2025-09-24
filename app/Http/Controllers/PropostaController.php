@@ -622,11 +622,18 @@ class PropostaController extends Controller
                 'user_id' => $currentUser->id
             ]);
 
-           
-
             // ✅ MAPEAR RESPOSTA PARA O FRONTEND
             $unidadesConsumidoras = json_decode($propostaInserida->unidades_consumidoras ?? '[]', true);
             $beneficios = json_decode($propostaInserida->beneficios ?? '[]', true);
+
+            // Registrar evento de auditoria para criação de proposta
+            AuditoriaService::registrarCriacaoProposta($propostaInserida->id, [
+                'numero' => $propostaInserida->numero_proposta,
+                'nome_cliente' => $propostaInserida->nome_cliente,
+                'consultor' => $propostaInserida->consultor_id,
+                'unidades_consumidoras' => $unidadesConsumidoras,
+                'beneficios' => $beneficios
+            ]);
             $primeiraUC = !empty($unidadesConsumidoras) ? $unidadesConsumidoras[0] : null;
 
             $respostaMapeada = [
@@ -1239,6 +1246,22 @@ class PropostaController extends Controller
                 'logradouro_alterado' => $request->has('logradouroUC'),
                 'documentacao_alterada' => $request->has('documentacao'),
                 'campos_alterados' => array_keys($request->all())
+            ]);
+
+            // Registrar evento de auditoria para edição de proposta
+            AuditoriaService::registrar('propostas', $id, 'ALTERADO', [
+                'evento_tipo' => 'PROPOSTA_EDITADA',
+                'descricao_evento' => 'Proposta editada pelo usuário',
+                'modulo' => 'propostas',
+                'dados_novos' => [
+                    'campos_alterados' => array_keys($request->all()),
+                    'nome_cliente' => $propostaAtualizada->nome_cliente
+                ],
+                'dados_contexto' => [
+                    'logradouro_alterado' => $request->has('logradouroUC'),
+                    'documentacao_alterada' => $request->has('documentacao'),
+                    'timestamp' => now()->toISOString()
+                ]
             ]);
 
             // ✅ MAPEAR RESPOSTA PARA O FRONTEND
@@ -2503,9 +2526,13 @@ class PropostaController extends Controller
                 ], 401);
             }
 
+            // Obter dados da proposta antes de excluí-la para auditoria
+            $propostaParaAuditoria = DB::selectOne("SELECT numero_proposta, nome_cliente, consultor_id FROM propostas WHERE id = ? AND deleted_at IS NULL", [$id]);
+
             Log::info('Excluindo proposta', [
                 'proposta_id' => $id,
-                'user_id' => $currentUser->id
+                'user_id' => $currentUser->id,
+                'numero_proposta' => $propostaParaAuditoria->numero_proposta ?? null
             ]);
 
             $query = "UPDATE propostas p SET deleted_at = NOW(), updated_at = NOW() WHERE p.id = ? AND p.deleted_at IS NULL";
@@ -2559,6 +2586,15 @@ class PropostaController extends Controller
                 'proposta_id' => $id,
                 'user_id' => $currentUser->id
             ]);
+
+            // Registrar evento de auditoria para exclusão de proposta
+            if ($propostaParaAuditoria) {
+                AuditoriaService::registrarExclusaoProposta($id, [
+                    'numero' => $propostaParaAuditoria->numero_proposta,
+                    'nome_cliente' => $propostaParaAuditoria->nome_cliente,
+                    'consultor_id' => $propostaParaAuditoria->consultor_id
+                ]);
+            }
 
             return response()->json([
                 'success' => true,

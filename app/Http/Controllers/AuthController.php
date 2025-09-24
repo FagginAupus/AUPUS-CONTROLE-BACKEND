@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
+use App\Services\AuditoriaService;
 
 class AuthController extends Controller
 {
@@ -135,6 +136,13 @@ class AuthController extends Controller
                     'user_role' => $usuario->role,
                     'ip' => $request->ip(),
                     'token_generated' => true
+                ]);
+
+                // Registrar evento de auditoria para login
+                AuditoriaService::registrarLogin($usuario->id, [
+                    'ip_address' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                    'role' => $usuario->role
                 ]);
 
                 return response()->json([
@@ -283,6 +291,9 @@ class AuthController extends Controller
                         'user_id' => $usuario->id,
                         'user_name' => $usuario->nome
                     ]);
+
+                    // Registrar evento de auditoria para logout
+                    AuditoriaService::registrarLogout($usuario->id);
                 }
                 
                 JWTAuth::invalidate($token);
