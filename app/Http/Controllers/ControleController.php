@@ -85,7 +85,7 @@ class ControleController extends Controller
                 $subordinados = $currentUser->getAllSubordinates();
                 $subordinadosIds = array_column($subordinados, 'id');
                 $usuariosPermitidos = array_merge([$currentUser->id], $subordinadosIds);
-                
+
                 if (!empty($usuariosPermitidos)) {
                     $placeholders = str_repeat('?,', count($usuariosPermitidos) - 1) . '?';
                     $query .= " AND p.usuario_id IN ({$placeholders})";
@@ -97,7 +97,7 @@ class ControleController extends Controller
             } elseif ($currentUser->role === 'consultor') {
                 $subordinados = $currentUser->getAllSubordinates();
                 $subordinadosIds = array_column($subordinados, 'id');
-                
+
                 if (!empty($subordinadosIds)) {
                     $placeholders = str_repeat('?,', count($subordinadosIds) - 1) . '?';
                     $query .= " AND (p.usuario_id = ? OR p.consultor_id = ? OR p.usuario_id IN ({$placeholders}))";
@@ -110,6 +110,7 @@ class ControleController extends Controller
                     $params[] = $currentUser->id;
                 }
             }
+            // ADMIN e ANALISTA veem todos os dados (sem filtro adicional)
 
             // Filtros opcionais
             if ($request->filled('proposta_id')) {

@@ -541,8 +541,8 @@ class UnidadeConsumidoraController extends Controller
                     ->whereNull('deleted_at');
 
             // Aplicar filtros baseados na role do usuário
-            if ($currentUser->role === 'admin') {
-                // Admin vê tudo
+            if (in_array($currentUser->role, ['admin', 'analista'])) {
+                // Admin e analista veem tudo
             } else {
                 if ($currentUser->role === 'gerente') {
                     $query->where('concessionaria_id', $currentUser->concessionaria_atual_id);

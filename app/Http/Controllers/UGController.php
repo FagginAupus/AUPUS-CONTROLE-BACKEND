@@ -85,16 +85,28 @@ class UGController extends Controller
 
             // Query simplificada sem as colunas redundantes
             $query = "
-                SELECT id, nome_usina, numero_unidade, potencia_cc, potencia_ca, fator_capacidade, 
+                SELECT id, nome_usina, numero_unidade, potencia_cc, potencia_ca, fator_capacidade,
                     capacidade_calculada, localizacao, observacoes_ug,
                     created_at, updated_at
-                FROM unidades_consumidoras 
-                WHERE gerador = true 
-                AND nexus_clube = true 
+                FROM unidades_consumidoras
+                WHERE gerador = true
+                AND nexus_clube = true
                 AND deleted_at IS NULL
             ";
-                        
+
             $params = [];
+
+            // Aplicar filtros baseados na role do usuário
+            if (!in_array($currentUser->role, ['admin', 'analista'])) {
+                if ($currentUser->role === 'gerente') {
+                    $query .= " AND concessionaria_id = ?";
+                    $params[] = $currentUser->concessionaria_atual_id;
+                } else {
+                    $query .= " AND usuario_id = ?";
+                    $params[] = $currentUser->id;
+                }
+            }
+            // Admin e analista veem todas as UGs (sem filtro adicional)
 
             if ($search) {
                 $query .= " AND nome_usina ILIKE ?";
@@ -176,11 +188,11 @@ class UGController extends Controller
             ], 401);
         }
 
-        // Verificar se é admin
-        if ($currentUser->role !== 'admin') {
+        // Verificar se é admin ou analista
+        if (!in_array($currentUser->role, ['admin', 'analista'])) {
             return response()->json([
                 'success' => false,
-                'message' => 'Apenas administradores podem criar UGs'
+                'message' => 'Apenas administradores e analistas podem criar UGs'
             ], 403);
         }
 
@@ -372,11 +384,11 @@ class UGController extends Controller
             ], 401);
         }
 
-        // Verificar se é admin
-        if ($currentUser->role !== 'admin') {
+        // Verificar se é admin ou analista
+        if (!in_array($currentUser->role, ['admin', 'analista'])) {
             return response()->json([
                 'success' => false,
-                'message' => 'Apenas administradores podem atualizar UGs'
+                'message' => 'Apenas administradores e analistas podem atualizar UGs'
             ], 403);
         }
 
@@ -493,10 +505,10 @@ class UGController extends Controller
             ], 401);
         }
 
-        if ($currentUser->role !== 'admin') {
+        if (!in_array($currentUser->role, ['admin', 'analista'])) {
             return response()->json([
                 'success' => false,
-                'message' => 'Apenas administradores podem excluir UGs'
+                'message' => 'Apenas administradores e analistas podem excluir UGs'
             ], 403);
         }
 
@@ -578,8 +590,8 @@ class UGController extends Controller
                        ->whereNull('deleted_at');
 
             // Aplicar filtros baseados na role do usuário
-            if ($currentUser->role === 'admin') {
-                // Admin vê tudo
+            if (in_array($currentUser->role, ['admin', 'analista'])) {
+                // Admin e analista veem tudo
             } else {
                 if ($currentUser->role === 'gerente') {
                     $query->where('concessionaria_id', $currentUser->concessionaria_atual_id);
