@@ -64,8 +64,7 @@ class AuditoriaController extends Controller
                     'a.ip_address',
                     'a.data_acao',
                     'a.observacoes'
-                ])
-                ->whereNull('a.deleted_at');
+                ]);
 
             // Aplicar filtros
             if ($modulo) {
