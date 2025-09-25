@@ -1248,21 +1248,37 @@ class PropostaController extends Controller
                 'campos_alterados' => array_keys($request->all())
             ]);
 
-            // Registrar evento de auditoria para edição de proposta
-            AuditoriaService::registrar('propostas', $id, 'ALTERADO', [
-                'evento_tipo' => 'PROPOSTA_EDITADA',
-                'descricao_evento' => 'Proposta editada pelo usuário',
-                'modulo' => 'propostas',
-                'dados_novos' => [
-                    'campos_alterados' => array_keys($request->all()),
-                    'nome_cliente' => $propostaAtualizada->nome_cliente
-                ],
-                'dados_contexto' => [
-                    'logradouro_alterado' => $request->has('logradouroUC'),
-                    'documentacao_alterada' => $request->has('documentacao'),
-                    'timestamp' => now()->toISOString()
-                ]
-            ]);
+            // ✅ VERIFICAR SE DEVE PULAR LOG GENÉRICO (para evitar conflito com logs específicos)
+            $skipLog = session()->get('skip_proposta_log', false);
+            $alteracaoDocumentacaoApenas = session()->get('alteracao_documentacao_apenas', false);
+
+            // Limpar flags de sessão
+            session()->forget(['skip_proposta_log', 'alteracao_documentacao_apenas']);
+
+            // Só registrar log genérico se não for alteração específica de documentação
+            if (!$skipLog && !$alteracaoDocumentacaoApenas) {
+                // Registrar evento de auditoria para edição de proposta
+                AuditoriaService::registrar('propostas', $id, 'ALTERADO', [
+                    'evento_tipo' => 'PROPOSTA_EDITADA',
+                    'descricao_evento' => 'Proposta editada pelo usuário',
+                    'modulo' => 'propostas',
+                    'dados_novos' => [
+                        'campos_alterados' => array_keys($request->all()),
+                        'nome_cliente' => $propostaAtualizada->nome_cliente
+                    ],
+                    'dados_contexto' => [
+                        'logradouro_alterado' => $request->has('logradouroUC'),
+                        'documentacao_alterada' => $request->has('documentacao'),
+                        'timestamp' => now()->toISOString()
+                    ]
+                ]);
+            } else {
+                Log::info('Log genérico de proposta pulado - alteração específica de documentação detectada', [
+                    'proposta_id' => $id,
+                    'skip_log' => $skipLog,
+                    'doc_apenas' => $alteracaoDocumentacaoApenas
+                ]);
+            }
 
             // ✅ MAPEAR RESPOSTA PARA O FRONTEND
             $unidadesConsumidoras = json_decode($propostaAtualizada->unidades_consumidoras ?? '[]', true);
@@ -2922,6 +2938,13 @@ class PropostaController extends Controller
                 }
             }
             
+            // ✅ MARCAR COMO ALTERAÇÃO DE DOCUMENTAÇÃO ESPECÍFICA
+            // Definir flag temporária para evitar log genérico
+            if (!session()->has('skip_proposta_log')) {
+                session()->put('skip_proposta_log', true);
+                session()->put('alteracao_documentacao_apenas', true);
+            }
+
             // Atualizar no banco
             DB::update(
                 "UPDATE propostas SET documentacao = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",

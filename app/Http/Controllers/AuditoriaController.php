@@ -60,7 +60,8 @@ class AuditoriaController extends Controller
                     'a.dados_contexto',
                     'a.evento_critico',
                     'a.usuario_id',
-                    'u.nome as usuario_nome',
+                    // ✅ CORRIGIR PROBLEMA DO USUÁRIO "SISTEMA"
+                    DB::raw("COALESCE(u.nome, 'Sistema') as usuario_nome"),
                     'a.ip_address',
                     'a.data_acao',
                     'a.observacoes'

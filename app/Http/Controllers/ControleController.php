@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use App\Services\AuditoriaService;
 
 class ControleController extends Controller
 {
@@ -349,6 +350,36 @@ class ControleController extends Controller
                 [$novoStatus, $request->data_titularidade, $id]
             );
 
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - MUDANÇA DE STATUS
+            $eventoData = [
+                'evento_tipo' => 'STATUS_ALTERADO',
+                'descricao_evento' => "Status alterado de '{$statusAnterior}' para '{$novoStatus}'",
+                'modulo' => 'controle',
+                'sub_acao' => 'MUDANCA_STATUS_TROCA',
+                'dados_anteriores' => [
+                    'status_troca' => $statusAnterior,
+                    'ug_id' => $ugAtual
+                ],
+                'dados_novos' => [
+                    'status_troca' => $novoStatus,
+                    'data_titularidade' => $request->data_titularidade,
+                    'ug_desatribuida' => $statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual
+                ],
+                'dados_contexto' => [
+                    'nome_cliente' => $controle->nome_cliente ?? null,
+                    'numero_uc' => $controle->numero_unidade ?? null,
+                    'ug_nome_anterior' => $controle->ug_nome ?? null,
+                    'timestamp' => now()->toISOString()
+                ]
+            ];
+
+            // Crítico apenas quando UC sai do controle (desatribuição de UG por mudança de status)
+            if ($statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual) {
+                $eventoData['evento_critico'] = true;
+            }
+
+            AuditoriaService::registrar('controle_clube', $id, 'ALTERADO', $eventoData);
+
             DB::commit();
 
             $mensagem = $statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual
@@ -578,6 +609,22 @@ class ControleController extends Controller
                 WHERE id = ?
             ", [$request->ug_id, $id]);
 
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - ATRIBUIÇÃO DE UG
+            AuditoriaService::registrar('controle_clube', $id, 'ALTERADO', [
+                'evento_tipo' => 'UG_ATRIBUIDA',
+                'descricao_evento' => "UG '{$ug->nome_usina}' atribuída ao controle",
+                'modulo' => 'controle',
+                'sub_acao' => 'ATRIBUIR_UG',
+                'dados_novos' => [
+                    'ug_id' => $request->ug_id,
+                    'ug_nome' => $ug->nome_usina,
+                    'consumo_calibrado' => $consumoCalibrado
+                ],
+                'dados_contexto' => [
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
+
             DB::commit();
 
             return response()->json([
@@ -657,6 +704,23 @@ class ControleController extends Controller
                 SET ug_id = NULL, valor_calibrado = NULL, updated_at = NOW()
                 WHERE id = ?
             ", [$id]);
+
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - REMOÇÃO DE UG
+            AuditoriaService::registrar('controle_clube', $id, 'ALTERADO', [
+                'evento_tipo' => 'UG_REMOVIDA',
+                'descricao_evento' => "UG '{$controle->ug_nome}' removida do controle",
+                'modulo' => 'controle',
+                'sub_acao' => 'REMOVER_UG',
+                'evento_critico' => true,
+                'dados_anteriores' => [
+                    'ug_id' => $controle->ug_id,
+                    'ug_nome' => $controle->ug_nome,
+                    'valor_calibrado' => $controle->valor_calibrado
+                ],
+                'dados_contexto' => [
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
 
             DB::commit();
 
@@ -829,6 +893,25 @@ class ControleController extends Controller
                 'data_entrada_controle' => now()
             ]);
 
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - CRIAÇÃO DE CONTROLE
+            AuditoriaService::registrar('controle_clube', $controle->id, 'CRIADO', [
+                'evento_tipo' => 'CONTROLE_CRIADO',
+                'descricao_evento' => 'Novo controle criado',
+                'modulo' => 'controle',
+                'dados_novos' => [
+                    'proposta_id' => $controle->proposta_id,
+                    'uc_id' => $controle->uc_id,
+                    'ug_id' => $controle->ug_id,
+                    'calibragem' => $controle->calibragem,
+                    'valor_calibrado' => $valorCalibrado
+                ],
+                'dados_contexto' => [
+                    'numero_proposta' => $propostaExistente->numero_proposta ?? null,
+                    'nome_cliente' => $propostaExistente->nome_cliente ?? null,
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
+
             DB::commit();
 
             // Carregar com relacionamentos para resposta
@@ -974,6 +1057,20 @@ class ControleController extends Controller
             }
 
             $controle->save();
+
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - EDIÇÃO DE CONTROLE
+            if (!empty($controle->getChanges())) {
+                AuditoriaService::registrar('controle_clube', $controle->id, 'ALTERADO', [
+                    'evento_tipo' => 'CONTROLE_EDITADO',
+                    'descricao_evento' => 'Controle editado pelo usuário',
+                    'modulo' => 'controle',
+                    'dados_novos' => $controle->getChanges(),
+                    'dados_contexto' => [
+                        'campos_alterados' => array_keys($controle->getChanges()),
+                        'timestamp' => now()->toISOString()
+                    ]
+                ]);
+            }
 
             DB::commit();
 
@@ -1183,6 +1280,29 @@ class ControleController extends Controller
 
             // ✅ SOFT DELETE DO CONTROLE
             $controle->delete();
+
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - EXCLUSÃO DE CONTROLE
+            AuditoriaService::registrar('controle_clube', $controle->id, 'EXCLUIDO', [
+                'evento_tipo' => 'CONTROLE_EXCLUIDO',
+                'descricao_evento' => 'Controle removido do sistema',
+                'modulo' => 'controle',
+                'evento_critico' => true,
+                'dados_anteriores' => [
+                    'proposta_id' => $controle->proposta_id,
+                    'uc_id' => $controle->uc_id,
+                    'ug_id' => $controle->ug_id,
+                    'calibragem' => $controle->calibragem,
+                    'valor_calibrado' => $controle->valor_calibrado,
+                    'observacoes' => $controle->observacoes
+                ],
+                'dados_contexto' => [
+                    'numero_proposta' => $controle->proposta->numero_proposta ?? null,
+                    'nome_cliente' => $controle->proposta->nome_cliente ?? null,
+                    'numero_uc' => $numeroUC ?? null,
+                    'motivo_exclusao' => 'Exclusão manual pelo usuário',
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
 
             Log::info('Controle excluído com sucesso', [
                 'controle_id' => $id,

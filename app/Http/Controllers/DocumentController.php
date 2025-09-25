@@ -10,6 +10,7 @@ use App\Models\Document;
 use App\Models\Proposta;
 use App\Models\Notificacao;
 use Illuminate\Support\Facades\Log;
+use App\Services\AuditoriaService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
@@ -172,6 +173,22 @@ class DocumentController extends Controller
             
             $documentoLocal->save();
 
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - GERAÇÃO DE TERMO
+            AuditoriaService::registrar('propostas', $propostaId, 'TERMO_GERADO', [
+                'evento_tipo' => 'TERMO_GERADO',
+                'descricao_evento' => "Termo de adesão gerado para UC {$numeroUC}",
+                'modulo' => 'propostas',
+                'dados_contexto' => [
+                    'numero_uc' => $numeroUC,
+                    'nome_cliente' => $nomeCliente,
+                    'documento_id' => $documentoLocal->id,
+                    'autentique_id' => $documentoAutentique['id'],
+                    'nome_arquivo' => $dadosDocumento['nome_documento'],
+                    'numero_proposta' => $proposta->numero_proposta ?? null,
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
+
             Log::info('✅ Termo de adesão gerado e enviado com sucesso', [
                 'proposta_id' => $propostaId,
                 'numero_uc' => $numeroUC,
@@ -179,6 +196,9 @@ class DocumentController extends Controller
                 'autentique_id' => $documentoAutentique['id'],
                 'nome_arquivo' => $dadosDocumento['nome_documento']
             ]);
+
+            // ✅ LIMPAR FLAGS DE SESSÃO APÓS LOG ESPECÍFICO
+            session()->forget(['skip_proposta_log', 'alteracao_documentacao_apenas']);
 
             return response()->json([
                 'success' => true,
@@ -754,6 +774,23 @@ class DocumentController extends Controller
             'autentique_response' => $fullEvent
         ]);
 
+        // ✅ REGISTRAR EVENTO DE AUDITORIA - DOCUMENTO ASSINADO
+        AuditoriaService::registrar('propostas', $localDocument->proposta_id, 'TERMO_ASSINADO', [
+            'evento_tipo' => 'TERMO_ASSINADO',
+            'descricao_evento' => "Termo de adesão assinado digitalmente",
+            'modulo' => 'propostas',
+            'dados_contexto' => [
+                'documento_id' => $localDocument->id,
+                'autentique_id' => $localDocument->autentique_id,
+                'document_name' => $localDocument->name,
+                'status_anterior' => $oldStatus,
+                'status_novo' => Document::STATUS_SIGNED,
+                'numero_uc' => $localDocument->document_data['numeroUC'] ?? null,
+                'nome_cliente' => $localDocument->document_data['nomeCliente'] ?? null,
+                'timestamp' => now()->toISOString()
+            ]
+        ]);
+
         Log::info('🎉 DOCUMENTO TOTALMENTE ASSINADO!', [
             'document_id' => $localDocument->autentique_id,
             'document_name' => $localDocument->name,
@@ -823,6 +860,9 @@ class DocumentController extends Controller
                             'proposta_id' => $localDocument->proposta_id,
                             'numero_uc' => $numeroUC
                         ]);
+
+                        // ✅ LIMPAR FLAGS APÓS PROCESSAMENTO AUTOMÁTICO
+                        session()->forget(['skip_proposta_log', 'alteracao_documentacao_apenas']);
                     } catch (\Exception $e) {
                         Log::error('❌ Erro ao adicionar UC ao controle automaticamente', [
                             'error' => $e->getMessage(),
@@ -895,6 +935,24 @@ class DocumentController extends Controller
             'rejected_count' => $localDocument->rejected_count + 1,
             'last_checked_at' => now(),
             'autentique_response' => $fullEvent
+        ]);
+
+        // ✅ REGISTRAR EVENTO DE AUDITORIA - DOCUMENTO REJEITADO
+        AuditoriaService::registrar('propostas', $localDocument->proposta_id, 'TERMO_REJEITADO', [
+            'evento_tipo' => 'TERMO_REJEITADO',
+            'descricao_evento' => "Termo de adesão rejeitado pelo signatário",
+            'modulo' => 'propostas',
+            'evento_critico' => true,
+            'dados_contexto' => [
+                'documento_id' => $localDocument->id,
+                'autentique_id' => $documentId,
+                'signatario_nome' => $signerName,
+                'rejected_count' => $localDocument->rejected_count,
+                'numero_uc' => $localDocument->document_data['numeroUC'] ?? null,
+                'nome_cliente' => $localDocument->document_data['nomeCliente'] ?? null,
+                'motivo' => 'Assinatura rejeitada pelo cliente/representante',
+                'timestamp' => now()->toISOString()
+            ]
         ]);
 
         Log::info('❌ ASSINATURA REJEITADA!', [
@@ -1056,6 +1114,20 @@ class DocumentController extends Controller
                     );
                 }
             }
+
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - REGENERAÇÃO DE TERMO
+            AuditoriaService::registrar('propostas', $propostaId, 'TERMO_REGENERADO', [
+                'evento_tipo' => 'TERMO_REGENERADO',
+                'descricao_evento' => "Termo rejeitado removido para regeneração",
+                'modulo' => 'propostas',
+                'evento_critico' => true,
+                'dados_contexto' => [
+                    'documento_autentique_id' => $documento->autentique_id,
+                    'numero_uc' => $numeroUC ?? null,
+                    'motivo' => 'Remoção de documento rejeitado para permitir nova geração',
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
 
             Log::info('🗑️ Documento rejeitado removido do sistema', [
                 'proposta_id' => $propostaId,
@@ -1734,6 +1806,21 @@ class DocumentController extends Controller
             if (!empty($erros)) {
                 $mensagem .= ' (com alguns erros)';
             }
+
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - CANCELAMENTO DE DOCUMENTOS
+            AuditoriaService::registrar('propostas', $propostaId, 'TERMO_CANCELADO', [
+                'evento_tipo' => 'TERMO_CANCELADO',
+                'descricao_evento' => "Documentos pendentes cancelados no Autentique",
+                'modulo' => 'propostas',
+                'evento_critico' => true,
+                'dados_contexto' => [
+                    'documentos_cancelados' => $documentosCancelados,
+                    'documentos_com_erro' => count($erros),
+                    'erros' => $erros,
+                    'motivo' => 'Cancelamento manual de documentos pendentes',
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
 
             Log::info('🎉 Cancelamento concluído', [
                 'documentos_cancelados' => $documentosCancelados,
@@ -2418,6 +2505,25 @@ class DocumentController extends Controller
                 $destinatarioExibicao = 'N/A';
             }
 
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - ENVIO PARA AUTENTIQUE
+            AuditoriaService::registrar('propostas', $propostaId, 'TERMO_ENVIADO', [
+                'evento_tipo' => 'TERMO_ENVIADO_AUTENTIQUE',
+                'descricao_evento' => "Termo enviado para assinatura via Autentique",
+                'modulo' => 'propostas',
+                'evento_critico' => true,
+                'dados_contexto' => [
+                    'numero_uc' => $request->numeroUC,
+                    'nome_cliente' => $request->nomeCliente,
+                    'documento_id' => $documentoSalvo->id,
+                    'autentique_id' => $documentId,
+                    'canais_envio' => $canaisEnvio,
+                    'destinatario_exibicao' => $destinatarioExibicao,
+                    'email_representante' => $request->emailRepresentante,
+                    'whatsapp_representante' => $request->whatsappRepresentante,
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
+
             Log::info('✅ Termo enviado para Autentique com sucesso', [
                 'proposta_id' => $propostaId,
                 'document_id' => $documentoSalvo->id,  // ✅ CORRIGIDO
@@ -2425,6 +2531,9 @@ class DocumentController extends Controller
                 'canais_envio' => $canaisEnvio,
                 'destinatario_exibicao' => $destinatarioExibicao
             ]);
+
+            // ✅ LIMPAR FLAGS DE SESSÃO APÓS LOG ESPECÍFICO
+            session()->forget(['skip_proposta_log', 'alteracao_documentacao_apenas']);
 
             // ✅ RESPOSTA CORRIGIDA PARA O FRONTEND
             return response()->json([

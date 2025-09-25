@@ -452,7 +452,33 @@ class UGController extends Controller
                 $dadosAtualizacao['capacidade_calculada'] = 720 * $potencia * $fator;
             }
 
+            // Capturar dados anteriores para auditoria
+            $dadosAnteriores = [
+                'nome_usina' => $ug->nome_usina,
+                'potencia_cc' => $ug->potencia_cc,
+                'potencia_ca' => $ug->potencia_ca,
+                'fator_capacidade' => $ug->fator_capacidade,
+                'localizacao' => $ug->localizacao,
+                'observacoes_ug' => $ug->observacoes_ug
+            ];
+
             $ug->update($dadosAtualizacao);
+
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - EDIÇÃO DE UG
+            if (!empty($dadosAtualizacao)) {
+                AuditoriaService::registrar('unidades_consumidoras', $ug->id, 'ALTERADO', [
+                    'evento_tipo' => 'UG_EDITADA',
+                    'descricao_evento' => 'UG editada pelo usuário',
+                    'modulo' => 'ugs',
+                    'dados_anteriores' => $dadosAnteriores,
+                    'dados_novos' => $dadosAtualizacao,
+                    'dados_contexto' => [
+                        'nome_usina' => $ug->nome_usina,
+                        'campos_alterados' => array_keys($dadosAtualizacao),
+                        'timestamp' => now()->toISOString()
+                    ]
+                ]);
+            }
 
             $ugTransformada = [
                 'id' => $ug->id,
@@ -527,6 +553,20 @@ class UGController extends Controller
         try {
             \Log::info('Iniciando exclusão de UG', ['ug_id' => $id]);
 
+            // ✅ BUSCAR DADOS DA UG ANTES DE EXCLUIR PARA AUDITORIA
+            $ug = UnidadeConsumidora::where('id', $id)
+                ->where('gerador', true)
+                ->where('nexus_clube', true)
+                ->whereNull('deleted_at')
+                ->first();
+
+            if (!$ug) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'UG não encontrada'
+                ], 404);
+            }
+
             // Verificar se há UCs atribuídas - CALCULADO DINAMICAMENTE
             $ucsAtribuidas = $this->obterUcsAtribuidas($id);
             if ($ucsAtribuidas > 0) {
@@ -534,7 +574,7 @@ class UGController extends Controller
                     'ug_id' => $id,
                     'ucs_atribuidas' => $ucsAtribuidas
                 ]);
-                
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Não é possível excluir UG com UCs atribuídas. Remova as UCs primeiro.'
@@ -557,6 +597,28 @@ class UGController extends Controller
                     'message' => 'UG não encontrada ou já excluída'
                 ], 404);
             }
+
+            // ✅ REGISTRAR EVENTO DE AUDITORIA - EXCLUSÃO DE UG
+            AuditoriaService::registrar('unidades_consumidoras', $ug->id, 'EXCLUIDO', [
+                'evento_tipo' => 'UG_EXCLUIDA',
+                'descricao_evento' => "UG '{$ug->nome_usina}' removida do sistema",
+                'modulo' => 'ugs',
+                'evento_critico' => true,
+                'dados_anteriores' => [
+                    'nome_usina' => $ug->nome_usina,
+                    'numero_unidade' => $ug->numero_unidade,
+                    'potencia_cc' => $ug->potencia_cc,
+                    'potencia_ca' => $ug->potencia_ca,
+                    'localizacao' => $ug->localizacao
+                ],
+                'dados_contexto' => [
+                    'nome_usina' => $ug->nome_usina,
+                    'numero_unidade' => $ug->numero_unidade,
+                    'motivo_exclusao' => 'Exclusão manual pelo usuário',
+                    'ucs_atribuidas_na_exclusao' => $ucsAtribuidas,
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
 
             \Log::info('UG excluída com sucesso', [
                 'ug_id' => $id,

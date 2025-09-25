@@ -11,6 +11,77 @@ use Tymon\JWTAuth\Facades\JWTAuth;
 class AuditoriaService
 {
     /**
+     * Registrar uma ação de auditoria com usuário específico
+     *
+     * @param string $entidade Nome da tabela/entidade
+     * @param string $entidadeId ID do registro principal
+     * @param string $acao Ação realizada
+     * @param string $usuarioId ID do usuário que executou a ação
+     * @param array $options Opções adicionais
+     * @return bool
+     */
+    public static function registrarComUsuario(string $entidade, string $entidadeId, string $acao, string $usuarioId, array $options = []): bool
+    {
+        try {
+            $request = request();
+
+            // Dados padrão - usando o usuário fornecido
+            $dados = [
+                'id' => Str::ulid()->toString(),
+                'entidade' => $entidade,
+                'entidade_id' => $entidadeId,
+                'acao' => strtoupper($acao),
+                'usuario_id' => $usuarioId,
+                'ip_address' => $request->ip() ?? null,
+                'user_agent' => $request->userAgent() ?? null,
+                'data_acao' => now(),
+                'created_at' => now()
+            ];
+
+            // Processar opções da mesma forma que o método original
+            $optionsFields = [
+                'entidade_relacionada', 'entidade_relacionada_id', 'sub_acao',
+                'dados_anteriores', 'dados_novos', 'metadados', 'observacoes',
+                'sessao_id', 'evento_tipo', 'descricao_evento', 'modulo',
+                'dados_contexto', 'evento_critico'
+            ];
+
+            foreach ($optionsFields as $field) {
+                if (isset($options[$field])) {
+                    if (in_array($field, ['dados_anteriores', 'dados_novos', 'metadados', 'dados_contexto'])) {
+                        $dados[$field] = json_encode($options[$field], JSON_UNESCAPED_UNICODE);
+                    } else {
+                        $dados[$field] = $options[$field];
+                    }
+                }
+            }
+
+            // Inserir no banco
+            DB::table('auditoria')->insert($dados);
+
+            Log::info('Auditoria registrada com usuário específico', [
+                'entidade' => $entidade,
+                'entidade_id' => $entidadeId,
+                'acao' => $acao,
+                'usuario_id' => $usuarioId
+            ]);
+
+            return true;
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao registrar auditoria com usuário específico', [
+                'entidade' => $entidade,
+                'entidade_id' => $entidadeId,
+                'acao' => $acao,
+                'usuario_id' => $usuarioId,
+                'error' => $e->getMessage()
+            ]);
+
+            return false;
+        }
+    }
+
+    /**
      * Registrar uma ação de auditoria
      *
      * @param string $entidade Nome da tabela/entidade (ex: 'controle_clube', 'propostas')
@@ -143,8 +214,8 @@ class AuditoriaService
      * Registrar remoção de controle (caso específico)
      */
     public static function registrarRemocaoControle(
-        string $propostaId, 
-        string $ucId, 
+        string $propostaId,
+        string $ucId,
         string $controleId,
         string $statusAnterior,
         string $statusNovo
@@ -153,6 +224,7 @@ class AuditoriaService
             'entidade_relacionada' => 'propostas',
             'entidade_relacionada_id' => $propostaId,
             'sub_acao' => 'SOFT_DELETE_POR_MUDANCA_STATUS',
+            'evento_critico' => true, // UC saindo do controle é crítico
             'dados_anteriores' => ['status' => $statusAnterior],
             'dados_novos' => ['status' => $statusNovo],
             'metadados' => [
@@ -351,7 +423,7 @@ class AuditoriaService
      */
     public static function registrarLogin(string $usuarioId, array $dadosLogin = []): bool
     {
-        return self::registrar('usuarios', $usuarioId, 'LOGIN', [
+        return self::registrarComUsuario('usuarios', $usuarioId, 'LOGIN', $usuarioId, [
             'evento_tipo' => 'USUARIO_LOGIN',
             'descricao_evento' => 'Usuário fez login no sistema',
             'modulo' => 'auth',
