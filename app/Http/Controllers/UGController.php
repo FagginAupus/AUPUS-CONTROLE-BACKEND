@@ -710,4 +710,79 @@ class UGController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * 📊 OBTER DETALHES DO RATEIO DE UMA UG
+     */
+    public function obterRateioDetalhes(string $ugId): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+
+        if (!$currentUser) {
+            return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
+        }
+
+        try {
+            // Buscar dados da UG
+            $ug = DB::selectOne("
+                SELECT id, nome_usina, numero_unidade, capacidade_calculada
+                FROM unidades_consumidoras
+                WHERE id = ? AND gerador = true AND deleted_at IS NULL
+            ", [$ugId]);
+
+            if (!$ug) {
+                return response()->json(['success' => false, 'message' => 'UG não encontrada'], 404);
+            }
+
+            // Buscar calibragem global
+            $calibragemGlobal = DB::selectOne(
+                "SELECT valor FROM configuracoes WHERE chave = 'calibragem_global'"
+            );
+            $calibragemGlobalValor = floatval($calibragemGlobal->valor ?? 0);
+
+            // Buscar UCs atribuídas com consumo calibrado
+            $ucsDetalhes = DB::select("
+                SELECT
+                    uc.numero_unidade,
+                    uc.consumo_medio,
+                    cc.calibragem_individual,
+                    CASE
+                        WHEN cc.calibragem_individual IS NOT NULL AND cc.calibragem_individual > 0
+                        THEN uc.consumo_medio * (1 + cc.calibragem_individual / 100)
+                        ELSE uc.consumo_medio * (1 + ? / 100)
+                    END as consumo_calibrado
+                FROM controle_clube cc
+                INNER JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                WHERE cc.ug_id = ? AND cc.deleted_at IS NULL
+                ORDER BY uc.numero_unidade
+            ", [$calibragemGlobalValor, $ugId]);
+
+            $ugInfo = [
+                'id' => $ug->id,
+                'nome_usina' => $ug->nome_usina,
+                'numero_unidade' => $ug->numero_unidade,
+                'capacidade' => floatval($ug->capacidade_calculada ?? 0)
+            ];
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'ugInfo' => $ugInfo,
+                    'ucsDetalhes' => $ucsDetalhes
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Erro ao obter rateio da UG', [
+                'ug_id' => $ugId,
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
 }
