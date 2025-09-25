@@ -2510,7 +2510,7 @@ class DocumentController extends Controller
                 'evento_tipo' => 'TERMO_ENVIADO_AUTENTIQUE',
                 'descricao_evento' => "Termo enviado para assinatura via Autentique",
                 'modulo' => 'propostas',
-                'evento_critico' => true,
+                'evento_critico' => false,
                 'dados_contexto' => [
                     'numero_uc' => $request->numeroUC,
                     'nome_cliente' => $request->nomeCliente,
