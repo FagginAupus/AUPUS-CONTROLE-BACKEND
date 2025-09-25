@@ -100,31 +100,42 @@ class CheckPermission
                 'notificacoes.view'
             ],
             
+            'analista' => [
+                // Analista tem acesso similar ao admin, exceto gestão de usuários crítica
+                'dashboard.view', 'usuarios.view', 'usuarios.create', 'usuarios.edit',
+                'propostas.view', 'propostas.create', 'propostas.edit', 'propostas.delete', 'propostas.change_status',
+                'unidades.view', 'unidades.create', 'unidades.edit', 'unidades.delete', 'unidades.convert_ug',
+                'prospec.view', 'prospec.create', 'prospec.edit', 'prospec.delete',
+                'controle.view', 'controle.create', 'controle.edit', 'controle.calibragem', 'controle.manage_ug',
+                'configuracoes.view', 'relatorios.view', 'relatorios.export',
+                'notificacoes.view'
+            ],
+
             'consultor' => [
                 'dashboard.view', 'usuarios.view', 'usuarios.create', 'usuarios.edit',
                 'propostas.view', 'propostas.create', 'propostas.edit', 'propostas.change_status',
                 'unidades.view', 'unidades.create', 'unidades.edit', 'unidades.convert_ug',
                 'controle.view', 'controle.create', 'controle.edit', 'controle.calibragem', 'controle.manage_ug',
                 'prospec.view', 'prospec.create', 'prospec.edit',
-                'configuracoes.view', 'relatorios.view', 'relatorios.export',
+                'configuracoes.view',
                 'notificacoes.view'
             ],
-            
+
             'gerente' => [
                 'dashboard.view', 'usuarios.view', 'usuarios.create',
                 'propostas.view', 'propostas.create', 'propostas.edit',
                 'unidades.view', 'unidades.create', 'unidades.edit',
                 'prospec.view', 'prospec.create', 'prospec.edit',
-                'controle.view', 'relatorios.view',
+                'controle.view',
                 'notificacoes.view'
             ],
-            
+
             'vendedor' => [
                 'dashboard.view', 'usuarios.view',
                 'propostas.view', 'propostas.create', 'propostas.edit',
                 'unidades.view', 'unidades.create', 'unidades.edit',
                 'prospec.view', 'prospec.create', 'prospec.edit',
-                'controle.view', 'relatorios.view',
+                'controle.view',
                 'notificacoes.view'
             ]
         ];

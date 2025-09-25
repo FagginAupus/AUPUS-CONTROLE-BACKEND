@@ -477,10 +477,19 @@ Route::middleware('auth:api')->group(function () {
     });
 
     // ==========================================
-    // RELATÓRIOS - Exportação de dados
+    // RELATÓRIOS - Sistema Completo de Relatórios
     // ==========================================
-    Route::prefix('relatorios')->group(function () {
-        // Relatório geral
+    Route::prefix('relatorios')->middleware(['jwt.auth', 'check.permission:relatorios.view'])->group(function () {
+        Route::get('dashboard-executivo', [\App\Http\Controllers\RelatorioController::class, 'dashboardExecutivo']);
+        Route::get('ranking-consultores', [\App\Http\Controllers\RelatorioController::class, 'rankingConsultores']);
+        Route::get('analise-propostas', [\App\Http\Controllers\RelatorioController::class, 'analisePropostas']);
+        Route::get('controle-clube', [\App\Http\Controllers\RelatorioController::class, 'controleClube']);
+        Route::get('geografico', [\App\Http\Controllers\RelatorioController::class, 'geografico']);
+        Route::get('financeiro', [\App\Http\Controllers\RelatorioController::class, 'financeiro']);
+        Route::get('produtividade', [\App\Http\Controllers\RelatorioController::class, 'produtividade']);
+        Route::post('exportar', [\App\Http\Controllers\RelatorioController::class, 'exportar']);
+
+        // Relatório geral (legado - manter compatibilidade)
         Route::get('geral', function (Request $request) {
             $user = $request->user();
             

@@ -17,8 +17,7 @@ return new class extends Migration
             ->where('evento_tipo', 'TERMO_ENVIADO_AUTENTIQUE')
             ->where('evento_critico', true)
             ->update([
-                'evento_critico' => false,
-                'updated_at' => now()
+                'evento_critico' => false
             ]);
     }
 
@@ -32,8 +31,7 @@ return new class extends Migration
             ->where('evento_tipo', 'TERMO_ENVIADO_AUTENTIQUE')
             ->where('evento_critico', false)
             ->update([
-                'evento_critico' => true,
-                'updated_at' => now()
+                'evento_critico' => true
             ]);
     }
 };
