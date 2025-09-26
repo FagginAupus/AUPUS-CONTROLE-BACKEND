@@ -3100,6 +3100,55 @@ class DocumentController extends Controller
             ]);
         }
     }
-        
+
+    /**
+     * Sincronizar status de documento com Autentique
+     */
+    public function syncDocumentStatus($documentId): JsonResponse
+    {
+        try {
+            $document = Document::findOrFail($documentId);
+
+            if (!$document->autentique_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Documento não possui ID da Autentique'
+                ], 400);
+            }
+
+            $autentiqueService = new AutentiqueService();
+            $result = $autentiqueService->syncDocumentStatus($document);
+
+            if ($result['success']) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Status sincronizado com sucesso',
+                    'data' => [
+                        'status_anterior' => $result['status_anterior'],
+                        'status_atual' => $result['status_novo'],
+                        'signed_count' => $result['signed_count'],
+                        'rejected_count' => $result['rejected_count'],
+                        'total_signers' => $result['total_signers']
+                    ]
+                ]);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erro ao sincronizar: ' . $result['error']
+                ], 500);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao sincronizar documento', [
+                'document_id' => $documentId,
+                'error' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno na sincronização'
+            ], 500);
+        }
+    }
 
 }

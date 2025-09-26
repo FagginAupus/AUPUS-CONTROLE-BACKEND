@@ -345,20 +345,19 @@ class AutentiqueService
         $this->ensureTokenConfigured();
         
         $query = '
-            query GetDocument($id: ID!) {
+            query GetDocument($id: UUID!) {
                 document(id: $id) {
                     id
                     name
-                    refusable
-                    sortable
                     created_at
+                    signed_count
+                    rejected_count
                     signatures {
                         public_id
                         name
                         email
                         created_at
                         action { name }
-                        link { short_link }
                         user { id name email }
                     }
                 }
@@ -665,6 +664,86 @@ class AutentiqueService
                 'error' => $e->getMessage()
             ]);
             return false;
+        }
+    }
+
+    /**
+     * Sincronizar status de um documento local com a Autentique
+     */
+    public function syncDocumentStatus($localDocument)
+    {
+        try {
+            Log::info('🔄 Iniciando sincronização manual', [
+                'document_id' => $localDocument->id,
+                'autentique_id' => $localDocument->autentique_id
+            ]);
+
+            // Consultar documento na Autentique
+            $autentiqueData = $this->getDocument($localDocument->autentique_id);
+            $documentData = $autentiqueData['document'] ?? null;
+
+            if (!$documentData) {
+                Log::warning('Documento não encontrado na Autentique', [
+                    'autentique_id' => $localDocument->autentique_id
+                ]);
+                return false;
+            }
+
+            $signedCount = $documentData['signed_count'] ?? 0;
+            $rejectedCount = $documentData['rejected_count'] ?? 0;
+            $totalSigners = count($documentData['signatures'] ?? []);
+
+            // Determinar status com base nos contadores
+            $newStatus = $localDocument->status; // Manter atual por padrão
+
+            if ($rejectedCount > 0) {
+                $newStatus = \App\Models\Document::STATUS_REJECTED;
+            } elseif ($signedCount >= $totalSigners && $totalSigners > 0) {
+                $newStatus = \App\Models\Document::STATUS_SIGNED;
+            } else {
+                $newStatus = \App\Models\Document::STATUS_PENDING;
+            }
+
+            // Atualizar documento local
+            $updates = [
+                'status' => $newStatus,
+                'signed_count' => $signedCount,
+                'rejected_count' => $rejectedCount,
+                'total_signers' => $totalSigners,
+                'last_checked_at' => now(),
+                'autentique_response' => $autentiqueData
+            ];
+
+            $localDocument->update($updates);
+
+            Log::info('✅ Sincronização concluída', [
+                'document_id' => $localDocument->id,
+                'status_anterior' => $localDocument->getOriginal('status'),
+                'status_novo' => $newStatus,
+                'signed_count' => $signedCount,
+                'rejected_count' => $rejectedCount,
+                'total_signers' => $totalSigners
+            ]);
+
+            return [
+                'success' => true,
+                'status_anterior' => $localDocument->getOriginal('status'),
+                'status_novo' => $newStatus,
+                'signed_count' => $signedCount,
+                'rejected_count' => $rejectedCount,
+                'total_signers' => $totalSigners
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro na sincronização manual', [
+                'document_id' => $localDocument->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
         }
     }
 
