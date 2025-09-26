@@ -161,7 +161,7 @@ class PropostaController extends Controller
                             'descontoBandeira' => $proposta['descontoBandeira'],
                             'beneficios' => $proposta['beneficios'],
                             'documentacao' => $proposta['documentacao'],
-                            
+
                             // Dados específicos desta UC
                             'apelido' => $uc['apelido'] ?? "UC " . ($uc['numero_unidade'] ?? ($index + 1)),
                             'numeroUC' => $uc['numero_unidade'] ?? $uc['numeroUC'] ?? '',
@@ -169,7 +169,7 @@ class PropostaController extends Controller
                             'ligacao' => $uc['ligacao'] ?? $uc['tipo_ligacao'] ?? '',
                             'media' => $uc['consumo_medio'] ?? $uc['media'] ?? 0,
                             'distribuidora' => $uc['distribuidora'] ?? '',
-                            
+
                             'created_at' => $proposta['created_at'],
                             'updated_at' => $proposta['updated_at']
                         ];
