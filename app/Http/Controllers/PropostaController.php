@@ -727,12 +727,6 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            // 🔍 DEBUG CRÍTICO: Log do ID sendo buscado
-            Log::info('🔍 SHOW METHOD - ID RECEBIDO', [
-                'id_received' => $id,
-                'user_id' => $currentUser->id,
-                'user_role' => $currentUser->role
-            ]);
 
             $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL AND p.id = ?";
             $params = [$id];
@@ -828,13 +822,6 @@ class PropostaController extends Controller
                 'updated_at' => $proposta->updated_at
             ];
 
-            // ✅ DEBUG: Log da proposta mapeada
-            Log::info('Proposta mapeada para frontend', [
-                'id' => $proposta->id,
-                'numero_proposta' => $proposta->numero_proposta,
-                'ucs_count' => count($unidadesConsumidoras),
-                'ucs_sample' => array_slice($unidadesConsumidoras, 0, 1) // Primeira UC para debug
-            ]);
 
             return response()->json([
                 'success' => true,
