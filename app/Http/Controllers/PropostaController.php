@@ -719,7 +719,7 @@ class PropostaController extends Controller
     {
         try {
             $currentUser = JWTAuth::user();
-            
+
             if (!$currentUser) {
                 return response()->json([
                     'success' => false,
@@ -727,7 +727,15 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL";
+            // 🔍 DEBUG CRÍTICO: Log do ID sendo buscado
+            Log::info('🔍 SHOW METHOD - ID RECEBIDO', [
+                'id_received' => $id,
+                'user_id' => $currentUser->id,
+                'user_role' => $currentUser->role
+            ]);
+
+            $query = "SELECT p.*, u.nome as consultor_nome FROM propostas p LEFT JOIN usuarios u ON p.consultor_id = u.id WHERE p.deleted_at IS NULL AND p.id = ?";
+            $params = [$id];
 
             // Se não for admin ou analista, verificar se é proposta do usuário
             if (!in_array($currentUser->role, ['admin', 'analista'])) {
