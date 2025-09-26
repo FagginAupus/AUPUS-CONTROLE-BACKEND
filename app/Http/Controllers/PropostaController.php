@@ -134,17 +134,43 @@ class PropostaController extends Controller
                 'user_id' => $currentUser->id
             ]);
 
-            // ✅ EXPANDIR PROPOSTAS PARA UCs (uma linha por UC)
+            // ✅ EXPANDIR PROPOSTAS PARA UCs (uma linha por UC) - 🔒 VERSÃO CORRIGIDA COM SEGURANÇA
             $linhasExpandidas = [];
 
             foreach ($propostasMapeadas as $proposta) {
                 $unidadesConsumidoras = $proposta['unidades_consumidoras'];
-                
+
                 if (empty($unidadesConsumidoras)) {
-                    // Se não tem UCs, criar uma linha padrão
-                    $linhasExpandidas[] = $proposta;
+                    // 🚨 CORREÇÃO CRÍTICA: Criar linha com dados LIMPOS ao invés de usar $primeiraUC de outra proposta
+                    $linhasExpandidas[] = [
+                        'id' => $proposta['id'] . '-EMPTY',
+                        'propostaId' => $proposta['id'],
+                        'numeroProposta' => $proposta['numeroProposta'],
+                        'nomeCliente' => $proposta['nomeCliente'],
+                        'consultor' => $proposta['consultor'],
+                        'consultor_id' => $proposta['consultor_id'],
+                        'data' => $proposta['data'],
+                        'status' => $proposta['status'],
+                        'observacoes' => $proposta['observacoes'],
+                        'recorrencia' => $proposta['recorrencia'],
+                        'descontoTarifa' => $proposta['descontoTarifa'],
+                        'descontoBandeira' => $proposta['descontoBandeira'],
+                        'beneficios' => $proposta['beneficios'],
+                        'documentacao' => $proposta['documentacao'],
+
+                        // 🔒 DADOS LIMPOS - sem UC (ao invés de dados de outra proposta)
+                        'apelido' => '-',
+                        'numeroUC' => '-',
+                        'numeroCliente' => '-',
+                        'ligacao' => '-',
+                        'media' => 0,
+                        'distribuidora' => '-',
+
+                        'created_at' => $proposta['created_at'],
+                        'updated_at' => $proposta['updated_at']
+                    ];
                 } else {
-                    // Para cada UC, criar uma linha separada
+                    // Para cada UC, criar uma linha separada (esta parte está correta)
                     foreach ($unidadesConsumidoras as $index => $uc) {
                         $linhasExpandidas[] = [
                             'id' => $proposta['id'] . '-UC-' . $index,
@@ -162,7 +188,7 @@ class PropostaController extends Controller
                             'beneficios' => $proposta['beneficios'],
                             'documentacao' => $proposta['documentacao'],
 
-                            // Dados específicos desta UC
+                            // Dados específicos desta UC (correto)
                             'apelido' => $uc['apelido'] ?? "UC " . ($uc['numero_unidade'] ?? ($index + 1)),
                             'numeroUC' => $uc['numero_unidade'] ?? $uc['numeroUC'] ?? '',
                             'numeroCliente' => $uc['numero_cliente'] ?? $uc['numeroCliente'] ?? '',
@@ -177,10 +203,12 @@ class PropostaController extends Controller
                 }
             }
 
-            Log::info('Propostas expandidas', [
+            Log::info('🔒 Propostas expandidas - CORREÇÃO DE SEGURANÇA APLICADA', [
                 'propostas_originais' => count($propostasMapeadas),
                 'linhas_expandidas' => count($linhasExpandidas),
-                'user_id' => $currentUser->id
+                'user_id' => $currentUser->id,
+                'user_role' => $currentUser->role,
+                'security_fix_applied' => '2024-09-26 - Data leakage prevention'
             ]);
 
             return response()->json([
