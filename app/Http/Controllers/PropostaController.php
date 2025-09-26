@@ -92,9 +92,9 @@ class PropostaController extends Controller
                 $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
                 $beneficios = json_decode($proposta->beneficios ?? '[]', true);
                 
-                // Pegar dados da primeira UC para compatibilidade
-                $primeiraUC = !empty($unidadesConsumidoras) ? $unidadesConsumidoras[0] : null;
-                
+                // 🚨 CORREÇÃO DEFINITIVA: Remover contaminação de $primeiraUC
+                // Não usar dados de UCs em campos de compatibilidade da proposta
+
                 $propostaMapeada = [
                     // Campos principais
                     'id' => $proposta->id,
@@ -111,13 +111,15 @@ class PropostaController extends Controller
                     'recorrencia' => $proposta->recorrencia,
                     'observacoes' => $proposta->observacoes,
                     'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
-                    'apelido' => $primeiraUC['apelido'] ?? '',
-                    'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
-                    'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '',
-                    'ligacao' => $primeiraUC['ligacao'] ?? $primeiraUC['tipo_ligacao'] ?? '',
-                    'media' => $primeiraUC['consumo_medio'] ?? $primeiraUC['media'] ?? 0,
-                    'distribuidora' => $primeiraUC['distribuidora'] ?? '',
-                    
+
+                    // 🔒 CAMPOS LIMPOS - sem contaminação de UCs de outras propostas
+                    'apelido' => '', // Será preenchido na expansão com dados corretos
+                    'numeroUC' => '', // Será preenchido na expansão com dados corretos
+                    'numeroCliente' => '', // Será preenchido na expansão com dados corretos
+                    'ligacao' => '', // Será preenchido na expansão com dados corretos
+                    'media' => 0, // Será preenchido na expansão com dados corretos
+                    'distribuidora' => '', // Será preenchido na expansão com dados corretos
+
                     // Arrays completos
                     'beneficios' => $beneficios,
                     'unidades_consumidoras' => $unidadesConsumidoras,
@@ -662,8 +664,8 @@ class PropostaController extends Controller
                 'unidades_consumidoras' => $unidadesConsumidoras,
                 'beneficios' => $beneficios
             ]);
-            $primeiraUC = !empty($unidadesConsumidoras) ? $unidadesConsumidoras[0] : null;
 
+            // 🔒 $primeiraUC removida - evita contaminação de dados
             $respostaMapeada = [
                 'id' => $propostaInserida->id,
                 'numeroProposta' => $propostaInserida->numero_proposta,
@@ -676,12 +678,13 @@ class PropostaController extends Controller
                 'descontoBandeira' => $propostaInserida->desconto_bandeira,
                 'recorrencia' => $propostaInserida->recorrencia,
                 'observacoes' => $propostaInserida->observacoes,
-                'apelido' => $primeiraUC['apelido'] ?? '',
-                'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
-                'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '',
-                'ligacao' => $primeiraUC['ligacao'] ?? $primeiraUC['tipo_ligacao'] ?? '',
-                'media' => $primeiraUC['consumo_medio'] ?? $primeiraUC['media'] ?? 0,
-                'distribuidora' => $primeiraUC['distribuidora'] ?? '',
+                // 🔒 CAMPOS LIMPOS - não contaminar resposta de criação
+                'apelido' => '',
+                'numeroUC' => '',
+                'numeroCliente' => '',
+                'ligacao' => '',
+                'media' => 0,
+                'distribuidora' => '',
                 'beneficios' => $beneficios,
                 'unidadesConsumidoras' => $unidadesConsumidoras
             ];
@@ -777,8 +780,8 @@ class PropostaController extends Controller
             $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
             $beneficios = json_decode($proposta->beneficios ?? '[]', true);
             $documentacao = json_decode($proposta->documentacao ?? '{}', true);
-            $primeiraUC = !empty($unidadesConsumidoras) ? $unidadesConsumidoras[0] : null;
 
+            // 🔒 $primeiraUC removida - evita contaminação de dados
             $propostaMapeada = [
                 'id' => $proposta->id,
                 'numero_proposta' => $proposta->numero_proposta,
@@ -799,13 +802,13 @@ class PropostaController extends Controller
                 'bandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 'inflacao' => floatval($proposta->inflacao ?? 2.00),
                 'tarifaTributos' => floatval($proposta->tarifa_tributos ?? 0.98),
-                // Dados da UC (para compatibilidade com frontend)
-                'apelido' => $primeiraUC['apelido'] ?? '',
-                'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
-                'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '', // ← ADICIONEI ESTA LINHA
-                'ligacao' => $primeiraUC['ligacao'] ?? $primeiraUC['tipo_ligacao'] ?? '',
-                'media' => $primeiraUC['consumo_medio'] ?? $primeiraUC['media'] ?? 0,
-                'distribuidora' => $primeiraUC['distribuidora'] ?? '',
+                // 🔒 CAMPOS LIMPOS - não contaminar resposta individual
+                'apelido' => '',
+                'numeroUC' => '',
+                'numeroCliente' => '',
+                'ligacao' => '',
+                'media' => 0,
+                'distribuidora' => '',
                 
                 // ✅ ARRAYS COMPLETOS - NOMES CORRETOS
                 'beneficios' => $beneficios,
@@ -1311,8 +1314,8 @@ class PropostaController extends Controller
             // ✅ MAPEAR RESPOSTA PARA O FRONTEND
             $unidadesConsumidoras = json_decode($propostaAtualizada->unidades_consumidoras ?? '[]', true);
             $beneficios = json_decode($propostaAtualizada->beneficios ?? '[]', true);
-            $primeiraUC = !empty($unidadesConsumidoras) ? $unidadesConsumidoras[0] : null;
 
+            // 🔒 $primeiraUC removida - evita contaminação de dados
             $respostaMapeada = [
                 'id' => $propostaAtualizada->id,
                 'numeroProposta' => $propostaAtualizada->numero_proposta,
@@ -1325,12 +1328,13 @@ class PropostaController extends Controller
                 'bandeira' => $this->extrairValorDesconto($propostaAtualizada->desconto_bandeira),
                 'recorrencia' => $propostaAtualizada->recorrencia,
                 'observacoes' => $propostaAtualizada->observacoes,
-                'apelido' => $primeiraUC['apelido'] ?? '',
-                'numeroUC' => $primeiraUC['numero_unidade'] ?? $primeiraUC['numeroUC'] ?? '',
-                'numeroCliente' => $primeiraUC['numero_cliente'] ?? $primeiraUC['numeroCliente'] ?? '',
-                'ligacao' => $primeiraUC['ligacao'] ?? $primeiraUC['tipo_ligacao'] ?? '',
-                'media' => $primeiraUC['consumo_medio'] ?? $primeiraUC['media'] ?? 0,
-                'distribuidora' => $primeiraUC['distribuidora'] ?? '',
+                // 🔒 CAMPOS LIMPOS - não contaminar resposta de atualização
+                'apelido' => '',
+                'numeroUC' => '',
+                'numeroCliente' => '',
+                'ligacao' => '',
+                'media' => 0,
+                'distribuidora' => '',
                 'beneficios' => $beneficios,
                 'unidadesConsumidoras' => $unidadesConsumidoras,
                 'inflacao' => $propostaAtualizada->inflacao,              
