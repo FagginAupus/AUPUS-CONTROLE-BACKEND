@@ -1261,7 +1261,7 @@ class ControleController extends Controller
                             SELECT jsonb_agg(
                                 CASE
                                     WHEN uc_data->>'numero_unidade' = ? OR uc_data->>'numeroUC' = ?
-                                    THEN jsonb_set(uc_data, '{status}', '\"Pendente\"')
+                                    THEN jsonb_set(uc_data, '{status}', '\"Aguardando\"')
                                     ELSE uc_data
                                 END
                             )
@@ -1270,7 +1270,7 @@ class ControleController extends Controller
                         WHERE id = ?
                     ", [$numeroUC, $numeroUC, $controle->proposta_id]);
 
-                    Log::info('Status da UC atualizado para Pendente no JSON', [
+                    Log::info('Status da UC atualizado para Aguardando no JSON', [
                         'proposta_id' => $controle->proposta_id,
                         'numero_uc' => $numeroUC,
                         'controle_id' => $id
@@ -1312,7 +1312,7 @@ class ControleController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'UC removida do controle com sucesso. Status da UC voltou para Pendente.'
+                'message' => 'UC removida do controle com sucesso. Status da UC voltou para Aguardando.'
             ]);
 
         } catch (\Exception $e) {
