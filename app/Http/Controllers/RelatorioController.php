@@ -23,102 +23,40 @@ class RelatorioController extends Controller
             $totalPropostas = DB::table('propostas')->count();
             $propostasFechadas = DB::table('propostas')->where('status_proposta', 'fechada')->count();
             $totalControle = DB::table('controle_clube')->count();
-            $totalUGs = DB::table('unidades_geradoras')->count();
+            $totalUCs = DB::table('unidades_consumidoras')->count();
 
             // Taxa de conversão
             $taxaConversao = $totalPropostas > 0 ? round(($propostasFechadas / $totalPropostas) * 100, 2) : 0;
 
-            // Evolução mensal
-            $evolucaoMensal = DB::table('propostas')
-                ->select(
-                    DB::raw('YEAR(data_proposta) as ano'),
-                    DB::raw('MONTH(data_proposta) as mes'),
-                    DB::raw('COUNT(*) as total'),
-                    DB::raw('SUM(CASE WHEN status_proposta = "fechada" THEN 1 ELSE 0 END) as fechadas')
-                )
-                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
-                ->groupBy('ano', 'mes')
-                ->orderBy('ano', 'desc')
-                ->orderBy('mes', 'desc')
-                ->get()
-                ->map(function ($item) {
-                    return [
-                        'periodo' => sprintf('%04d-%02d', $item->ano, $item->mes),
-                        'total' => $item->total,
-                        'fechadas' => $item->fechadas,
-                        'taxa_conversao' => $item->total > 0 ? round(($item->fechadas / $item->total) * 100, 2) : 0
-                    ];
-                });
-
-            // Top consultores
-            $topConsultores = DB::table('propostas')
-                ->select(
-                    'consultor',
-                    DB::raw('COUNT(*) as total_propostas'),
-                    DB::raw('SUM(CASE WHEN status_proposta = "fechada" THEN 1 ELSE 0 END) as fechadas'),
-                    DB::raw('ROUND(AVG(CASE WHEN status_proposta = "fechada" THEN valor_uc ELSE NULL END), 2) as ticket_medio')
-                )
-                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
-                ->groupBy('consultor')
-                ->orderByDesc('fechadas')
-                ->limit(5)
-                ->get();
-
-            // Status das propostas
-            $statusDistribuicao = DB::table('propostas')
-                ->select(
-                    'status_proposta',
-                    DB::raw('COUNT(*) as quantidade'),
-                    DB::raw('ROUND((COUNT(*) * 100.0 / (SELECT COUNT(*) FROM propostas)), 2) as percentual')
-                )
-                ->groupBy('status_proposta')
-                ->get();
-
-            $dados = [
-                'metricas_gerais' => [
-                    'total_propostas' => $totalPropostas,
-                    'propostas_fechadas' => $propostasFechadas,
-                    'total_controle' => $totalControle,
-                    'total_ugs' => $totalUGs,
-                    'taxa_conversao' => $taxaConversao
-                ],
-                'evolucao_mensal' => $evolucaoMensal,
-                'top_consultores' => $topConsultores,
-                'status_distribuicao' => $statusDistribuicao
-            ];
-
-            // Registrar auditoria
-            AuditoriaService::registrar('relatorios', null, 'DASHBOARD_EXECUTIVO_ACESSADO', [
-                'evento_tipo' => 'ACESSO_DASHBOARD',
-                'descricao_evento' => 'Dashboard executivo acessado',
-                'modulo' => 'relatorios',
-                'dados_contexto' => [
-                    'periodo' => "$dataInicio a $dataFim",
-                    'usuario_id' => auth()->id(),
-                    'metricas' => [
-                        'total_propostas' => $totalPropostas,
-                        'taxa_conversao' => $taxaConversao
-                    ]
-                ]
-            ]);
-
             return response()->json([
                 'success' => true,
-                'data' => $dados
+                'data' => [
+                    'metricas_gerais' => [
+                        'total_propostas' => $totalPropostas,
+                        'propostas_fechadas' => $propostasFechadas,
+                        'total_controle' => $totalControle,
+                        'total_ucs' => $totalUCs,
+                        'taxa_conversao' => $taxaConversao
+                    ],
+                    'evolucao_mensal' => [],
+                    'top_consultores' => [],
+                    'status_distribuicao' => [],
+                    'controle' => []
+                ]
             ]);
-
         } catch (\Exception $e) {
-            Log::error('Erro no dashboard executivo', [
-                'error' => $e->getMessage(),
+            Log::error('Erro no dashboard executivo: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao carregar dashboard executivo'
+                'message' => 'Erro interno do servidor',
+                'error' => $e->getMessage()
             ], 500);
         }
     }
+
 
     /**
      * Ranking de Consultores

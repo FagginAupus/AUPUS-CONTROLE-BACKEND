@@ -479,7 +479,7 @@ Route::middleware('auth:api')->group(function () {
     // ==========================================
     // RELATÓRIOS - Sistema Completo de Relatórios
     // ==========================================
-    Route::prefix('relatorios')->middleware(['jwt.auth', 'check.permission:relatorios.view'])->group(function () {
+    Route::prefix('relatorios')->middleware(['jwt.auth'])->group(function () {
         Route::get('dashboard-executivo', [\App\Http\Controllers\RelatorioController::class, 'dashboardExecutivo']);
         Route::get('ranking-consultores', [\App\Http\Controllers\RelatorioController::class, 'rankingConsultores']);
         Route::get('analise-propostas', [\App\Http\Controllers\RelatorioController::class, 'analisePropostas']);
