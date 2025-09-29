@@ -874,6 +874,16 @@ class ControleController extends Controller
                 ], 409);
             }
 
+            // ✅ BUSCAR PROPOSTA PARA COPIAR DESCONTOS
+            $proposta = Proposta::find($request->proposta_id);
+
+            if (!$proposta) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Proposta não encontrada'
+                ], 404);
+            }
+
             // Calcular valor calibrado
             $uc = UnidadeConsumidora::find($request->uc_id);
             $valorCalibrado = null;
@@ -881,7 +891,7 @@ class ControleController extends Controller
                 $valorCalibrado = $this->calcularValorCalibrado($uc->consumo_medio, $request->calibragem);
             }
 
-            // Criar controle
+            // ✅ CRIAR CONTROLE COM DESCONTOS DA PROPOSTA
             $controle = ControleClube::create([
                 'id' => Str::ulid(),
                 'proposta_id' => $request->proposta_id,
@@ -890,7 +900,10 @@ class ControleController extends Controller
                 'calibragem' => $request->calibragem,
                 'valor_calibrado' => $valorCalibrado,
                 'observacoes' => $request->observacoes,
-                'data_entrada_controle' => now()
+                'data_entrada_controle' => now(),
+                // ✅ CORREÇÃO: Copiar descontos da proposta ao criar
+                'desconto_tarifa' => $proposta->desconto_tarifa ?? '20%',
+                'desconto_bandeira' => $proposta->desconto_bandeira ?? '20%'
             ]);
 
             // ✅ REGISTRAR EVENTO DE AUDITORIA - CRIAÇÃO DE CONTROLE
@@ -903,11 +916,13 @@ class ControleController extends Controller
                     'uc_id' => $controle->uc_id,
                     'ug_id' => $controle->ug_id,
                     'calibragem' => $controle->calibragem,
-                    'valor_calibrado' => $valorCalibrado
+                    'valor_calibrado' => $valorCalibrado,
+                    'desconto_tarifa' => $controle->desconto_tarifa,
+                    'desconto_bandeira' => $controle->desconto_bandeira
                 ],
                 'dados_contexto' => [
-                    'numero_proposta' => $propostaExistente->numero_proposta ?? null,
-                    'nome_cliente' => $propostaExistente->nome_cliente ?? null,
+                    'numero_proposta' => $proposta->numero_proposta ?? null,
+                    'nome_cliente' => $proposta->nome_cliente ?? null,
                     'timestamp' => now()->toISOString()
                 ]
             ]);
