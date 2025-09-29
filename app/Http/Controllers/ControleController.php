@@ -45,30 +45,35 @@ class ControleController extends Controller
                 : min(1000, max(1, (int)$request->get('per_page', 50)));
 
             // ✅ QUERY COM NOVOS CAMPOS
-            $query = "SELECT 
-                cc.id, 
-                cc.proposta_id, 
-                cc.uc_id, 
-                cc.ug_id, 
+            $query = "SELECT
+                cc.id,
+                cc.proposta_id,
+                cc.uc_id,
+                cc.ug_id,
                 cc.calibragem_individual,
-                cc.observacoes, 
-                cc.status_troca, 
-                cc.data_titularidade, 
-                cc.data_entrada_controle, 
-                cc.created_at, 
-                cc.updated_at, 
-                p.numero_proposta, 
-                p.nome_cliente, 
+                cc.observacoes,
+                cc.status_troca,
+                cc.data_titularidade,
+                cc.data_entrada_controle,
+                cc.created_at,
+                cc.updated_at,
+                p.numero_proposta,
+                p.nome_cliente,
                 COALESCE(u_consultor.nome, 'Sem consultor') as consultor_nome,
-                p.data_proposta, 
-                p.usuario_id, 
-                uc.numero_unidade, 
-                uc.apelido, 
-                uc.consumo_medio, 
-                uc.ligacao, 
-                ug.nome_usina as ug_nome, 
-                ug.potencia_cc as ug_potencia_cc, 
-                ug.capacidade_calculada as ug_capacidade
+                p.data_proposta,
+                p.usuario_id,
+                uc.numero_unidade,
+                uc.apelido,
+                uc.consumo_medio,
+                uc.ligacao,
+                ug.nome_usina as ug_nome,
+                ug.potencia_cc as ug_potencia_cc,
+                ug.capacidade_calculada as ug_capacidade,
+                -- ✅ CORREÇÃO: Adicionar descontos do controle e da proposta
+                cc.desconto_tarifa,
+                cc.desconto_bandeira,
+                p.desconto_tarifa as proposta_desconto_tarifa,
+                p.desconto_bandeira as proposta_desconto_bandeira
             FROM controle_clube cc
             LEFT JOIN propostas p ON cc.proposta_id = p.id
             LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
