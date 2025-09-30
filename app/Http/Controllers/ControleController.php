@@ -1420,7 +1420,7 @@ class ControleController extends Controller
                 'consumo_medio' => floatval($controle->consumo_medio),
                 'ligacao' => $controle->ligacao,
                 'distribuidora' => $controle->distribuidora,
-                'cpf_cnpj' => $controle->cpf_cnpj ?? 'N/A',
+                'cpf_cnpj' => $controle->cpf_cnpj ?? '',
 
                 // Dados do controle
                 'ug_id' => $controle->ug_id,
