@@ -201,7 +201,8 @@ class ControleController extends Controller
                     'apelido' => $controle->apelido ?? 'N/A',
                     'media' => floatval($controle->consumo_medio ?? 0),
                     'ligacao' => $controle->ligacao ?? 'N/A',
-                    
+                    'cpf_cnpj' => $this->formatarCpfCnpj($controle->cpf_cnpj ?? ''),
+
                     // ✅ NOVOS CAMPOS: Status de troca
                     'statusTroca' => $controle->status_troca ?? 'Aguardando',
                     'dataTitularidade' => $controle->data_titularidade,
@@ -1420,7 +1421,7 @@ class ControleController extends Controller
                 'consumo_medio' => floatval($controle->consumo_medio),
                 'ligacao' => $controle->ligacao,
                 'distribuidora' => $controle->distribuidora,
-                'cpf_cnpj' => $controle->cpf_cnpj ?? '',
+                'cpf_cnpj' => $this->formatarCpfCnpj($controle->cpf_cnpj ?? ''),
 
                 // Dados do controle
                 'ug_id' => $controle->ug_id,
@@ -1731,12 +1732,49 @@ class ControleController extends Controller
         if (str_contains($valor, '%')) {
             return $valor;
         }
-        
+
         if (is_numeric($valor)) {
             return $valor . '%';
         }
-        
+
         return $valor;
+    }
+
+    /**
+     * ✅ Helper para formatar CPF/CNPJ
+     */
+    private function formatarCpfCnpj(?string $documento): string
+    {
+        if (empty($documento)) {
+            return '';
+        }
+
+        // Remove tudo que não for número
+        $documento = preg_replace('/[^0-9]/', '', $documento);
+
+        if (empty($documento)) {
+            return '';
+        }
+
+        // CPF: 11 dígitos - formato: xxx.xxx.xxx-xx
+        if (strlen($documento) === 11) {
+            return substr($documento, 0, 3) . '.' .
+                   substr($documento, 3, 3) . '.' .
+                   substr($documento, 6, 3) . '-' .
+                   substr($documento, 9, 2);
+        }
+
+        // CNPJ: 14 dígitos - formato: xx.xxx.xxx/xxxx-xx
+        if (strlen($documento) === 14) {
+            return substr($documento, 0, 2) . '.' .
+                   substr($documento, 2, 3) . '.' .
+                   substr($documento, 5, 3) . '/' .
+                   substr($documento, 8, 4) . '-' .
+                   substr($documento, 12, 2);
+        }
+
+        // Se não tiver 11 nem 14 dígitos, retorna vazio
+        return '';
     }
 
     /**
