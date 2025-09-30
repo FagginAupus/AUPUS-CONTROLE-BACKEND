@@ -189,47 +189,60 @@ class ControleController extends Controller
                     'propostaId' => $controle->proposta_id,
                     'ucId' => $controle->uc_id,
                     'ugId' => $controle->ug_id,
-                    
+
                     // Dados da proposta
                     'numeroProposta' => $controle->numero_proposta ?? 'N/A',
                     'nomeCliente' => $controle->nome_cliente ?? 'N/A',
                     'consultor' => $controle->consultor_nome ?? $controle->consultor ?? 'Sem consultor',
+                    'consultor_nome' => $controle->consultor_nome ?? $controle->consultor ?? 'Sem consultor',
                     'dataProposta' => $controle->data_proposta,
-                    
+
                     // Dados da UC
                     'numeroUC' => $controle->numero_unidade ?? 'N/A',
+                    'numero_unidade' => $controle->numero_unidade ?? 'N/A',
                     'apelido' => $controle->apelido ?? 'N/A',
                     'media' => floatval($controle->consumo_medio ?? 0),
+                    'consumo_medio' => floatval($controle->consumo_medio ?? 0),
                     'ligacao' => $controle->ligacao ?? 'N/A',
                     'cpf_cnpj' => $this->formatarCpfCnpj($controle->cpf_cnpj ?? ''),
 
                     // ✅ NOVOS CAMPOS: Status de troca
                     'statusTroca' => $controle->status_troca ?? 'Aguardando',
+                    'status_troca' => $controle->status_troca ?? 'Aguardando',
                     'dataTitularidade' => $controle->data_titularidade,
-                    
+                    'data_titularidade' => $controle->data_titularidade,
+
                     // Dados da UG
                     'ug' => $controle->ug_nome,
                     'ugNome' => $controle->ug_nome,
+                    'ug_nome' => $controle->ug_nome,
                     'ugPotencia' => floatval($controle->ug_potencia_cc ?? 0),
                     'ugCapacidade' => floatval($controle->ug_capacidade ?? 0),
-                    
+
+                    // ✅ DESCONTOS
+                    'desconto_tarifa' => $controle->desconto_tarifa ?? $controle->proposta_desconto_tarifa ?? '20%',
+                    'desconto_bandeira' => $controle->desconto_bandeira ?? $controle->proposta_desconto_bandeira ?? '20%',
+                    'proposta_desconto_tarifa' => $controle->proposta_desconto_tarifa ?? '20%',
+                    'proposta_desconto_bandeira' => $controle->proposta_desconto_bandeira ?? '20%',
+
                     // Calibragem
-                    
+
                     'calibragemIndividual' => $controle->calibragem_individual ? floatval($controle->calibragem_individual) : null,
-                    'calibragem_efetiva' => $controle->calibragem_individual !== null 
-                        ? (float) $controle->calibragem_individual 
+                    'calibragem_efetiva' => $controle->calibragem_individual !== null
+                        ? (float) $controle->calibragem_individual
                         : \App\Models\Configuracao::getCalibragemGlobal(),
                     'usa_calibragem_global' => $controle->calibragem_individual === null,
                     'valorCalibrado' => $this->calcularValorCalibrado(
                         floatval($controle->consumo_medio ?? 0),
-                        $controle->calibragem_individual !== null 
-                            ? (float) $controle->calibragem_individual 
+                        $controle->calibragem_individual !== null
+                            ? (float) $controle->calibragem_individual
                             : \App\Models\Configuracao::getCalibragemGlobal()
                     ),
 
                     // Metadados
                     'observacoes' => $controle->observacoes,
                     'dataEntradaControle' => $controle->data_entrada_controle,
+                    'data_entrada_controle' => $controle->data_entrada_controle,
                     'createdAt' => $controle->created_at,
                     'updatedAt' => $controle->updated_at
                 ];
