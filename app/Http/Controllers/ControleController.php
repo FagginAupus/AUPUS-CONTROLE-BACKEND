@@ -73,7 +73,13 @@ class ControleController extends Controller
                 cc.desconto_tarifa,
                 cc.desconto_bandeira,
                 p.desconto_tarifa as proposta_desconto_tarifa,
-                p.desconto_bandeira as proposta_desconto_bandeira
+                p.desconto_bandeira as proposta_desconto_bandeira,
+                -- ✅ NOVO: Extrair CPF/CNPJ do JSON documentacao (preferir cpf, senão cnpj)
+                COALESCE(
+                    NULLIF(p.documentacao->uc.numero_unidade::text->>'cpf', 'null'),
+                    NULLIF(p.documentacao->uc.numero_unidade::text->>'cnpj', 'null'),
+                    ''
+                ) as cpf_cnpj
             FROM controle_clube cc
             LEFT JOIN propostas p ON cc.proposta_id = p.id
             LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
@@ -1355,7 +1361,7 @@ class ControleController extends Controller
             $currentUser = auth()->user();
 
             $controle = DB::selectOne("
-                SELECT 
+                SELECT
                     cc.*,
                     uc.numero_unidade,
                     uc.apelido,
@@ -1366,11 +1372,19 @@ class ControleController extends Controller
                     p.nome_cliente,
                     p.desconto_tarifa as proposta_desconto_tarifa,
                     p.desconto_bandeira as proposta_desconto_bandeira,
-                    u.nome as consultor_nome
+                    consultor.nome as consultor_nome,
+                    COALESCE(
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'cpf', 'null'),
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'cnpj', 'null'),
+                        ''
+                    ) as cpf_cnpj,
+                    ug.nome_usina as ug_nome
                 FROM controle_clube cc
                 JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
                 JOIN propostas p ON cc.proposta_id = p.id
-                LEFT JOIN usuarios u ON p.usuario_id = u.id
+                LEFT JOIN usuarios consultor ON p.consultor_id = consultor.id
+                LEFT JOIN usuarios cliente ON p.usuario_id = cliente.id
+                LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
                 WHERE cc.id = ? AND cc.deleted_at IS NULL
             ", [$controleId]);
 
@@ -1396,17 +1410,21 @@ class ControleController extends Controller
                 'numero_proposta' => $controle->numero_proposta,
                 'nome_cliente' => $controle->nome_cliente,
                 'consultor' => $controle->consultor_nome ?? 'Sem consultor',
-                
+                'consultor_nome' => $controle->consultor_nome ?? 'Sem consultor',
+
                 // Dados da UC
                 'uc_id' => $controle->uc_id,
                 'numero_uc' => $controle->numero_unidade,
+                'numero_unidade' => $controle->numero_unidade,
                 'apelido' => $controle->apelido,
                 'consumo_medio' => floatval($controle->consumo_medio),
                 'ligacao' => $controle->ligacao,
                 'distribuidora' => $controle->distribuidora,
-                
+                'cpf_cnpj' => $controle->cpf_cnpj ?? 'N/A',
+
                 // Dados do controle
                 'ug_id' => $controle->ug_id,
+                'ug_nome' => $controle->ug_nome ?? '',
                 'calibragem' => floatval($controle->calibragem ?? 0),
                 'calibragem_individual' => $controle->calibragem_individual ? floatval($controle->calibragem_individual) : null,
                 'calibragem_global' => \App\Models\Configuracao::getCalibragemGlobal(),
@@ -1415,12 +1433,12 @@ class ControleController extends Controller
                 'data_titularidade' => $controle->data_titularidade,
                 'observacoes' => $controle->observacoes,
                 'documentacao_troca_titularidade' => $controle->documentacao_troca_titularidade,
-                
+
                 // ✅ DESCONTOS CORRETOS
                 // Valores ORIGINAIS da proposta (imutáveis)
                 'proposta_desconto_tarifa' => $controle->proposta_desconto_tarifa ?? '20%',
                 'proposta_desconto_bandeira' => $controle->proposta_desconto_bandeira ?? '20%',
-                
+
                 // Valores ATUAIS da controle_clube (podem ser null = usa proposta)
                 'desconto_tarifa' => $controle->desconto_tarifa, // null ou "25%" por exemplo
                 'desconto_bandeira' => $controle->desconto_bandeira, // null ou "15%" por exemplo
