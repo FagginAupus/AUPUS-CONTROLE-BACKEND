@@ -324,7 +324,8 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('{id}/documento', [ControleController::class, 'removerDocumento']);
 
         Route::get('buscar-por-uc/{numeroUC}', [ControleController::class, 'buscarPorUC']);
-        
+        Route::get('buscar-documentacao-por-uc/{numeroUC}', [ControleController::class, 'buscarDocumentacaoPorUC']);
+
         // Rotas genéricas por último
         Route::get('{id}', [ControleController::class, 'show']);
         Route::put('{id}', [ControleController::class, 'update']);

@@ -1981,4 +1981,72 @@ class ControleController extends Controller
         }
     }
 
+    /**
+     * 📍 BUSCAR DOCUMENTAÇÃO DA PROPOSTA POR NÚMERO DA UC
+     * Retorna o JSON de documentação da proposta associada à UC
+     */
+    public function buscarDocumentacaoPorUC(string $numeroUC): JsonResponse
+    {
+        try {
+            $currentUser = auth()->user();
+
+            if (!$currentUser) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            Log::info('Buscando documentação por UC', [
+                'numero_uc' => $numeroUC,
+                'user_id' => $currentUser->id
+            ]);
+
+            // Buscar a proposta através do controle_clube e UC
+            $resultado = DB::selectOne("
+                SELECT
+                    p.id as proposta_id,
+                    p.documentacao,
+                    uc.numero_unidade
+                FROM controle_clube cc
+                JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                JOIN propostas p ON cc.proposta_id = p.id
+                WHERE uc.numero_unidade = ?
+                    AND cc.deleted_at IS NULL
+                LIMIT 1
+            ", [$numeroUC]);
+
+            if (!$resultado) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'UC não encontrada no controle'
+                ], 404);
+            }
+
+            // Decodificar o JSON de documentação
+            $documentacao = $resultado->documentacao ? json_decode($resultado->documentacao, true) : [];
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'proposta_id' => $resultado->proposta_id,
+                    'numero_unidade' => $resultado->numero_unidade,
+                    'documentacao' => $documentacao
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao buscar documentação por UC', [
+                'numero_uc' => $numeroUC,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao buscar documentação: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
 }
