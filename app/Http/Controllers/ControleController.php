@@ -1392,6 +1392,11 @@ class ControleController extends Controller
                         NULLIF(p.documentacao->uc.numero_unidade::text->>'cnpj', 'null'),
                         ''
                     ) as cpf_cnpj,
+                    COALESCE(
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'logradouroUC', 'null'),
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'enderecoUC', 'null'),
+                        ''
+                    ) as endereco_uc,
                     ug.nome_usina as ug_nome
                 FROM controle_clube cc
                 JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
@@ -1435,6 +1440,7 @@ class ControleController extends Controller
                 'ligacao' => $controle->ligacao,
                 'distribuidora' => $controle->distribuidora,
                 'cpf_cnpj' => $this->formatarCpfCnpj($controle->cpf_cnpj ?? ''),
+                'endereco_completo' => $controle->endereco_uc ?? '',
 
                 // Dados do controle
                 'ug_id' => $controle->ug_id,
