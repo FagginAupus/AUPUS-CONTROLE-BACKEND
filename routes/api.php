@@ -655,6 +655,9 @@ Route::middleware('auth:api')->group(function () {
     Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente']);
         //->middleware('permission:prospec.edit');
 
+    Route::post('/documentos/propostas/{proposta}/cancelar-termo-assinado', [DocumentController::class, 'cancelarTermoAssinado']);
+        //->middleware('permission:prospec.edit');
+
     // ==========================================
     // AUDITORIA - Sistema de log de eventos
     // ==========================================

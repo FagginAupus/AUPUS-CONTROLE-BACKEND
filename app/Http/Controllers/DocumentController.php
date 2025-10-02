@@ -402,23 +402,27 @@ class DocumentController extends Controller
                 case 'document.finished':
                     $this->handleDocumentFinished($eventData, $webhookBody);
                     break;
-                    
+
                 case 'document.created':  // NOVO CASO ADICIONADO
                     $this->handleDocumentCreated($eventData, $webhookBody);
                     break;
-                    
+
                 case 'document.updated':
                     $this->handleDocumentUpdated($eventData, $webhookBody);
                     break;
-                    
+
                 case 'signature.accepted':
                     $this->handleSignatureAccepted($eventData, $webhookBody);
                     break;
-                    
+
                 case 'signature.rejected':
                     $this->handleSignatureRejected($eventData, $webhookBody);
                     break;
-                    
+
+                case 'document.deleted':  // NOVO: Quando documento é cancelado na Autentique
+                    $this->handleDocumentDeleted($eventData, $webhookBody);
+                    break;
+
                 default:
                     Log::info('ℹ️ Evento webhook não mapeado', ['event_type' => $eventType]);
             }
@@ -3148,6 +3152,293 @@ class DocumentController extends Controller
                 'success' => false,
                 'message' => 'Erro interno na sincronização'
             ], 500);
+        }
+    }
+
+    /**
+     * Cancelar termo assinado (cancela na Autentique, volta status para pendente e faz soft delete do controle)
+     */
+    public function cancelarTermoAssinado(Request $request, string $propostaId): JsonResponse
+    {
+        try {
+            Log::info('🚫 Iniciando cancelamento de termo assinado', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $request->numero_uc,
+                'user_id' => auth()->id()
+            ]);
+
+            $numeroUC = $request->numero_uc;
+
+            if (!$numeroUC) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Número da UC é obrigatório'
+                ], 400);
+            }
+
+            // Buscar documento assinado para esta UC
+            $documento = Document::where('proposta_id', $propostaId)
+                ->where('numero_uc', $numeroUC)
+                ->where('status', Document::STATUS_SIGNED)
+                ->first();
+
+            if (!$documento) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum termo assinado encontrado para esta UC'
+                ], 404);
+            }
+
+            Log::info('📄 Documento assinado encontrado', [
+                'document_id' => $documento->id,
+                'autentique_id' => $documento->autentique_id,
+                'uploaded_manually' => $documento->uploaded_manually
+            ]);
+
+            // 1. Cancelar na Autentique (se não for upload manual)
+            if (!$documento->uploaded_manually && $documento->autentique_id) {
+                try {
+                    $cancelado = $this->autentiqueService->cancelDocument($documento->autentique_id);
+
+                    if ($cancelado) {
+                        Log::info('✅ Documento cancelado na Autentique', [
+                            'autentique_id' => $documento->autentique_id
+                        ]);
+                    } else {
+                        Log::warning('⚠️ Falha ao cancelar na Autentique (continuando)', [
+                            'autentique_id' => $documento->autentique_id
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('⚠️ Erro ao cancelar na Autentique (continuando)', [
+                        'autentique_id' => $documento->autentique_id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            // 2. Atualizar status do documento para CANCELLED
+            $documento->update([
+                'status' => Document::STATUS_CANCELLED,
+                'cancelled_at' => now(),
+                'cancelled_by' => auth()->id()
+            ]);
+
+            Log::info('✅ Status do documento atualizado para CANCELLED', [
+                'document_id' => $documento->id
+            ]);
+
+            // 3. Fazer soft delete do controle (se existir)
+            try {
+                $controle = \App\Models\ControleClube::where('proposta_id', $propostaId)
+                    ->whereHas('unidadeConsumidora', function($query) use ($numeroUC) {
+                        $query->where('numero_unidade', $numeroUC);
+                    })
+                    ->first();
+
+                if ($controle) {
+                    $controle->delete(); // Soft delete
+
+                    Log::info('✅ Controle deletado (soft delete)', [
+                        'controle_id' => $controle->id,
+                        'numero_uc' => $numeroUC
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::warning('⚠️ Erro ao deletar controle (continuando)', [
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            // 4. Reverter status da UC para Pendente na proposta
+            try {
+                $proposta = Proposta::find($propostaId);
+
+                if ($proposta) {
+                    $unidadesConsumidoras = $proposta->unidades_consumidoras;
+
+                    if (is_string($unidadesConsumidoras)) {
+                        $unidadesConsumidoras = json_decode($unidadesConsumidoras, true);
+                    }
+
+                    if (is_array($unidadesConsumidoras)) {
+                        foreach ($unidadesConsumidoras as &$uc) {
+                            $ucNumero = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
+
+                            if ($ucNumero === $numeroUC) {
+                                $statusAnterior = $uc['status'] ?? null;
+                                $uc['status'] = 'Pendente';
+
+                                Log::info('🔄 Status da UC revertido para Pendente', [
+                                    'numero_uc' => $numeroUC,
+                                    'status_anterior' => $statusAnterior,
+                                    'status_novo' => 'Pendente'
+                                ]);
+
+                                break;
+                            }
+                        }
+
+                        $proposta->update([
+                            'unidades_consumidoras' => json_encode($unidadesConsumidoras)
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::warning('⚠️ Erro ao reverter status da UC (continuando)', [
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            // 5. Registrar auditoria
+            AuditoriaService::registrar('propostas', $propostaId, 'TERMO_ASSINADO_CANCELADO', [
+                'evento_tipo' => 'TERMO_ASSINADO_CANCELADO',
+                'descricao_evento' => "Termo assinado cancelado para UC {$numeroUC}",
+                'modulo' => 'propostas',
+                'evento_critico' => true,
+                'dados_contexto' => [
+                    'numero_uc' => $numeroUC,
+                    'document_id' => $documento->id,
+                    'autentique_id' => $documento->autentique_id,
+                    'motivo' => 'Cancelamento manual de termo assinado',
+                    'timestamp' => now()->toISOString()
+                ]
+            ]);
+
+            Log::info('🎉 Cancelamento de termo assinado concluído com sucesso', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $numeroUC
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Termo assinado cancelado com sucesso. Status da UC revertido para Pendente.'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao cancelar termo assinado', [
+                'proposta_id' => $propostaId,
+                'numero_uc' => $request->numero_uc ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao cancelar termo assinado: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Handler para evento document.deleted do webhook
+     */
+    private function handleDocumentDeleted(array $eventData, array $fullEvent)
+    {
+        try {
+            $autentiqueId = $eventData['id'] ?? null;
+
+            if (!$autentiqueId) {
+                Log::warning('⚠️ Webhook document.deleted sem ID do documento');
+                return;
+            }
+
+            Log::info('🗑️ Processando webhook document.deleted', [
+                'autentique_id' => $autentiqueId,
+                'event_data' => $eventData
+            ]);
+
+            // Buscar documento local
+            $localDocument = Document::where('autentique_id', $autentiqueId)->first();
+
+            if (!$localDocument) {
+                Log::warning('⚠️ Documento deletado na Autentique não encontrado localmente', [
+                    'autentique_id' => $autentiqueId
+                ]);
+                return;
+            }
+
+            // Atualizar status para CANCELLED se ainda não estiver
+            if ($localDocument->status !== Document::STATUS_CANCELLED) {
+                $localDocument->update([
+                    'status' => Document::STATUS_CANCELLED,
+                    'cancelled_at' => now()
+                ]);
+
+                Log::info('✅ Documento marcado como cancelado via webhook', [
+                    'document_id' => $localDocument->id,
+                    'autentique_id' => $autentiqueId
+                ]);
+            }
+
+            // Reverter status da UC para Pendente
+            try {
+                $proposta = Proposta::find($localDocument->proposta_id);
+                $numeroUC = $localDocument->numero_uc;
+
+                if ($proposta && $numeroUC) {
+                    $unidadesConsumidoras = $proposta->unidades_consumidoras;
+
+                    if (is_string($unidadesConsumidoras)) {
+                        $unidadesConsumidoras = json_decode($unidadesConsumidoras, true);
+                    }
+
+                    if (is_array($unidadesConsumidoras)) {
+                        foreach ($unidadesConsumidoras as &$uc) {
+                            $ucNumero = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
+
+                            if ($ucNumero === $numeroUC) {
+                                $statusAnterior = $uc['status'] ?? null;
+                                $uc['status'] = 'Pendente';
+
+                                Log::info('🔄 Status da UC revertido para Pendente via webhook', [
+                                    'numero_uc' => $numeroUC,
+                                    'status_anterior' => $statusAnterior
+                                ]);
+
+                                break;
+                            }
+                        }
+
+                        $proposta->update([
+                            'unidades_consumidoras' => json_encode($unidadesConsumidoras)
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::warning('⚠️ Erro ao reverter status da UC via webhook', [
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            // Fazer soft delete do controle se existir
+            try {
+                $numeroUC = $localDocument->numero_uc;
+                $controle = \App\Models\ControleClube::where('proposta_id', $localDocument->proposta_id)
+                    ->whereHas('unidadeConsumidora', function($query) use ($numeroUC) {
+                        $query->where('numero_unidade', $numeroUC);
+                    })
+                    ->first();
+
+                if ($controle && !$controle->trashed()) {
+                    $controle->delete(); // Soft delete
+
+                    Log::info('✅ Controle deletado via webhook', [
+                        'controle_id' => $controle->id,
+                        'numero_uc' => $numeroUC
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::warning('⚠️ Erro ao deletar controle via webhook', [
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('❌ Erro ao processar document.deleted webhook', [
+                'error' => $e->getMessage(),
+                'event_data' => $eventData
+            ]);
         }
     }
 
