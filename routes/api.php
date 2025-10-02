@@ -365,6 +365,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/', [\App\Http\Controllers\UGController::class, 'index']);
         Route::post('/', [\App\Http\Controllers\UGController::class, 'store']);
         Route::get('statistics', [\App\Http\Controllers\UGController::class, 'statistics']);
+        Route::get('relatorio', [\App\Http\Controllers\UGController::class, 'gerarRelatorio']);
         Route::get('{id}/rateio-detalhes', [\App\Http\Controllers\UGController::class, 'obterRateioDetalhes']);
         Route::get('{id}', [\App\Http\Controllers\UGController::class, 'show']);
         Route::put('{id}', [\App\Http\Controllers\UGController::class, 'update']);

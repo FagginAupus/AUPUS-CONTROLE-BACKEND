@@ -785,4 +785,64 @@ class UGController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * ✅ GERAR RELATÓRIO DE UGs
+     */
+    public function gerarRelatorio(Request $request): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+
+        if (!$currentUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
+        }
+
+        try {
+            \Log::info('Gerando relatório de UGs', [
+                'user_id' => $currentUser->id,
+                'user_role' => $currentUser->role
+            ]);
+
+            // Buscar todas as UGs
+            $ugs = DB::select("
+                SELECT id, nome_usina, numero_unidade, capacidade_calculada
+                FROM unidades_consumidoras
+                WHERE gerador = true
+                  AND nexus_clube = true
+                  AND deleted_at IS NULL
+                ORDER BY nome_usina ASC
+            ");
+
+            // Preparar dados para o relatório
+            $dadosRelatorio = [];
+
+            foreach ($ugs as $ug) {
+                $dadosRelatorio[] = [
+                    'numero_uc' => $ug->numero_unidade,
+                    'nome_usina' => $ug->nome_usina,
+                    'capacidade' => round(floatval($ug->capacidade_calculada ?? 0), 2)
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $dadosRelatorio,
+                'total' => count($dadosRelatorio)
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Erro ao gerar relatório de UGs', [
+                'error' => $e->getMessage(),
+                'user_id' => $currentUser->id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao gerar relatório'
+            ], 500);
+        }
+    }
 }
