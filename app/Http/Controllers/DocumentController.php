@@ -3267,12 +3267,12 @@ class DocumentController extends Controller
 
                             if ($ucNumero === $numeroUC) {
                                 $statusAnterior = $uc['status'] ?? null;
-                                $uc['status'] = 'Pendente';
+                                $uc['status'] = 'Aguardando';
 
-                                Log::info('🔄 Status da UC revertido para Pendente', [
+                                Log::info('🔄 Status da UC revertido para Aguardando', [
                                     'numero_uc' => $numeroUC,
                                     'status_anterior' => $statusAnterior,
-                                    'status_novo' => 'Pendente'
+                                    'status_novo' => 'Aguardando'
                                 ]);
 
                                 break;
@@ -3312,7 +3312,7 @@ class DocumentController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Termo assinado cancelado com sucesso. Status da UC revertido para Pendente.'
+                'message' => 'Termo assinado cancelado com sucesso. Status da UC revertido para Aguardando.'
             ]);
 
         } catch (\Exception $e) {
@@ -3389,9 +3389,9 @@ class DocumentController extends Controller
 
                             if ($ucNumero === $numeroUC) {
                                 $statusAnterior = $uc['status'] ?? null;
-                                $uc['status'] = 'Pendente';
+                                $uc['status'] = 'Aguardando';
 
-                                Log::info('🔄 Status da UC revertido para Pendente via webhook', [
+                                Log::info('🔄 Status da UC revertido para Aguardando via webhook', [
                                     'numero_uc' => $numeroUC,
                                     'status_anterior' => $statusAnterior
                                 ]);

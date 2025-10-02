@@ -1409,9 +1409,9 @@ class PropostaController extends Controller
                     'uc_data' => $uc
                 ]);
 
-                // ✅ VERIFICAR SE UC JÁ EXISTE NA TABELA unidades_consumidoras
+                // ✅ VERIFICAR SE UC JÁ EXISTE NA TABELA unidades_consumidoras (apenas não deletadas)
                 $ucExistente = DB::selectOne(
-                    "SELECT id FROM unidades_consumidoras WHERE numero_unidade = ?", 
+                    "SELECT id FROM unidades_consumidoras WHERE numero_unidade = ? AND deleted_at IS NULL",
                     [$numeroUC]
                 );
 
@@ -1620,9 +1620,9 @@ class PropostaController extends Controller
                 'uc_data' => $ucEspecifica
             ]);
 
-            // ✅ VERIFICAR SE UC JÁ EXISTE NA TABELA unidades_consumidoras
+            // ✅ VERIFICAR SE UC JÁ EXISTE NA TABELA unidades_consumidoras (apenas não deletadas)
             $ucExistente = DB::selectOne(
-                "SELECT id FROM unidades_consumidoras WHERE numero_unidade = ?", 
+                "SELECT id FROM unidades_consumidoras WHERE numero_unidade = ? AND deleted_at IS NULL",
                 [$numeroUC]
             );
 

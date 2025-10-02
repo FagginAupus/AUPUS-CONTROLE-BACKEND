@@ -209,6 +209,32 @@ class UnidadeConsumidoraController extends Controller
                 ], 422);
             }
 
+            // ✅ VALIDAÇÃO: Verificar se UC já existe (prevenir duplicações)
+            $ucExistente = UnidadeConsumidora::where('numero_unidade', $request->numero_unidade)
+                                            ->whereNull('deleted_at')
+                                            ->first();
+
+            if ($ucExistente) {
+                Log::warning('Tentativa de criar UC duplicada', [
+                    'numero_unidade' => $request->numero_unidade,
+                    'uc_existente_id' => $ucExistente->id,
+                    'user_id' => $currentUser->id
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Já existe uma UC com este número',
+                    'data' => [
+                        'numero_unidade' => $request->numero_unidade,
+                        'uc_existente' => [
+                            'id' => $ucExistente->id,
+                            'apelido' => $ucExistente->apelido,
+                            'created_at' => $ucExistente->created_at
+                        ]
+                    ]
+                ], 409);
+            }
+
             // Criar unidade
             $dadosUnidade = [
                 'id' => (string) Str::uuid(),
