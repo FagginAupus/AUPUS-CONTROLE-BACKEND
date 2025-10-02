@@ -314,7 +314,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('ugs-disponiveis', [ControleController::class, 'getUgsDisponiveis']);
         Route::patch('{id}/status-troca', [ControleController::class, 'updateStatusTroca']);
         Route::post('{id}/atribuir-ug', [ControleController::class, 'atribuirUg']);
-        Route::patch('{id}/remover-ug', [ControleController::class, 'removerUg']); 
+        Route::patch('{id}/remover-ug', [ControleController::class, 'removerUg']);
+        Route::post('bulk-uc-detalhes', [ControleController::class, 'getBulkUCDetalhes']);
         Route::get('{id}/uc-detalhes', [ControleController::class, 'getUCDetalhes']);
         Route::put('{id}/uc-detalhes', [ControleController::class, 'updateUCDetalhes']);
 

@@ -1368,7 +1368,95 @@ class ControleController extends Controller
             ], 500);
         }
     }
-    
+
+    /**
+     * Buscar detalhes de múltiplos controles de uma vez (para relatórios)
+     */
+    public function getBulkUCDetalhes(Request $request): JsonResponse
+    {
+        try {
+            $controleIds = $request->input('controle_ids', []);
+
+            if (empty($controleIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum ID de controle fornecido'
+                ], 400);
+            }
+
+            // Limitar a 500 por requisição para evitar sobrecarga
+            $controleIds = array_slice($controleIds, 0, 500);
+
+            $placeholders = implode(',', array_fill(0, count($controleIds), '?'));
+
+            $controles = DB::select("
+                SELECT
+                    cc.id as controle_id,
+                    cc.desconto_tarifa,
+                    cc.desconto_bandeira,
+                    uc.numero_unidade,
+                    uc.apelido,
+                    uc.consumo_medio,
+                    uc.ligacao,
+                    p.numero_proposta,
+                    p.nome_cliente,
+                    p.desconto_tarifa as proposta_desconto_tarifa,
+                    p.desconto_bandeira as proposta_desconto_bandeira,
+                    consultor.nome as consultor_nome,
+                    COALESCE(
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'cpf', 'null'),
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'cnpj', 'null'),
+                        ''
+                    ) as cpf_cnpj,
+                    COALESCE(
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'logradouroUC', 'null'),
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'enderecoUC', 'null'),
+                        ''
+                    ) as endereco_uc,
+                    ug.nome_usina as ug_nome
+                FROM controle_clube cc
+                JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                JOIN propostas p ON cc.proposta_id = p.id
+                LEFT JOIN usuarios consultor ON p.consultor_id = consultor.id
+                LEFT JOIN unidades_consumidoras ug ON cc.ug_id = ug.id AND ug.gerador = true
+                WHERE cc.id IN ($placeholders) AND cc.deleted_at IS NULL
+            ", $controleIds);
+
+            $resultado = [];
+            foreach ($controles as $controle) {
+                $resultado[$controle->controle_id] = [
+                    'numero_unidade' => $controle->numero_unidade,
+                    'nome_cliente' => $controle->nome_cliente,
+                    'apelido' => $controle->apelido,
+                    'consumo_medio' => floatval($controle->consumo_medio),
+                    'desconto_tarifa' => $controle->desconto_tarifa ?? $controle->proposta_desconto_tarifa ?? '20%',
+                    'desconto_bandeira' => $controle->desconto_bandeira ?? $controle->proposta_desconto_bandeira ?? '20%',
+                    'cpf_cnpj' => $this->formatarCpfCnpj($controle->cpf_cnpj ?? ''),
+                    'consultor_nome' => $controle->consultor_nome ?? '',
+                    'ug_nome' => $controle->ug_nome ?? '',
+                    'ligacao' => $controle->ligacao ?? '',
+                    'endereco_completo' => $controle->endereco_uc ?? ''
+                ];
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $resultado
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao buscar detalhes em lote', [
+                'error' => $e->getMessage(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500);
+        }
+    }
+
     public function getUCDetalhes(string $controleId): JsonResponse
     {
         try {
