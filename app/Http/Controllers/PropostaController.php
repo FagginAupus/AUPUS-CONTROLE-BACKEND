@@ -495,9 +495,16 @@ class PropostaController extends Controller
             ]);
 
 
+            DB::beginTransaction();
+
+            // Processar consultor_id
             $consultorId = null;
             if ($request->has('consultor_id') && $request->consultor_id) {
                 $consultorId = $request->consultor_id;
+                // Limpar valores inválidos
+                if ($consultorId === 'null' || $consultorId === '') {
+                    $consultorId = null;
+                }
             } elseif ($request->has('consultor') && $request->consultor) {
                 // Buscar por nome se não vier ID
                 $consultorEncontrado = DB::selectOne("
@@ -505,21 +512,16 @@ class PropostaController extends Controller
                     WHERE nome = ? AND role IN ('admin', 'analista', 'consultor', 'gerente', 'vendedor')
                     AND deleted_at IS NULL
                 ", [$request->consultor]);
-                
+
                 if ($consultorEncontrado) {
                     $consultorId = $consultorEncontrado->id;
                 }
             }
-            DB::beginTransaction();
 
-            $consultorId = $request->consultor_id;
-            if (empty($consultorId) || $consultorId === 'null' || $consultorId === '') {
-                $consultorId = null;
-            }
-
-            // Ajustar recorrência automaticamente
+            // Processar recorrência
             $recorrencia = $request->recorrencia ?? '3%';
-            if ($consultorId === null && $recorrencia === '3%') {
+            // Se não tem consultor, recorrência deve ser 0%
+            if ($consultorId === null) {
                 $recorrencia = '0%';
             }
             // ✅ GERAR ID E NÚMERO DA PROPOSTA
