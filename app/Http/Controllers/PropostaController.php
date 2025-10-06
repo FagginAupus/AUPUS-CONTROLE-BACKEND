@@ -2129,23 +2129,43 @@ class PropostaController extends Controller
             } 
             // ✅ DOCUMENTOS GERAIS DA PROPOSTA
             else {
-                // Para documentos gerais, salvar no nível raiz
-                $documentacaoAtual[$tipoDocumento] = $nomeArquivo;
-                
-                // Também manter estrutura por UC se numeroUC foi fornecido
-                if ($numeroUC) {
-                    if (!isset($documentacaoAtual[$numeroUC])) {
-                        $documentacaoAtual[$numeroUC] = [];
+                // ✅ Verificar se é um documento extra
+                if (strpos($tipoDocumento, 'documentoExtra_') === 0) {
+                    // Inicializar array de documentos extras se não existir
+                    if (!isset($documentacaoAtual['documentosExtras'])) {
+                        $documentacaoAtual['documentosExtras'] = [];
                     }
-                    $documentacaoAtual[$numeroUC][$tipoDocumento] = $nomeArquivo;
+
+                    // Extrair índice do documento extra (ex: documentoExtra_0, documentoExtra_1)
+                    $indexExtra = str_replace('documentoExtra_', '', $tipoDocumento);
+
+                    // Adicionar documento extra ao array
+                    $documentacaoAtual['documentosExtras'][$indexExtra] = $nomeArquivo;
+
+                    Log::info('Documento extra adicionado à documentação', [
+                        'proposta_id' => $propostaId,
+                        'index' => $indexExtra,
+                        'arquivo' => $nomeArquivo
+                    ]);
+                } else {
+                    // Para documentos gerais, salvar no nível raiz
+                    $documentacaoAtual[$tipoDocumento] = $nomeArquivo;
+
+                    // Também manter estrutura por UC se numeroUC foi fornecido
+                    if ($numeroUC) {
+                        if (!isset($documentacaoAtual[$numeroUC])) {
+                            $documentacaoAtual[$numeroUC] = [];
+                        }
+                        $documentacaoAtual[$numeroUC][$tipoDocumento] = $nomeArquivo;
+                    }
+
+                    Log::info('Documento geral adicionado à documentação', [
+                        'proposta_id' => $propostaId,
+                        'numero_uc' => $numeroUC,
+                        'tipo' => $tipoDocumento,
+                        'arquivo' => $nomeArquivo
+                    ]);
                 }
-                
-                Log::info('Documento geral adicionado à documentação', [
-                    'proposta_id' => $propostaId,
-                    'numero_uc' => $numeroUC,
-                    'tipo' => $tipoDocumento,
-                    'arquivo' => $nomeArquivo
-                ]);
             }
 
             // ✅ CONVERTER PARA JSON E ATUALIZAR
@@ -2535,7 +2555,7 @@ class PropostaController extends Controller
                 'contratoLocacao' => 'Contrato de Locação',
                 'termoAdesao' => 'Termo de Adesão'
             ];
-            
+
             foreach ($tiposDocumentos as $tipo => $descricao) {
                 if (isset($documentacao[$tipo]) && !empty($documentacao[$tipo])) {
                     $arquivos[] = [
@@ -2545,6 +2565,21 @@ class PropostaController extends Controller
                         'url' => asset("storage/propostas/documentos/{$documentacao[$tipo]}"),
                         'descricao' => $descricao
                     ];
+                }
+            }
+
+            // ✅ DOCUMENTOS EXTRAS (dinâmicos)
+            if (isset($documentacao['documentosExtras']) && is_array($documentacao['documentosExtras'])) {
+                foreach ($documentacao['documentosExtras'] as $index => $docExtra) {
+                    if (!empty($docExtra)) {
+                        $arquivos[] = [
+                            'tipo' => 'documentoExtra',
+                            'numero_uc' => null,
+                            'nome_arquivo' => $docExtra,
+                            'url' => asset("storage/propostas/documentos/{$docExtra}"),
+                            'descricao' => "Documento Extra " . ($index + 1)
+                        ];
+                    }
                 }
             }
 
