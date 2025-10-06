@@ -1016,13 +1016,24 @@ class PropostaController extends Controller
                 }
             }
 
-            // REGRA: Se definiu como "sem consultor" E não definiu recorrência ainda, ajustar recorrência para 0%
+            // REGRA 1: Se definiu como "sem consultor" E não definiu recorrência ainda, ajustar recorrência para 0%
             if ($definindoSemConsultor && !$recorrenciaDefinida) {
                 $updateFields[] = 'recorrencia = ?';
                 $updateParams[] = '0%';
-                
+
                 Log::info('✅ Recorrência ajustada para 0% por estar sem consultor', [
                     'proposta_id' => $id
+                ]);
+            }
+
+            // REGRA 2: Se definiu consultor E não definiu recorrência ainda, ajustar recorrência para 3%
+            if ($processarConsultor && $consultorIdFinal !== null && !$recorrenciaDefinida) {
+                $updateFields[] = 'recorrencia = ?';
+                $updateParams[] = '3%';
+
+                Log::info('✅ Recorrência ajustada para 3% por ter consultor', [
+                    'proposta_id' => $id,
+                    'consultor_id' => $consultorIdFinal
                 ]);
             }
 
