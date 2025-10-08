@@ -76,9 +76,8 @@ return new class extends Migration
             'amostra' => $amostra->toArray()
         ]);
     }
-
     /**
-     * Reverse the migrations.
+     * Reverse the migrations
      *
      * ⚠️ ATENÇÃO: Este rollback define os descontos como NULL novamente
      * Use com cuidado pois pode causar perda de dados se houver descontos customizados
