@@ -3146,10 +3146,14 @@ class DocumentController extends Controller
                     ]
                 ]);
             } else {
+                // Se o documento não foi encontrado na Autentique, retorna 404
+                $statusCode = str_contains($result['message'], 'não encontrado') ? 404 : 422;
+
                 return response()->json([
                     'success' => false,
-                    'message' => $result['message'] ?? 'Erro ao sincronizar documento'
-                ], 500);
+                    'message' => $result['message'] ?? 'Erro ao sincronizar documento',
+                    'document_not_found' => $statusCode === 404 // Flag para frontend saber que pode resetar
+                ], $statusCode);
             }
 
         } catch (\Exception $e) {
