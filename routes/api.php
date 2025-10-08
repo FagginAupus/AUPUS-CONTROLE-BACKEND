@@ -648,8 +648,8 @@ Route::middleware('auth:api')->group(function () {
             ->middleware('permission:prospec.delete');
 
         // Sincronizar status do documento com Autentique
-        Route::post('{documento}/sync-status', [DocumentController::class, 'syncDocumentStatus'])
-            ->middleware('permission:prospec.edit');
+        Route::post('{documento}/sync-status', [DocumentController::class, 'syncDocumentStatus']);
+            //->middleware('permission:prospec.edit');
 
     });
 

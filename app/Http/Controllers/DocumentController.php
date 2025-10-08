@@ -3111,6 +3111,11 @@ class DocumentController extends Controller
     public function syncDocumentStatus($documentId): JsonResponse
     {
         try {
+            Log::info('🔄 Iniciando sincronização de status', [
+                'document_id' => $documentId,
+                'user_id' => auth()->id()
+            ]);
+
             $document = Document::findOrFail($documentId);
 
             if (!$document->autentique_id) {
@@ -3123,34 +3128,40 @@ class DocumentController extends Controller
             $autentiqueService = new AutentiqueService();
             $result = $autentiqueService->syncDocumentStatus($document);
 
+            Log::info('📊 Resultado da sincronização', [
+                'result' => $result
+            ]);
+
             if ($result['success']) {
                 return response()->json([
                     'success' => true,
-                    'message' => 'Status sincronizado com sucesso',
+                    'message' => $result['message'] ?? 'Status sincronizado com sucesso',
                     'data' => [
-                        'status_anterior' => $result['status_anterior'],
-                        'status_atual' => $result['status_novo'],
-                        'signed_count' => $result['signed_count'],
-                        'rejected_count' => $result['rejected_count'],
-                        'total_signers' => $result['total_signers']
+                        'status_changed' => $result['status_changed'] ?? false,
+                        'status_anterior' => $result['status_anterior'] ?? null,
+                        'status_atual' => $result['status_novo'] ?? null,
+                        'signed_count' => $result['signed_count'] ?? 0,
+                        'rejected_count' => $result['rejected_count'] ?? 0,
+                        'total_signers' => $result['total_signers'] ?? 0
                     ]
                 ]);
             } else {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Erro ao sincronizar: ' . $result['error']
+                    'message' => $result['message'] ?? 'Erro ao sincronizar documento'
                 ], 500);
             }
 
         } catch (\Exception $e) {
-            Log::error('Erro ao sincronizar documento', [
+            Log::error('❌ Erro ao sincronizar documento', [
                 'document_id' => $documentId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno na sincronização'
+                'message' => 'Erro interno na sincronização: ' . $e->getMessage()
             ], 500);
         }
     }
