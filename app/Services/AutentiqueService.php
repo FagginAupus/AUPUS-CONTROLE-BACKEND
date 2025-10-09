@@ -344,6 +344,11 @@ class AutentiqueService
     {
         $this->ensureTokenConfigured();
 
+        Log::info('🔍 Buscando documento na Autentique', [
+            'document_id' => $documentId,
+            'document_id_length' => strlen($documentId)
+        ]);
+
         $query = '
             query GetDocument($id: UUID!) {
                 document(id: $id) {
@@ -364,7 +369,18 @@ class AutentiqueService
             }
         ';
 
-        return $this->sendGraphQLRequest($query, ['id' => $documentId]);
+        $response = $this->sendGraphQLRequest($query, ['id' => $documentId]);
+
+        Log::info('📤 Resposta da query GetDocument', [
+            'document_id' => $documentId,
+            'response_structure' => [
+                'has_data' => isset($response['data']),
+                'has_errors' => isset($response['errors']),
+                'data_keys' => isset($response['data']) ? array_keys($response['data']) : null
+            ]
+        ]);
+
+        return $response;
     }
 
     /**
@@ -383,9 +399,20 @@ class AutentiqueService
             // Buscar dados atualizados na Autentique
             $response = $this->getDocument($localDocument->autentique_id);
 
+            Log::info('📥 Resposta completa da Autentique', [
+                'autentique_id' => $localDocument->autentique_id,
+                'response' => $response,
+                'has_data' => isset($response['data']),
+                'has_document' => isset($response['data']['document']),
+                'has_errors' => isset($response['errors'])
+            ]);
+
             if (!isset($response['data']['document'])) {
                 Log::warning('Documento não encontrado na Autentique', [
-                    'autentique_id' => $localDocument->autentique_id
+                    'autentique_id' => $localDocument->autentique_id,
+                    'response_keys' => array_keys($response),
+                    'data_keys' => isset($response['data']) ? array_keys($response['data']) : null,
+                    'errors' => $response['errors'] ?? null
                 ]);
                 return [
                     'success' => false,
