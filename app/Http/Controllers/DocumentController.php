@@ -102,7 +102,9 @@ class DocumentController extends Controller
                     'nomeCliente' => $proposta->nome_cliente,
                     'consultor' => $proposta->consultor,
                     'numeroUC' => $numeroUC,
-                    'nomeCliente' => $nomeCliente
+                    'nomeCliente' => $nomeCliente,
+                    // ✅ CORREÇÃO: Usar desconto_tarifa da proposta
+                    'descontoTarifa' => $proposta->desconto_tarifa
                 ]);
                 if (method_exists($this, 'tentarPreenchimentoPDFtk')) {
                     $pdfContent = $this->tentarPreenchimentoPDFtk($dadosCompletos);
@@ -123,6 +125,8 @@ class DocumentController extends Controller
                 'nome_cliente' => $proposta->nome_cliente,
                 'numeroUC' => $numeroUC,
                 'nomeCliente' => $nomeCliente,
+                // ✅ CORREÇÃO: Usar desconto_tarifa da proposta
+                'descontoTarifa' => $proposta->desconto_tarifa,
                 // ✅ CORREÇÃO: Nome do arquivo usando Nome Cliente + Número UC
                 'nome_documento' => "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}",
                 'opcoes_envio' => [
@@ -1431,7 +1435,9 @@ class DocumentController extends Controller
             $dadosCompletos = array_merge($request->all(), [
                 'numeroProposta' => $proposta->numero_proposta,
                 'nomeCliente' => $proposta->nome_cliente,
-                'consultor' => $proposta->consultor
+                'consultor' => $proposta->consultor,
+                // ✅ CORREÇÃO: Usar desconto_tarifa da proposta
+                'descontoTarifa' => $proposta->desconto_tarifa
             ]);
 
             Log::info('🎯 Tentando preenchimento de PDF com form fields');
@@ -2162,7 +2168,9 @@ class DocumentController extends Controller
                 'numeroProposta' => $proposta->numero_proposta,
                 'nomeCliente' => $proposta->nome_cliente,
                 'consultor' => $proposta->consultor,
-                'propostaId' => $propostaId
+                'propostaId' => $propostaId,
+                // ✅ CORREÇÃO: Usar desconto_tarifa da proposta
+                'descontoTarifa' => $proposta->desconto_tarifa
             ]);
 
             Log::info('🎯 Gerando PDF para visualização');
@@ -2305,7 +2313,9 @@ class DocumentController extends Controller
                 $dadosCompletos = array_merge($request->all(), [
                     'numeroProposta' => $proposta->numero_proposta,
                     'nomeCliente' => $proposta->nome_cliente,
-                    'consultor' => $proposta->consultor
+                    'consultor' => $proposta->consultor,
+                    // ✅ CORREÇÃO: Usar desconto_tarifa da proposta
+                    'descontoTarifa' => $proposta->desconto_tarifa
                 ]);
                 if (method_exists($this, 'tentarPreenchimentoPDFtk')) {
                     $pdfContent = $this->tentarPreenchimentoPDFtk($dadosCompletos);

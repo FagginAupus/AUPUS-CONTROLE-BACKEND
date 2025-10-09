@@ -402,16 +402,14 @@ class AutentiqueService
             Log::info('📥 Resposta completa da Autentique', [
                 'autentique_id' => $localDocument->autentique_id,
                 'response' => $response,
-                'has_data' => isset($response['data']),
-                'has_document' => isset($response['data']['document']),
+                'has_document' => isset($response['document']),
                 'has_errors' => isset($response['errors'])
             ]);
 
-            if (!isset($response['data']['document'])) {
+            if (!isset($response['document'])) {
                 Log::warning('Documento não encontrado na Autentique', [
                     'autentique_id' => $localDocument->autentique_id,
                     'response_keys' => array_keys($response),
-                    'data_keys' => isset($response['data']) ? array_keys($response['data']) : null,
                     'errors' => $response['errors'] ?? null
                 ]);
                 return [
@@ -420,7 +418,7 @@ class AutentiqueService
                 ];
             }
 
-            $autentiqueDoc = $response['data']['document'];
+            $autentiqueDoc = $response['document'];
             $signedCount = $autentiqueDoc['signed_count'] ?? 0;
             $rejectedCount = $autentiqueDoc['rejected_count'] ?? 0;
             $totalSigners = $localDocument->total_signers;
