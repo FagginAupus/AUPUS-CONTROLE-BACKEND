@@ -597,16 +597,13 @@ Route::middleware('auth:api')->group(function () {
         
         // ✅ NOVAS ROTAS - ADICIONAR AQUI NO INÍCIO
         Route::post('propostas/{proposta}/gerar-pdf-apenas', [DocumentController::class, 'gerarPdfApenas']);
-            //->middleware('permission:prospec.edit');
-        
+
         Route::post('propostas/{proposta}/enviar-para-autentique', [DocumentController::class, 'enviarParaAutentique']);
-           // ->middleware('permission:prospec.edit');
 
         Route::get('propostas/{proposta}/pdf-temporario', [DocumentController::class, 'verificarPdfTemporario']);
 
         Route::get('propostas/{proposta}/pdf-original', [DocumentController::class, 'buscarPDFOriginal'])
             ->middleware(['auth:api']);
-            //->middleware('permission:prospec.view');  // Comentado temporariamente
 
         Route::post('propostas/{proposta}/gerar-termo', [DocumentController::class, 'gerarTermoAdesao'])
             ->middleware('permission:prospec.edit');
@@ -619,13 +616,11 @@ Route::middleware('auth:api')->group(function () {
             
         // Buscar status do documento de uma proposta
         Route::get('propostas/{proposta}/status', [DocumentController::class, 'buscarStatusDocumento']);
-            //->middleware('permission:prospec.view');
-        
+
         Route::post('propostas/{proposta}/upload-termo-manual', [DocumentController::class, 'uploadTermoManual']);
-        
+
         Route::get('propostas/{proposta}/pdf-assinado', [DocumentController::class, 'baixarPDFAssinado'])
             ->name('documentos.pdf-assinado');
-            //->middleware('permission:prospec.view');
 
         Route::post('propostas/{proposta}/upload-termo-assinado', [DocumentController::class, 'uploadTermoAssinadoManual']);
         
@@ -649,15 +644,12 @@ Route::middleware('auth:api')->group(function () {
 
         // Sincronizar status do documento com Autentique
         Route::post('{documento}/sync-status', [DocumentController::class, 'syncDocumentStatus']);
-            //->middleware('permission:prospec.edit');
 
     });
 
     Route::delete('/documentos/propostas/{proposta}/cancelar-pendente', [DocumentController::class, 'cancelarDocumentoPendente']);
-        //->middleware('permission:prospec.edit');
 
     Route::post('/documentos/propostas/{proposta}/cancelar-termo-assinado', [DocumentController::class, 'cancelarTermoAssinado']);
-        //->middleware('permission:prospec.edit');
 
     // ==========================================
     // AUDITORIA - Sistema de log de eventos
