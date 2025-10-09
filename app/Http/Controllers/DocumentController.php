@@ -3113,10 +3113,19 @@ class DocumentController extends Controller
         try {
             Log::info('🔄 Iniciando sincronização de status', [
                 'document_id' => $documentId,
-                'user_id' => auth()->id()
+                'user_id' => auth()->id(),
+                'request_path' => request()->path(),
+                'request_method' => request()->method()
             ]);
 
             $document = Document::findOrFail($documentId);
+
+            Log::info('📄 Documento encontrado', [
+                'document_id' => $document->id,
+                'autentique_id' => $document->autentique_id,
+                'current_status' => $document->status,
+                'proposta_id' => $document->proposta_id
+            ]);
 
             if (!$document->autentique_id) {
                 return response()->json([
@@ -3156,16 +3165,32 @@ class DocumentController extends Controller
                 ], $statusCode);
             }
 
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            Log::error('❌ Documento não encontrado', [
+                'document_id' => $documentId,
+                'user_id' => auth()->id()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Documento não encontrado no sistema',
+                'document_not_found' => true
+            ], 404);
+
         } catch (\Exception $e) {
             Log::error('❌ Erro ao sincronizar documento', [
                 'document_id' => $documentId,
                 'error' => $e->getMessage(),
+                'error_class' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
                 'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno na sincronização: ' . $e->getMessage()
+                'message' => 'Erro interno na sincronização: ' . $e->getMessage(),
+                'error_type' => get_class($e)
             ], 500);
         }
     }
