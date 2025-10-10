@@ -1467,6 +1467,16 @@ class DocumentController extends Controller
             $numeroUC = $request->numeroUC;
             $nomeDocumento = "Procuracao e Termo de Adesao - {$nomeCliente} - UC {$numeroUC}";
 
+            // ✅ DEBUG: Log da estrutura do documento retornado
+            Log::info('🔍 DEBUG: Estrutura do documento da Autentique (método antigo)', [
+                'documento_keys' => array_keys($documento),
+                'tem_signatures' => isset($documento['signatures']),
+                'signatures_count' => isset($documento['signatures']) ? count($documento['signatures']) : 0,
+                'primeiro_signature' => $documento['signatures'][0] ?? null,
+                'link_data' => $documento['signatures'][0]['link'] ?? null,
+                'short_link' => $documento['signatures'][0]['link']['short_link'] ?? 'NÃO ENCONTRADO'
+            ]);
+
             $document = Document::create([
                 'proposta_id' => $proposta->id,
                 'autentique_id' => $documento['id'],
@@ -2425,8 +2435,19 @@ class DocumentController extends Controller
             $linkAssinatura = null;
 
             // Extrair link de assinatura
+            Log::info('🔍 DEBUG: Verificando link de assinatura', [
+                'documentoData_keys' => array_keys($documentoData),
+                'tem_signatures' => isset($documentoData['signatures']),
+                'signatures' => $documentoData['signatures'] ?? null,
+                'primeiro_signature' => $documentoData['signatures'][0] ?? null,
+                'link_data' => $documentoData['signatures'][0]['link'] ?? null
+            ]);
+
             if (isset($documentoData['signatures'][0]['link']['short_link'])) {
                 $linkAssinatura = $documentoData['signatures'][0]['link']['short_link'];
+                Log::info('✅ Link de assinatura extraído', ['link' => $linkAssinatura]);
+            } else {
+                Log::warning('⚠️ Link de assinatura não encontrado na resposta da Autentique');
             }
 
             // ✅ PREPARAR DADOS PARA SALVAR NO BANCO (usando dados do request)
