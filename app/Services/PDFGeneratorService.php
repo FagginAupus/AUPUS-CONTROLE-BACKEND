@@ -131,27 +131,51 @@ class PDFGeneratorService
     }
 
     /**
-     * Criar arquivo FDF para PDFtk
+     * Criar arquivo FDF para PDFtk com suporte UTF-8
      */
     private function criarArquivoFDF(array $mapeamento): string
     {
         $fdfPath = storage_path('app/temp/form_data_' . time() . '.fdf');
-        
-        $fdfContent = "%FDF-1.2\n1 0 obj\n<<\n/FDF << /Fields [";
-        
+
+        $fdfContent = "%FDF-1.2\n%âãÏÓ\n1 0 obj\n<<\n/FDF << /Fields [";
+
         foreach ($mapeamento as $campo => $valor) {
             if (!empty($valor)) {
-                $valorLimpo = $this->limparTextoParaPDF($valor);
-                $valorEscapado = str_replace(['(', ')', '\\'], ['\\(', '\\)', '\\\\'], $valorLimpo);
-                $fdfContent .= "\n<< /T ({$campo}) /V ({$valorEscapado}) >>";
+                // Garantir UTF-8 e não fazer conversão
+                if (!mb_check_encoding($valor, 'UTF-8')) {
+                    $valor = mb_convert_encoding($valor, 'UTF-8', 'auto');
+                }
+
+                // Converter para formato FDF UTF-8 usando notação de string hexadecimal
+                $valorHex = $this->stringToFDFHex($valor);
+                $fdfContent .= "\n<< /T ({$campo}) /V {$valorHex} >>";
             }
         }
-        
+
         $fdfContent .= "\n] >>\n>>\nendobj\ntrailer\n<<\n/Root 1 0 R\n>>\n%%EOF";
-        
-        file_put_contents($fdfPath, $fdfContent);
-        
+
+        // Escrever arquivo com UTF-8 BOM para garantir encoding
+        file_put_contents($fdfPath, "\xEF\xBB\xBF" . $fdfContent);
+
         return $fdfPath;
+    }
+
+    /**
+     * Converter string UTF-8 para formato hexadecimal do FDF
+     */
+    private function stringToFDFHex(string $texto): string
+    {
+        // Converter UTF-8 para UTF-16BE (Big Endian) que é suportado pelo PDF
+        $utf16be = mb_convert_encoding($texto, 'UTF-16BE', 'UTF-8');
+
+        // Converter para hexadecimal
+        $hex = '';
+        for ($i = 0; $i < strlen($utf16be); $i++) {
+            $hex .= sprintf('%02X', ord($utf16be[$i]));
+        }
+
+        // Retornar no formato FDF: <FEFF + hex>
+        return '<FEFF' . $hex . '>';
     }
 
     /**
@@ -319,11 +343,11 @@ startxref
         }
         
         // 2. ✅ SUBSTITUIR APENAS CARACTERES REALMENTE PROBLEMÁTICOS
+        // Acentos e cedilha são preservados (ã, á, é, í, ó, ú, â, ê, ô, à, ç, Ç)
         $substituicoes = [
             // Manter nº como n° (não como "no")
             'nº' => 'numero',    // Número - usa grau simples
             'Nº' => 'numero',    // Número maiúsculo
-            'ç' => 'c',    // Número maiúsculo
             // Caracteres especiais problemáticos
             '€' => 'EUR',    // Euro
             '£' => 'GBP',    // Libra
