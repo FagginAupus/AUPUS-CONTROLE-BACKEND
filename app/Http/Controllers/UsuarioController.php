@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Usuario;
 use App\Models\Notificacao;
+use App\Helpers\TextHelper;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -800,8 +801,8 @@ class UsuarioController extends Controller implements HasMiddleware
         }
 
         try {
-            // Padronizar nome (primeira letra maiúscula)
-            $nomeFormatado = ucwords(strtolower(trim($request->nome)));
+            // Padronizar nome (primeira letra maiúscula) - UTF-8 safe
+            $nomeFormatado = TextHelper::formatarNomeProprio($request->nome);
 
             $analista = Usuario::create([
                 'nome' => $nomeFormatado,

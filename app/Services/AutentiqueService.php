@@ -41,7 +41,7 @@ class AutentiqueService
         if (!$this->token) {
             // ✅ CORREÇÃO: Tentar recarregar o token do env
             $this->token = env('AUTENTIQUE_API_TOKEN');
-            
+
             if (!$this->token) {
                 Log::error('Token da Autentique não configurado', [
                     'env_dump' => [
@@ -57,14 +57,59 @@ class AutentiqueService
     }
 
     /**
+     * Formata nome próprio com primeira letra de cada palavra em maiúscula
+     * Mantém preposições e artigos em minúsculo (de, da, dos, das, do, e)
+     */
+    private function formatarNomeProprio(?string $nome): string
+    {
+        if (empty($nome)) {
+            return '';
+        }
+
+        // Garantir UTF-8
+        if (!mb_check_encoding($nome, 'UTF-8')) {
+            $nome = mb_convert_encoding($nome, 'UTF-8', 'auto');
+        }
+
+        // Remover espaços extras
+        $nome = trim(preg_replace('/\s+/', ' ', $nome));
+
+        // Converter para minúsculo primeiro
+        $nome = mb_strtolower($nome, 'UTF-8');
+
+        // Lista de preposições e artigos que devem ficar em minúsculo
+        $minusculas = ['de', 'da', 'do', 'dos', 'das', 'e', 'a', 'o', 'as', 'os'];
+
+        // Separar palavras
+        $palavras = explode(' ', $nome);
+
+        // Processar cada palavra
+        $palavrasFormatadas = [];
+        foreach ($palavras as $index => $palavra) {
+            // Primeira palavra sempre em maiúscula, ou se não for preposição/artigo
+            if ($index === 0 || !in_array($palavra, $minusculas)) {
+                $palavrasFormatadas[] = mb_convert_case($palavra, MB_CASE_TITLE, 'UTF-8');
+            } else {
+                $palavrasFormatadas[] = $palavra;
+            }
+        }
+
+        return implode(' ', $palavrasFormatadas);
+    }
+
+    /**
      * Cria um documento na Autentique a partir dos dados da proposta
      */
 
     public function createDocumentFromProposta($propostaData, $signers, $pdfContent, $sandbox = true)
     {
         $this->ensureTokenConfigured();
-        $nomeDocumento = $propostaData['nome_documento'] ?? 
-                     "Procuracao e Termo de Adesao - " . ($propostaData['nome_cliente'] ?? $propostaData['nomeCliente']) . 
+
+        // Formatar nome do cliente
+        $nomeCliente = $this->formatarNomeProprio($propostaData['nome_cliente'] ?? $propostaData['nomeCliente'] ?? '');
+
+        $nomeDocumento = $propostaData['nome_documento'] ??
+                     "Procuracao e Termo de Adesao - " . $nomeCliente .
                      " - UC " . ($propostaData['numeroUC'] ?? 'UC');
         // Preparar dados do documento
         $documentData = [
@@ -103,7 +148,7 @@ class AutentiqueService
                     $processedSigners[] = [
                         'email' => $signer['email'],
                         'action' => $signer['action'] ?? 'SIGN',
-                        'name' => $signer['name'] ?? ''
+                        'name' => $this->formatarNomeProprio($signer['name'] ?? '')
                     ];
                     
                     Log::info('✅ Email + WhatsApp: Criado signatário por email', [
@@ -120,7 +165,7 @@ class AutentiqueService
                     $processedSigners[] = [
                         'email' => $signer['email'],
                         'action' => $signer['action'] ?? 'SIGN',
-                        'name' => $signer['name'] ?? ''
+                        'name' => $this->formatarNomeProprio($signer['name'] ?? '')
                     ];
                     
                     Log::info('✅ Apenas Email: Criado signatário por email', [
@@ -232,9 +277,9 @@ class AutentiqueService
                 'signers' => $signers,
                 'file' => null
             ]
-        ]);
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        $map = json_encode(['file' => ['variables.file']]);
+        $map = json_encode(['file' => ['variables.file']], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         // Configuração cURL com Content-Type correto para PDF
         $curl = curl_init();
@@ -247,10 +292,12 @@ class AutentiqueService
                 'file' => new \CURLFile($filePath, 'application/pdf', 'document.pdf') // Nome fixo .pdf
             ],
             CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer ' . $this->token
+                'Authorization: Bearer ' . $this->token,
+                'Accept-Charset: utf-8'
             ],
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 60
+            CURLOPT_TIMEOUT => 60,
+            CURLOPT_ENCODING => 'UTF-8'
         ]);
 
         $response = curl_exec($curl);
@@ -773,7 +820,7 @@ class AutentiqueService
                     $signatarios[] = [
                         'email' => $signatario['email'],
                         'action' => 'SIGN',
-                        'name' => $signatario['nome'] ?? ''
+                        'name' => $this->formatarNomeProprio($signatario['nome'] ?? '')
                     ];
                     
                 } elseif (!$hasEmail && $hasPhone) {
@@ -789,7 +836,7 @@ class AutentiqueService
                     $signatarios[] = [
                         'email' => $signatario['email'],
                         'action' => 'SIGN',
-                        'name' => $signatario['nome'] ?? ''
+                        'name' => $this->formatarNomeProprio($signatario['nome'] ?? '')
                     ];
                     
                 } else {
