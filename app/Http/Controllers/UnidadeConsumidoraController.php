@@ -770,4 +770,123 @@ class UnidadeConsumidoraController extends Controller
     {
         return $this->transformUGForAPI($ug, $currentUser);
     }
+
+    /**
+     * ✅ MÉTODO CRIADO: Atualização em massa de consumo_medio de UCs
+     */
+    public function bulkUpdate(Request $request): JsonResponse
+    {
+        $currentUser = JWTAuth::user();
+
+        if (!$currentUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado'
+            ], 401);
+        }
+
+        try {
+            // Validar dados recebidos
+            $validator = Validator::make($request->all(), [
+                'updates' => 'required|array|min:1',
+                'updates.*.numero_unidade' => 'required|string',
+                'updates.*.consumo_medio' => 'required|numeric|min:0'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados inválidos',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $updates = $request->input('updates');
+            $ucsAtualizadas = [];
+            $erros = [];
+
+            DB::beginTransaction();
+
+            try {
+                foreach ($updates as $updateData) {
+                    $numeroUnidade = $updateData['numero_unidade'];
+                    $consumoMedio = $updateData['consumo_medio'];
+
+                    // Buscar UC pelo numero_unidade
+                    $uc = UnidadeConsumidora::where('numero_unidade', $numeroUnidade)
+                                           ->whereNull('deleted_at')
+                                           ->first();
+
+                    if (!$uc) {
+                        $erros[] = [
+                            'numero_unidade' => $numeroUnidade,
+                            'erro' => 'Unidade não encontrada'
+                        ];
+                        continue;
+                    }
+
+                    // Verificar permissão
+                    if (!$this->canEditUnidade($currentUser, $uc)) {
+                        $erros[] = [
+                            'numero_unidade' => $numeroUnidade,
+                            'erro' => 'Sem permissão para editar esta unidade'
+                        ];
+                        continue;
+                    }
+
+                    // Atualizar consumo_medio
+                    $uc->update([
+                        'consumo_medio' => $consumoMedio
+                    ]);
+
+                    $ucsAtualizadas[] = [
+                        'id' => $uc->id,
+                        'numero_unidade' => $uc->numero_unidade,
+                        'consumo_medio_antigo' => $uc->getOriginal('consumo_medio'),
+                        'consumo_medio_novo' => $consumoMedio
+                    ];
+
+                    Log::info('UC atualizada via bulk-update', [
+                        'uc_id' => $uc->id,
+                        'numero_unidade' => $numeroUnidade,
+                        'consumo_medio_antigo' => $uc->getOriginal('consumo_medio'),
+                        'consumo_medio_novo' => $consumoMedio,
+                        'user_id' => $currentUser->id
+                    ]);
+                }
+
+                DB::commit();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => count($ucsAtualizadas) > 0
+                        ? count($ucsAtualizadas) . ' UC(s) atualizada(s) com sucesso!'
+                        : 'Nenhuma UC foi atualizada',
+                    'data' => [
+                        'atualizadas' => $ucsAtualizadas,
+                        'erros' => $erros,
+                        'total_enviadas' => count($updates),
+                        'total_atualizadas' => count($ucsAtualizadas),
+                        'total_erros' => count($erros)
+                    ]
+                ]);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao fazer bulk update de UCs', [
+                'user_id' => $currentUser->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao atualizar UCs: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
