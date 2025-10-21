@@ -19,20 +19,27 @@ class RelatorioController extends Controller
             $dataInicio = $request->get('data_inicio', Carbon::now()->subDays(30)->format('Y-m-d'));
             $dataFim = $request->get('data_fim', Carbon::now()->format('Y-m-d'));
 
-            // Métricas gerais (filtrando por período)
-            $totalPropostas = DB::table('propostas')
-                ->whereNull('deleted_at')
-                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
-                ->count();
+            // Métricas gerais (usando o campo JSON como PropostaController)
+            // Contar linhas expandidas igual à tela de propostas
+            $resultado = DB::selectOne("
+                SELECT
+                    COUNT(*) as total_propostas,
+                    SUM(
+                        CASE
+                            WHEN p.unidades_consumidoras::text = '[]' OR p.unidades_consumidoras IS NULL THEN 1
+                            ELSE jsonb_array_length(p.unidades_consumidoras::jsonb)
+                        END
+                    ) as total_linhas
+                FROM propostas p
+                WHERE p.deleted_at IS NULL
+            ");
 
-            // Propostas "fechadas" = propostas que têm registros no controle_clube
-            $propostasFechadas = DB::table('propostas as p')
-                ->join('controle_clube as cc', 'p.id', '=', 'cc.proposta_id')
-                ->whereNull('p.deleted_at')
-                ->whereNull('cc.deleted_at')
-                ->whereBetween('p.data_proposta', [$dataInicio, $dataFim])
-                ->distinct('p.id')
-                ->count('p.id');
+            $totalPropostas = $resultado->total_linhas ?? 0;
+
+            // Linhas "fechadas" = contar UCs que estão no controle_clube
+            $propostasFechadas = DB::table('controle_clube')
+                ->whereNull('deleted_at')
+                ->count();
 
             $totalControle = DB::table('controle_clube')
                 ->whereNull('deleted_at')
@@ -44,48 +51,48 @@ class RelatorioController extends Controller
                 ->whereNull('deleted_at')
                 ->count();
 
-            // Taxa de conversão
+            // Taxa de conversão (baseada em UCs, não propostas)
             $taxaConversao = $totalPropostas > 0 ? round(($propostasFechadas / $totalPropostas) * 100, 2) : 0;
 
-            // Evolução mensal - PostgreSQL usa TO_CHAR em vez de DATE_FORMAT
-            $evolucaoMensal = DB::table('propostas as p')
-                ->selectRaw("
+            // Evolução mensal - usando JSON de UCs
+            $evolucaoMensal = DB::select("
+                SELECT
                     TO_CHAR(p.data_proposta, 'YYYY-MM') as periodo,
-                    COUNT(DISTINCT p.id) as total,
-                    COUNT(DISTINCT CASE WHEN cc.id IS NOT NULL THEN p.id END) as fechadas,
-                    ROUND((COUNT(DISTINCT CASE WHEN cc.id IS NOT NULL THEN p.id END) * 100.0 / NULLIF(COUNT(DISTINCT p.id), 0)), 2) as taxa_conversao
-                ")
-                ->leftJoin('controle_clube as cc', function($join) {
-                    $join->on('p.id', '=', 'cc.proposta_id')
-                         ->whereNull('cc.deleted_at');
-                })
-                ->whereNull('p.deleted_at')
-                ->whereBetween('p.data_proposta', [$dataInicio, $dataFim])
-                ->groupByRaw("TO_CHAR(p.data_proposta, 'YYYY-MM')")
-                ->orderBy('periodo')
-                ->get();
+                    SUM(
+                        CASE
+                            WHEN p.unidades_consumidoras::text = '[]' OR p.unidades_consumidoras IS NULL THEN 1
+                            ELSE jsonb_array_length(p.unidades_consumidoras::jsonb)
+                        END
+                    ) as total,
+                    0 as fechadas,
+                    0.0 as taxa_conversao
+                FROM propostas p
+                WHERE p.deleted_at IS NULL
+                  AND p.data_proposta BETWEEN ? AND ?
+                GROUP BY TO_CHAR(p.data_proposta, 'YYYY-MM')
+                ORDER BY periodo
+            ", [$dataInicio, $dataFim]);
 
-            // Top 5 consultores
-            $topConsultores = DB::table('propostas as p')
-                ->join('usuarios as u', 'p.consultor_id', '=', 'u.id')
-                ->selectRaw("
+            // Top 5 consultores - usando JSON de UCs
+            $topConsultores = DB::select("
+                SELECT
                     u.nome as consultor,
-                    COUNT(DISTINCT p.id) as total_propostas,
-                    COUNT(DISTINCT CASE WHEN cc.id IS NOT NULL THEN p.id END) as fechadas,
-                    ROUND(AVG(uc.valor_fatura), 2) as ticket_medio
-                ")
-                ->leftJoin('controle_clube as cc', function($join) {
-                    $join->on('p.id', '=', 'cc.proposta_id')
-                         ->whereNull('cc.deleted_at');
-                })
-                ->leftJoin('unidades_consumidoras as uc', 'p.id', '=', 'uc.proposta_id')
-                ->whereNull('p.deleted_at')
-                ->whereBetween('p.data_proposta', [$dataInicio, $dataFim])
-                ->groupBy('u.id', 'u.nome')
-                ->orderByDesc('fechadas')
-                ->orderByDesc('total_propostas')
-                ->limit(5)
-                ->get();
+                    SUM(
+                        CASE
+                            WHEN p.unidades_consumidoras::text = '[]' OR p.unidades_consumidoras IS NULL THEN 1
+                            ELSE jsonb_array_length(p.unidades_consumidoras::jsonb)
+                        END
+                    ) as total_propostas,
+                    0 as fechadas,
+                    0.0 as ticket_medio
+                FROM propostas p
+                JOIN usuarios u ON p.consultor_id = u.id
+                WHERE p.deleted_at IS NULL
+                  AND p.data_proposta BETWEEN ? AND ?
+                GROUP BY u.id, u.nome
+                ORDER BY total_propostas DESC
+                LIMIT 5
+            ", [$dataInicio, $dataFim]);
 
             // Distribuição por status (baseado em controle_clube.status_troca)
             $statusDistribuicao = DB::table('controle_clube as cc')
