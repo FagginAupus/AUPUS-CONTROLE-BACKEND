@@ -21,60 +21,84 @@ class RelatorioController extends Controller
 
             // Métricas gerais (filtrando por período)
             $totalPropostas = DB::table('propostas')
+                ->whereNull('deleted_at')
                 ->whereBetween('data_proposta', [$dataInicio, $dataFim])
                 ->count();
 
-            $propostasFechadas = DB::table('propostas')
-                ->where('status_proposta', 'fechada')
-                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
-                ->count();
+            // Propostas "fechadas" = propostas que têm registros no controle_clube
+            $propostasFechadas = DB::table('propostas as p')
+                ->join('controle_clube as cc', 'p.id', '=', 'cc.proposta_id')
+                ->whereNull('p.deleted_at')
+                ->whereNull('cc.deleted_at')
+                ->whereBetween('p.data_proposta', [$dataInicio, $dataFim])
+                ->distinct('p.id')
+                ->count('p.id');
 
             $totalControle = DB::table('controle_clube')
                 ->whereNull('deleted_at')
                 ->count();
 
-            $totalUGs = DB::table('unidades_geradoras')
+            // Total de UGs (unidades geradoras = unidades_consumidoras onde gerador = true)
+            $totalUGs = DB::table('unidades_consumidoras')
+                ->where('gerador', true)
+                ->whereNull('deleted_at')
                 ->count();
 
             // Taxa de conversão
             $taxaConversao = $totalPropostas > 0 ? round(($propostasFechadas / $totalPropostas) * 100, 2) : 0;
 
-            // Evolução mensal
-            $evolucaoMensal = DB::table('propostas')
+            // Evolução mensal - PostgreSQL usa TO_CHAR em vez de DATE_FORMAT
+            $evolucaoMensal = DB::table('propostas as p')
                 ->selectRaw("
-                    DATE_FORMAT(data_proposta, '%Y-%m') as periodo,
-                    COUNT(*) as total,
-                    SUM(CASE WHEN status_proposta = 'fechada' THEN 1 ELSE 0 END) as fechadas,
-                    ROUND((SUM(CASE WHEN status_proposta = 'fechada' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)), 2) as taxa_conversao
+                    TO_CHAR(p.data_proposta, 'YYYY-MM') as periodo,
+                    COUNT(DISTINCT p.id) as total,
+                    COUNT(DISTINCT CASE WHEN cc.id IS NOT NULL THEN p.id END) as fechadas,
+                    ROUND((COUNT(DISTINCT CASE WHEN cc.id IS NOT NULL THEN p.id END) * 100.0 / NULLIF(COUNT(DISTINCT p.id), 0)), 2) as taxa_conversao
                 ")
-                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
-                ->groupBy('periodo')
+                ->leftJoin('controle_clube as cc', function($join) {
+                    $join->on('p.id', '=', 'cc.proposta_id')
+                         ->whereNull('cc.deleted_at');
+                })
+                ->whereNull('p.deleted_at')
+                ->whereBetween('p.data_proposta', [$dataInicio, $dataFim])
+                ->groupByRaw("TO_CHAR(p.data_proposta, 'YYYY-MM')")
                 ->orderBy('periodo')
                 ->get();
 
             // Top 5 consultores
-            $topConsultores = DB::table('propostas')
+            $topConsultores = DB::table('propostas as p')
+                ->join('usuarios as u', 'p.consultor_id', '=', 'u.id')
                 ->selectRaw("
-                    consultor,
-                    COUNT(*) as total_propostas,
-                    SUM(CASE WHEN status_proposta = 'fechada' THEN 1 ELSE 0 END) as fechadas,
-                    ROUND(AVG(CASE WHEN status_proposta = 'fechada' THEN valor_uc ELSE NULL END), 2) as ticket_medio
+                    u.nome as consultor,
+                    COUNT(DISTINCT p.id) as total_propostas,
+                    COUNT(DISTINCT CASE WHEN cc.id IS NOT NULL THEN p.id END) as fechadas,
+                    ROUND(AVG(uc.valor_fatura), 2) as ticket_medio
                 ")
-                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
-                ->groupBy('consultor')
+                ->leftJoin('controle_clube as cc', function($join) {
+                    $join->on('p.id', '=', 'cc.proposta_id')
+                         ->whereNull('cc.deleted_at');
+                })
+                ->leftJoin('unidades_consumidoras as uc', 'p.id', '=', 'uc.proposta_id')
+                ->whereNull('p.deleted_at')
+                ->whereBetween('p.data_proposta', [$dataInicio, $dataFim])
+                ->groupBy('u.id', 'u.nome')
                 ->orderByDesc('fechadas')
+                ->orderByDesc('total_propostas')
                 ->limit(5)
                 ->get();
 
-            // Distribuição por status
-            $statusDistribuicao = DB::table('propostas')
+            // Distribuição por status (baseado em controle_clube.status_troca)
+            $statusDistribuicao = DB::table('controle_clube as cc')
+                ->join('propostas as p', 'cc.proposta_id', '=', 'p.id')
                 ->selectRaw("
-                    status_proposta,
+                    cc.status_troca as status_proposta,
                     COUNT(*) as quantidade,
-                    ROUND((COUNT(*) * 100.0 / (SELECT COUNT(*) FROM propostas WHERE data_proposta BETWEEN ? AND ?)), 2) as percentual
-                ", [$dataInicio, $dataFim])
-                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
-                ->groupBy('status_proposta')
+                    ROUND((COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM controle_clube WHERE deleted_at IS NULL), 0)), 2) as percentual
+                ")
+                ->whereNull('cc.deleted_at')
+                ->whereNull('p.deleted_at')
+                ->whereBetween('p.data_proposta', [$dataInicio, $dataFim])
+                ->groupBy('cc.status_troca')
                 ->get();
 
             return response()->json([
