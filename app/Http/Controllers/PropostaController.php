@@ -242,63 +242,105 @@ class PropostaController extends Controller
     private function validarUcsDisponiveis(array $ucsArray): array
     {
         $ucsComPropostaAtiva = [];
-        
+
         foreach ($ucsArray as $uc) {
             $numeroUC = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
-            
+
             if (empty($numeroUC)) {
                 continue; // Pular UCs sem número
             }
-            
-            // ✅ VERSÃO POSTGRESQL - Usar jsonb_array_elements()
-            $propostasAtivas = DB::select("
-                SELECT DISTINCT 
-                    p.id, 
-                    p.numero_proposta, 
+
+            // ✅ VERIFICAR 1: Campo JSON unidades_consumidoras na tabela propostas
+            $propostasAtivasJSON = DB::select("
+                SELECT DISTINCT
+                    p.id,
+                    p.numero_proposta,
                     p.nome_cliente,
                     uc_data->>'status' as status_uc
                 FROM propostas p,
                 jsonb_array_elements(p.unidades_consumidoras::jsonb) as uc_data
                 WHERE p.deleted_at IS NULL
                 AND (
-                    uc_data->>'numero_unidade' = ? OR 
+                    uc_data->>'numero_unidade' = ? OR
                     uc_data->>'numeroUC' = ?
                 )
                 AND uc_data->>'status' NOT IN ('Cancelada', 'Perdida', 'Recusada')
             ", [$numeroUC, $numeroUC]);
-            
-            if (!empty($propostasAtivas)) {
-                foreach ($propostasAtivas as $proposta) {
+
+            if (!empty($propostasAtivasJSON)) {
+                foreach ($propostasAtivasJSON as $proposta) {
                     $ucsComPropostaAtiva[] = [
                         'numero_uc' => $numeroUC,
                         'apelido' => $uc['apelido'] ?? "UC {$numeroUC}",
                         'proposta_numero' => $proposta->numero_proposta,
                         'proposta_cliente' => $proposta->nome_cliente,
-                        'status_atual' => $proposta->status_uc ?? 'Aguardando'
+                        'status_atual' => $proposta->status_uc ?? 'Aguardando',
+                        'origem' => 'propostas.unidades_consumidoras'
                     ];
                 }
             }
+
+            // ✅ VERIFICAR 2: Tabela controle_clube (UCs no Nexus Clube)
+            $propostasAtivasControleClube = DB::select("
+                SELECT DISTINCT
+                    p.id,
+                    p.numero_proposta,
+                    p.nome_cliente,
+                    cc.status_troca
+                FROM controle_clube cc
+                INNER JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                INNER JOIN propostas p ON cc.proposta_id = p.id
+                WHERE uc.numero_unidade = ?
+                AND cc.deleted_at IS NULL
+                AND p.deleted_at IS NULL
+                AND cc.status_troca IN ('Esteira', 'Em andamento', 'Concluído')
+            ", [$numeroUC]);
+
+            if (!empty($propostasAtivasControleClube)) {
+                foreach ($propostasAtivasControleClube as $proposta) {
+                    // Evitar duplicatas
+                    $jaCadastrado = false;
+                    foreach ($ucsComPropostaAtiva as $ucJaCadastrada) {
+                        if ($ucJaCadastrada['numero_uc'] == $numeroUC &&
+                            $ucJaCadastrada['proposta_numero'] == $proposta->numero_proposta) {
+                            $jaCadastrado = true;
+                            break;
+                        }
+                    }
+
+                    if (!$jaCadastrado) {
+                        $ucsComPropostaAtiva[] = [
+                            'numero_uc' => $numeroUC,
+                            'apelido' => $uc['apelido'] ?? "UC {$numeroUC}",
+                            'proposta_numero' => $proposta->numero_proposta,
+                            'proposta_cliente' => $proposta->nome_cliente,
+                            'status_atual' => $proposta->status_troca ?? 'Em processo',
+                            'origem' => 'controle_clube'
+                        ];
+                    }
+                }
+            }
         }
-        
+
         return $ucsComPropostaAtiva;
     }
 
     private function validarUcsDisponiveisParaEdicao(array $ucsArray, string $propostaId): array
     {
         $ucsComPropostaAtiva = [];
-        
+
         foreach ($ucsArray as $uc) {
             $numeroUC = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
-            
+
             if (empty($numeroUC)) {
                 continue;
             }
-            
-            // ✅ VERSÃO POSTGRESQL - EXCLUIR PROPOSTA ATUAL
-            $propostasAtivas = DB::select("
-                SELECT DISTINCT 
-                    p.id, 
-                    p.numero_proposta, 
+
+            // ✅ VERIFICAR 1: Campo JSON unidades_consumidoras na tabela propostas (EXCLUINDO PROPOSTA ATUAL)
+            $propostasAtivasJSON = DB::select("
+                SELECT DISTINCT
+                    p.id,
+                    p.numero_proposta,
                     p.nome_cliente,
                     uc_data->>'status' as status_uc
                 FROM propostas p,
@@ -306,25 +348,68 @@ class PropostaController extends Controller
                 WHERE p.deleted_at IS NULL
                 AND p.id != ?
                 AND (
-                    uc_data->>'numero_unidade' = ? OR 
+                    uc_data->>'numero_unidade' = ? OR
                     uc_data->>'numeroUC' = ?
                 )
                 AND uc_data->>'status' NOT IN ('Cancelada', 'Perdida', 'Recusada')
             ", [$propostaId, $numeroUC, $numeroUC]);
-            
-            if (!empty($propostasAtivas)) {
-                foreach ($propostasAtivas as $proposta) {
+
+            if (!empty($propostasAtivasJSON)) {
+                foreach ($propostasAtivasJSON as $proposta) {
                     $ucsComPropostaAtiva[] = [
                         'numero_uc' => $numeroUC,
                         'apelido' => $uc['apelido'] ?? "UC {$numeroUC}",
                         'proposta_numero' => $proposta->numero_proposta,
                         'proposta_cliente' => $proposta->nome_cliente,
-                        'status_atual' => $proposta->status_uc ?? 'Aguardando'
+                        'status_atual' => $proposta->status_uc ?? 'Aguardando',
+                        'origem' => 'propostas.unidades_consumidoras'
                     ];
                 }
             }
+
+            // ✅ VERIFICAR 2: Tabela controle_clube (EXCLUINDO PROPOSTA ATUAL)
+            $propostasAtivasControleClube = DB::select("
+                SELECT DISTINCT
+                    p.id,
+                    p.numero_proposta,
+                    p.nome_cliente,
+                    cc.status_troca
+                FROM controle_clube cc
+                INNER JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                INNER JOIN propostas p ON cc.proposta_id = p.id
+                WHERE uc.numero_unidade = ?
+                AND cc.deleted_at IS NULL
+                AND p.deleted_at IS NULL
+                AND p.id != ?
+                AND cc.status_troca IN ('Esteira', 'Em andamento', 'Concluído')
+            ", [$numeroUC, $propostaId]);
+
+            if (!empty($propostasAtivasControleClube)) {
+                foreach ($propostasAtivasControleClube as $proposta) {
+                    // Evitar duplicatas
+                    $jaCadastrado = false;
+                    foreach ($ucsComPropostaAtiva as $ucJaCadastrada) {
+                        if ($ucJaCadastrada['numero_uc'] == $numeroUC &&
+                            $ucJaCadastrada['proposta_numero'] == $proposta->numero_proposta) {
+                            $jaCadastrado = true;
+                            break;
+                        }
+                    }
+
+                    if (!$jaCadastrado) {
+                        $ucsComPropostaAtiva[] = [
+                            'numero_uc' => $numeroUC,
+                            'apelido' => $uc['apelido'] ?? "UC {$numeroUC}",
+                            'proposta_numero' => $proposta->numero_proposta,
+                            'proposta_cliente' => $proposta->nome_cliente,
+                            'status_atual' => $proposta->status_troca ?? 'Em processo',
+                            'origem' => 'controle_clube'
+                        ];
+                    }
+                }
+            }
         }
-        
+
         return $ucsComPropostaAtiva;
     }
 
@@ -335,7 +420,7 @@ class PropostaController extends Controller
     {
         try {
             $currentUser = JWTAuth::user();
-            
+
             if (!$currentUser) {
                 return response()->json([
                     'success' => false,
@@ -343,36 +428,77 @@ class PropostaController extends Controller
                 ], 401);
             }
 
-            // ✅ VERIFICAR SE A UC TEM PROPOSTAS ATIVAS (PostgreSQL)
-            $propostasAtivas = DB::select("
-                SELECT DISTINCT 
-                    p.id, 
-                    p.numero_proposta, 
+            $todasPropostasAtivas = [];
+
+            // ✅ VERIFICAR 1: Campo JSON unidades_consumidoras
+            $propostasAtivasJSON = DB::select("
+                SELECT DISTINCT
+                    p.id,
+                    p.numero_proposta,
                     p.nome_cliente,
                     uc_data->>'status' as status_uc
                 FROM propostas p,
                 jsonb_array_elements(p.unidades_consumidoras::jsonb) as uc_data
                 WHERE p.deleted_at IS NULL
                 AND (
-                    uc_data->>'numero_unidade' = ? OR 
+                    uc_data->>'numero_unidade' = ? OR
                     uc_data->>'numeroUC' = ?
                 )
                 AND uc_data->>'status' NOT IN ('Cancelada', 'Perdida', 'Recusada')
             ", [$numero, $numero]);
 
-            $disponivel = empty($propostasAtivas);
+            foreach ($propostasAtivasJSON as $proposta) {
+                $todasPropostasAtivas[] = [
+                    'numero_proposta' => $proposta->numero_proposta,
+                    'nome_cliente' => $proposta->nome_cliente,
+                    'status' => $proposta->status_uc ?? 'Aguardando',
+                    'origem' => 'propostas.unidades_consumidoras'
+                ];
+            }
+
+            // ✅ VERIFICAR 2: Tabela controle_clube
+            $propostasAtivasControleClube = DB::select("
+                SELECT DISTINCT
+                    p.id,
+                    p.numero_proposta,
+                    p.nome_cliente,
+                    cc.status_troca
+                FROM controle_clube cc
+                INNER JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
+                INNER JOIN propostas p ON cc.proposta_id = p.id
+                WHERE uc.numero_unidade = ?
+                AND cc.deleted_at IS NULL
+                AND p.deleted_at IS NULL
+                AND cc.status_troca IN ('Esteira', 'Em andamento', 'Concluído')
+            ", [$numero]);
+
+            foreach ($propostasAtivasControleClube as $proposta) {
+                // Evitar duplicatas
+                $jaCadastrado = false;
+                foreach ($todasPropostasAtivas as $propostaExistente) {
+                    if ($propostaExistente['numero_proposta'] == $proposta->numero_proposta) {
+                        $jaCadastrado = true;
+                        break;
+                    }
+                }
+
+                if (!$jaCadastrado) {
+                    $todasPropostasAtivas[] = [
+                        'numero_proposta' => $proposta->numero_proposta,
+                        'nome_cliente' => $proposta->nome_cliente,
+                        'status' => $proposta->status_troca ?? 'Em processo',
+                        'origem' => 'controle_clube'
+                    ];
+                }
+            }
+
+            $disponivel = empty($todasPropostasAtivas);
 
             return response()->json([
                 'success' => true,
                 'disponivel' => $disponivel,
                 'numero_uc' => $numero,
-                'propostas_ativas' => array_map(function($proposta) {
-                    return [
-                        'numero_proposta' => $proposta->numero_proposta,
-                        'nome_cliente' => $proposta->nome_cliente,
-                        'status' => $proposta->status_uc ?? 'Aguardando'
-                    ];
-                }, $propostasAtivas)
+                'propostas_ativas' => $todasPropostasAtivas
             ]);
 
         } catch (\Exception $e) {
