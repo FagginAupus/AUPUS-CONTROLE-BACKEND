@@ -19,14 +19,63 @@ class RelatorioController extends Controller
             $dataInicio = $request->get('data_inicio', Carbon::now()->subDays(30)->format('Y-m-d'));
             $dataFim = $request->get('data_fim', Carbon::now()->format('Y-m-d'));
 
-            // Métricas gerais
-            $totalPropostas = DB::table('propostas')->count();
-            $propostasFechadas = DB::table('propostas')->where('status_proposta', 'fechada')->count();
-            $totalControle = DB::table('controle_clube')->count();
-            $totalUCs = DB::table('unidades_consumidoras')->count();
+            // Métricas gerais (filtrando por período)
+            $totalPropostas = DB::table('propostas')
+                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
+                ->count();
+
+            $propostasFechadas = DB::table('propostas')
+                ->where('status_proposta', 'fechada')
+                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
+                ->count();
+
+            $totalControle = DB::table('controle_clube')
+                ->whereNull('deleted_at')
+                ->count();
+
+            $totalUGs = DB::table('unidades_geradoras')
+                ->count();
 
             // Taxa de conversão
             $taxaConversao = $totalPropostas > 0 ? round(($propostasFechadas / $totalPropostas) * 100, 2) : 0;
+
+            // Evolução mensal
+            $evolucaoMensal = DB::table('propostas')
+                ->selectRaw("
+                    DATE_FORMAT(data_proposta, '%Y-%m') as periodo,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status_proposta = 'fechada' THEN 1 ELSE 0 END) as fechadas,
+                    ROUND((SUM(CASE WHEN status_proposta = 'fechada' THEN 1 ELSE 0 END) * 100.0 / COUNT(*)), 2) as taxa_conversao
+                ")
+                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
+                ->groupBy('periodo')
+                ->orderBy('periodo')
+                ->get();
+
+            // Top 5 consultores
+            $topConsultores = DB::table('propostas')
+                ->selectRaw("
+                    consultor,
+                    COUNT(*) as total_propostas,
+                    SUM(CASE WHEN status_proposta = 'fechada' THEN 1 ELSE 0 END) as fechadas,
+                    ROUND(AVG(CASE WHEN status_proposta = 'fechada' THEN valor_uc ELSE NULL END), 2) as ticket_medio
+                ")
+                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
+                ->groupBy('consultor')
+                ->orderByDesc('fechadas')
+                ->limit(5)
+                ->get();
+
+            // Distribuição por status
+            $statusDistribuicao = DB::table('propostas')
+                ->selectRaw("
+                    status_proposta,
+                    COUNT(*) as quantidade,
+                    ROUND((COUNT(*) * 100.0 / (SELECT COUNT(*) FROM propostas WHERE data_proposta BETWEEN ? AND ?)), 2) as percentual
+                ", [$dataInicio, $dataFim])
+                ->whereBetween('data_proposta', [$dataInicio, $dataFim])
+                ->groupBy('status_proposta')
+                ->get();
 
             return response()->json([
                 'success' => true,
@@ -35,13 +84,12 @@ class RelatorioController extends Controller
                         'total_propostas' => $totalPropostas,
                         'propostas_fechadas' => $propostasFechadas,
                         'total_controle' => $totalControle,
-                        'total_ucs' => $totalUCs,
+                        'total_ugs' => $totalUGs,
                         'taxa_conversao' => $taxaConversao
                     ],
-                    'evolucao_mensal' => [],
-                    'top_consultores' => [],
-                    'status_distribuicao' => [],
-                    'controle' => []
+                    'evolucao_mensal' => $evolucaoMensal,
+                    'top_consultores' => $topConsultores,
+                    'status_distribuicao' => $statusDistribuicao
                 ]
             ]);
         } catch (\Exception $e) {
