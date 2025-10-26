@@ -145,8 +145,8 @@ class ControleController extends Controller
             }
 
             if ($request->filled('consultor')) {
-                $query .= " AND u_consultor.nome ILIKE ?";
-                $params[] = '%' . $request->consultor . '%';
+                $query .= " AND p.consultor_id = ?";
+                $params[] = $request->consultor;
             }
 
             if ($request->filled('search')) {
