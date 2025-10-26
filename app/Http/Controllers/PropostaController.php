@@ -632,11 +632,13 @@ class PropostaController extends Controller
                     $consultorId = null;
                 }
             } elseif ($request->has('consultor') && $request->consultor) {
-                // Buscar por nome se não vier ID
+                // Buscar por nome se não vier ID (apenas consultores, gerentes e vendedores)
                 $consultorEncontrado = DB::selectOne("
                     SELECT id FROM usuarios
-                    WHERE nome = ? AND role IN ('admin', 'analista', 'consultor', 'gerente', 'vendedor')
+                    WHERE nome = ? AND role IN ('consultor', 'gerente', 'vendedor')
                     AND deleted_at IS NULL
+                    ORDER BY role = 'consultor' DESC, created_at ASC
+                    LIMIT 1
                 ", [$request->consultor]);
 
                 if ($consultorEncontrado) {
@@ -1113,8 +1115,10 @@ class PropostaController extends Controller
                 } else {
                     $consultorEncontrado = DB::selectOne("
                         SELECT id FROM usuarios
-                        WHERE nome = ? AND role IN ('admin', 'analista', 'consultor', 'gerente', 'vendedor')
+                        WHERE nome = ? AND role IN ('consultor', 'gerente', 'vendedor')
                         AND deleted_at IS NULL
+                        ORDER BY role = 'consultor' DESC, created_at ASC
+                        LIMIT 1
                     ", [$consultorNome]);
                     
                     if ($consultorEncontrado) {
