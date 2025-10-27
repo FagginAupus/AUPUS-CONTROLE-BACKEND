@@ -107,7 +107,7 @@ class PropostaController extends Controller
                     'descontoTarifa' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                     'descontoBandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                     'inflacao' => floatval($proposta->inflacao ?? 2.00),
-                    'tarifaTributos' => floatval($proposta->tarifa_tributos ?? 0.98),
+                    'tarifaTributos' => floatval($proposta->tarifa_tributos ?? 1.17),
                     'recorrencia' => $proposta->recorrencia,
                     'observacoes' => $proposta->observacoes,
                     'documentacao' => json_decode($proposta->documentacao ?? '{}', true),
@@ -752,8 +752,8 @@ class PropostaController extends Controller
                 $request->observacoes ?? '',
                 $beneficiosJson,
                 $ucJson,
-                $request->inflacao ?? 2.00,              
-                $request->tarifa_tributos ?? 0.98
+                $request->inflacao ?? 2.00,
+                $request->tarifa_tributos ?? 1.17
             ];
 
             $result = DB::insert($sql, $params);
@@ -933,7 +933,7 @@ class PropostaController extends Controller
                 'economia' => $this->extrairValorDesconto($proposta->desconto_tarifa),
                 'bandeira' => $this->extrairValorDesconto($proposta->desconto_bandeira),
                 'inflacao' => floatval($proposta->inflacao ?? 2.00),
-                'tarifaTributos' => floatval($proposta->tarifa_tributos ?? 0.98),
+                'tarifaTributos' => floatval($proposta->tarifa_tributos ?? 1.17),
                 // 🔒 CAMPOS LIMPOS - não contaminar resposta individual
                 'apelido' => '',
                 'numeroUC' => '',

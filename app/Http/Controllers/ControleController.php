@@ -1413,6 +1413,22 @@ class ControleController extends Controller
                         NULLIF(p.documentacao->uc.numero_unidade::text->>'enderecoUC', 'null'),
                         ''
                     ) as endereco_uc,
+                    COALESCE(
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'CEP_UC', 'null'),
+                        ''
+                    ) as cep_uc,
+                    COALESCE(
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'Bairro_UC', 'null'),
+                        ''
+                    ) as bairro_uc,
+                    COALESCE(
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'Cidade_UC', 'null'),
+                        ''
+                    ) as cidade_uc,
+                    COALESCE(
+                        NULLIF(p.documentacao->uc.numero_unidade::text->>'Estado_UC', 'null'),
+                        ''
+                    ) as estado_uc,
                     ug.nome_usina as ug_nome
                 FROM controle_clube cc
                 JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
@@ -1435,7 +1451,11 @@ class ControleController extends Controller
                     'consultor_nome' => $controle->consultor_nome ?? '',
                     'ug_nome' => $controle->ug_nome ?? '',
                     'ligacao' => $controle->ligacao ?? '',
-                    'endereco_completo' => $controle->endereco_uc ?? ''
+                    'endereco_completo' => $controle->endereco_uc ?? '',
+                    'cep_uc' => $controle->cep_uc ?? '',
+                    'bairro_uc' => $controle->bairro_uc ?? '',
+                    'cidade_uc' => $controle->cidade_uc ?? '',
+                    'estado_uc' => $controle->estado_uc ?? ''
                 ];
             }
 
