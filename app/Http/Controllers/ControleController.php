@@ -52,6 +52,8 @@ class ControleController extends Controller
                 cc.ug_id,
                 cc.calibragem_individual,
                 cc.observacoes,
+                cc.whatsapp,
+                cc.email,
                 cc.status_troca,
                 cc.data_titularidade,
                 cc.data_entrada_controle,
@@ -241,6 +243,8 @@ class ControleController extends Controller
 
                     // Metadados
                     'observacoes' => $controle->observacoes,
+                    'whatsapp' => $controle->whatsapp,
+                    'email' => $controle->email,
                     'dataEntradaControle' => $controle->data_entrada_controle,
                     'data_entrada_controle' => $controle->data_entrada_controle,
                     'createdAt' => $controle->created_at,
@@ -1560,6 +1564,8 @@ class ControleController extends Controller
                 'status_troca' => $controle->status_troca,
                 'data_titularidade' => $controle->data_titularidade,
                 'observacoes' => $controle->observacoes,
+                'whatsapp' => $controle->whatsapp,
+                'email' => $controle->email,
                 'documentacao_troca_titularidade' => $controle->documentacao_troca_titularidade,
 
                 // ✅ DESCONTOS CORRETOS
@@ -1793,6 +1799,25 @@ class ControleController extends Controller
             if ($request->has('observacoes')) {
                 $updateFields[] = 'observacoes = ?';
                 $updateParams[] = $request->observacoes;
+            }
+
+            // ✅ 5. WhatsApp
+            if ($request->has('whatsapp')) {
+                $updateFields[] = 'whatsapp = ?';
+                $updateParams[] = $request->whatsapp;
+            }
+
+            // ✅ 6. Email
+            if ($request->has('email')) {
+                // Validar formato de email se não estiver vazio
+                if (!empty($request->email) && !filter_var($request->email, FILTER_VALIDATE_EMAIL)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Formato de email inválido'
+                    ], 400);
+                }
+                $updateFields[] = 'email = ?';
+                $updateParams[] = $request->email;
             }
 
             // ✅ 5. Documentação de Troca de Titularidade

@@ -1823,14 +1823,27 @@ class PropostaController extends Controller
 
             if ($controleExistente) {
                 if ($controleExistente->deleted_at) {
-                    // ✅ REATIVAR CONTROLE (REMOVER SOFT DELETE)
-                    DB::update("UPDATE controle_clube SET deleted_at = NULL WHERE id = ?", [$controleExistente->id]);
-                    
-                    Log::info('Controle reativado (removido soft delete)', [
+                    // ✅ REATIVAR CONTROLE E ATUALIZAR DESCONTOS
+                    DB::update("
+                        UPDATE controle_clube
+                        SET deleted_at = NULL,
+                            desconto_tarifa = ?,
+                            desconto_bandeira = ?,
+                            updated_at = NOW()
+                        WHERE id = ?
+                    ", [
+                        $proposta->desconto_tarifa,
+                        $proposta->desconto_bandeira,
+                        $controleExistente->id
+                    ]);
+
+                    Log::info('Controle reativado com descontos atualizados', [
                         'controle_id' => $controleExistente->id,
                         'proposta_id' => $proposta_id,
                         'uc_id' => $ucIdFinal,
-                        'numero_uc' => $numeroUC
+                        'numero_uc' => $numeroUC,
+                        'desconto_tarifa' => $proposta->desconto_tarifa,
+                        'desconto_bandeira' => $proposta->desconto_bandeira
                     ]);
                 } else {
                     Log::info('Controle já existia ativo para esta UC', [
@@ -1841,27 +1854,32 @@ class PropostaController extends Controller
                     ]);
                 }
             } else {
-                // ✅ CRIAR NOVO CONTROLE
+                // ✅ CRIAR NOVO CONTROLE COM DESCONTOS DA PROPOSTA
                 $controleId = \Illuminate\Support\Str::ulid()->toString();
-                
+
                 DB::insert("
                     INSERT INTO controle_clube (
                         id, proposta_id, uc_id, calibragem, valor_calibrado,
+                        desconto_tarifa, desconto_bandeira,
                         data_entrada_controle, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())
                 ", [
                     $controleId,
                     $proposta_id,
                     $ucIdFinal,
                     0, // calibragem padrão
-                    floatval($ucEspecifica['consumo_medio'] ?? $ucEspecifica['media'] ?? 0)
+                    floatval($ucEspecifica['consumo_medio'] ?? $ucEspecifica['media'] ?? 0),
+                    $proposta->desconto_tarifa,
+                    $proposta->desconto_bandeira
                 ]);
 
-                Log::info('Novo controle criado para UC', [
+                Log::info('Novo controle criado para UC com descontos', [
                     'controle_id' => $controleId,
                     'proposta_id' => $proposta_id,
                     'uc_id' => $ucIdFinal,
-                    'numero_uc' => $numeroUC
+                    'numero_uc' => $numeroUC,
+                    'desconto_tarifa' => $proposta->desconto_tarifa,
+                    'desconto_bandeira' => $proposta->desconto_bandeira
                 ]);
             }
 
