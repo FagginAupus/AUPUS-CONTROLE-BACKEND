@@ -869,6 +869,30 @@ class DocumentController extends Controller
                             'numero_uc' => $numeroUC
                         ]);
 
+                        // ✅ ATUALIZAR DATA DE ASSINATURA NO CONTROLE
+                        try {
+                            DB::statement("
+                                UPDATE controle_clube cc
+                                SET data_assinatura = NOW()
+                                FROM unidades_consumidoras uc
+                                WHERE cc.uc_id = uc.id
+                                    AND uc.numero_unidade = ?
+                                    AND cc.proposta_id = ?
+                                    AND cc.data_assinatura IS NULL
+                            ", [$numeroUC, $localDocument->proposta_id]);
+
+                            Log::info('📅 Data de assinatura atualizada no controle', [
+                                'proposta_id' => $localDocument->proposta_id,
+                                'numero_uc' => $numeroUC
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('❌ Erro ao atualizar data de assinatura no controle', [
+                                'error' => $e->getMessage(),
+                                'proposta_id' => $localDocument->proposta_id,
+                                'numero_uc' => $numeroUC
+                            ]);
+                        }
+
                         // ✅ LIMPAR FLAGS APÓS PROCESSAMENTO AUTOMÁTICO
                         session()->forget(['skip_proposta_log', 'alteracao_documentacao_apenas']);
                     } catch (\Exception $e) {
