@@ -385,7 +385,13 @@ class DocumentController extends Controller
      */
     public function webhook(Request $request): JsonResponse
     {
+        // Gerar ID único para rastrear este webhook
+        $webhookId = uniqid('webhook_', true);
+
         Log::info('🎣 WEBHOOK RECEBIDO', [
+            'webhook_id' => $webhookId,
+            'url' => $request->fullUrl(),
+            'ip' => $request->ip(),
             'headers' => $request->headers->all(),
             'body' => $request->all()
         ]);
@@ -398,6 +404,7 @@ class DocumentController extends Controller
             $eventData = $event['data'] ?? [];
 
             Log::info('📥 Processando evento webhook', [
+                'webhook_id' => $webhookId,
                 'event_type' => $eventType,
                 'document_id' => $eventData['id'] ?? 'N/A'
             ]);
@@ -771,6 +778,15 @@ class DocumentController extends Controller
         $localDocument = Document::where('autentique_id', $documentId)->first();
         if (!$localDocument) {
             Log::warning('Documento não encontrado localmente', ['document_id' => $documentId]);
+            return;
+        }
+
+        // ✅ PROTEÇÃO: Verificar se já foi processado como assinado
+        if ($localDocument->status === Document::STATUS_SIGNED) {
+            Log::info('⚠️ Documento já processado como assinado - ignorando duplicata', [
+                'document_id' => $documentId,
+                'document_name' => $localDocument->name
+            ]);
             return;
         }
 
