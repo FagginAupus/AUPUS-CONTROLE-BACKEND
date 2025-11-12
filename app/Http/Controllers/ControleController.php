@@ -596,14 +596,6 @@ class ControleController extends Controller
                 return response()->json(['success' => false, 'message' => 'Controle não encontrado'], 404);
             }
 
-            // Verificar se status permite atribuição
-            if ($controle->status_troca !== 'Associado') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Status deve ser "Associado" para atribuir UG'
-                ], 400);
-            }
-
             // Buscar UG - SEM as colunas redundantes
             $ug = DB::selectOne("
                 SELECT id, nome_usina, capacidade_calculada
