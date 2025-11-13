@@ -329,6 +329,18 @@ class Notificacao extends Model
         return self::notificarHierarquia(['admin', 'analista'], $titulo, $descricao, 'erro', '/controle');
     }
 
+    public static function criarTrocaTitularidade(string $nomeCliente, string $numeroUC, string $statusAnterior, string $novoStatus, ?string $nomeUsuario = null): array
+    {
+        $titulo = 'Troca de titularidade atualizada';
+        $descricao = "Status da UC {$numeroUC} ({$nomeCliente}) alterado de '{$statusAnterior}' para '{$novoStatus}'";
+
+        if ($nomeUsuario) {
+            $descricao .= " por {$nomeUsuario}";
+        }
+
+        return self::notificarHierarquia(['admin', 'analista'], $titulo, $descricao, 'info', '/controle');
+    }
+
     // Método para limpar notificações antigas
     public static function limparAntigas(int $diasParaManter = 30): int
     {

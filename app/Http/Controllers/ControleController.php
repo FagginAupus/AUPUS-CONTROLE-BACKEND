@@ -409,6 +409,28 @@ class ControleController extends Controller
 
             AuditoriaService::registrar('controle_clube', $id, 'ALTERADO', $eventoData);
 
+            // ✅ CRIAR NOTIFICAÇÃO DE TROCA DE TITULARIDADE
+            try {
+                \App\Models\Notificacao::criarTrocaTitularidade(
+                    $controle->nome_cliente ?? 'Cliente',
+                    $controle->numero_unidade ?? 'UC',
+                    $statusAnterior,
+                    $novoStatus,
+                    $currentUser->nome
+                );
+                Log::info('Notificação de troca de titularidade criada', [
+                    'controle_id' => $id,
+                    'status_anterior' => $statusAnterior,
+                    'status_novo' => $novoStatus
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Erro ao criar notificação de troca de titularidade', [
+                    'controle_id' => $id,
+                    'error' => $e->getMessage()
+                ]);
+                // Não falhar a operação por causa da notificação
+            }
+
             DB::commit();
 
             $mensagem = $statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual
