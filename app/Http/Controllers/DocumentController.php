@@ -768,6 +768,39 @@ class DocumentController extends Controller
     }
 
     /**
+     * Extrair data real de assinatura do payload da Autentique
+     */
+    private function extrairDataAssinatura(array $eventData): ?string
+    {
+        // Procurar nas signatures pela data de assinatura
+        $signatures = $eventData['signatures'] ?? [];
+
+        foreach ($signatures as $signature) {
+            // Verificar se tem data de assinatura diretamente
+            if (!empty($signature['signed'])) {
+                Log::info('📅 Data de assinatura encontrada no campo signed', [
+                    'signed' => $signature['signed']
+                ]);
+                return $signature['signed'];
+            }
+
+            // Se não, procurar nos events pelo tipo "signed"
+            $events = $signature['events'] ?? [];
+            foreach ($events as $event) {
+                if ($event['type'] === 'signed' && !empty($event['created_at'])) {
+                    Log::info('📅 Data de assinatura encontrada nos events', [
+                        'created_at' => $event['created_at']
+                    ]);
+                    return $event['created_at'];
+                }
+            }
+        }
+
+        Log::warning('⚠️ Data de assinatura não encontrada no payload, usando NOW()');
+        return null;
+    }
+
+    /**
      * Handle document.finished - documento totalmente assinado
      */
     private function handleDocumentFinished(array $eventData, array $fullEvent)
@@ -789,6 +822,9 @@ class DocumentController extends Controller
             ]);
             return;
         }
+
+        // ✅ EXTRAIR DATA REAL DE ASSINATURA DO PAYLOAD
+        $dataAssinaturaAutentique = $this->extrairDataAssinatura($eventData);
 
         $oldStatus = $localDocument->status;
         $localDocument->update([
@@ -887,20 +923,39 @@ class DocumentController extends Controller
 
                         // ✅ ATUALIZAR DATA DE ASSINATURA NO CONTROLE
                         try {
-                            DB::statement("
-                                UPDATE controle_clube cc
-                                SET data_assinatura = NOW()
-                                FROM unidades_consumidoras uc
-                                WHERE cc.uc_id = uc.id
-                                    AND uc.numero_unidade = ?
-                                    AND cc.proposta_id = ?
-                                    AND cc.data_assinatura IS NULL
-                            ", [$numeroUC, $localDocument->proposta_id]);
+                            // Usar data real da Autentique ou NOW() como fallback
+                            if ($dataAssinaturaAutentique) {
+                                DB::statement("
+                                    UPDATE controle_clube cc
+                                    SET data_assinatura = ?
+                                    FROM unidades_consumidoras uc
+                                    WHERE cc.uc_id = uc.id
+                                        AND uc.numero_unidade = ?
+                                        AND cc.proposta_id = ?
+                                        AND cc.data_assinatura IS NULL
+                                ", [$dataAssinaturaAutentique, $numeroUC, $localDocument->proposta_id]);
 
-                            Log::info('📅 Data de assinatura atualizada no controle', [
-                                'proposta_id' => $localDocument->proposta_id,
-                                'numero_uc' => $numeroUC
-                            ]);
+                                Log::info('📅 Data de assinatura atualizada no controle (data real da Autentique)', [
+                                    'proposta_id' => $localDocument->proposta_id,
+                                    'numero_uc' => $numeroUC,
+                                    'data_assinatura' => $dataAssinaturaAutentique
+                                ]);
+                            } else {
+                                DB::statement("
+                                    UPDATE controle_clube cc
+                                    SET data_assinatura = NOW()
+                                    FROM unidades_consumidoras uc
+                                    WHERE cc.uc_id = uc.id
+                                        AND uc.numero_unidade = ?
+                                        AND cc.proposta_id = ?
+                                        AND cc.data_assinatura IS NULL
+                                ", [$numeroUC, $localDocument->proposta_id]);
+
+                                Log::info('📅 Data de assinatura atualizada no controle (fallback NOW())', [
+                                    'proposta_id' => $localDocument->proposta_id,
+                                    'numero_uc' => $numeroUC
+                                ]);
+                            }
                         } catch (\Exception $e) {
                             Log::error('❌ Erro ao atualizar data de assinatura no controle', [
                                 'error' => $e->getMessage(),

@@ -1823,27 +1823,52 @@ class PropostaController extends Controller
 
             if ($controleExistente) {
                 if ($controleExistente->deleted_at) {
-                    // ✅ REATIVAR CONTROLE E ATUALIZAR DESCONTOS
+                    // ✅ EXTRAIR WHATSAPP E EMAIL DA DOCUMENTAÇÃO DA PROPOSTA
+                    $documentacao = json_decode($proposta->documentacao ?? '{}', true);
+                    $whatsappCliente = null;
+                    $emailCliente = null;
+
+                    // Buscar whatsapp e email da UC específica na documentação
+                    if (isset($documentacao[$numeroUC])) {
+                        $whatsappCliente = $documentacao[$numeroUC]['whatsappRepresentante'] ?? null;
+                        $emailCliente = $documentacao[$numeroUC]['emailRepresentante'] ?? null;
+                    }
+
+                    // Fallback: buscar nos campos gerais da documentação (caso não esteja por UC)
+                    if (!$whatsappCliente) {
+                        $whatsappCliente = $documentacao['whatsappRepresentante'] ?? null;
+                    }
+                    if (!$emailCliente) {
+                        $emailCliente = $documentacao['emailRepresentante'] ?? null;
+                    }
+
+                    // ✅ REATIVAR CONTROLE E ATUALIZAR DESCONTOS E CONTATOS
                     DB::update("
                         UPDATE controle_clube
                         SET deleted_at = NULL,
                             desconto_tarifa = ?,
                             desconto_bandeira = ?,
+                            whatsapp = ?,
+                            email = ?,
                             updated_at = NOW()
                         WHERE id = ?
                     ", [
                         $proposta->desconto_tarifa,
                         $proposta->desconto_bandeira,
+                        $whatsappCliente,
+                        $emailCliente,
                         $controleExistente->id
                     ]);
 
-                    Log::info('Controle reativado com descontos atualizados', [
+                    Log::info('Controle reativado com descontos e contatos atualizados', [
                         'controle_id' => $controleExistente->id,
                         'proposta_id' => $proposta_id,
                         'uc_id' => $ucIdFinal,
                         'numero_uc' => $numeroUC,
                         'desconto_tarifa' => $proposta->desconto_tarifa,
-                        'desconto_bandeira' => $proposta->desconto_bandeira
+                        'desconto_bandeira' => $proposta->desconto_bandeira,
+                        'whatsapp' => $whatsappCliente,
+                        'email' => $emailCliente
                     ]);
                 } else {
                     Log::info('Controle já existia ativo para esta UC', [
@@ -1857,12 +1882,39 @@ class PropostaController extends Controller
                 // ✅ CRIAR NOVO CONTROLE COM DESCONTOS DA PROPOSTA
                 $controleId = \Illuminate\Support\Str::ulid()->toString();
 
+                // ✅ EXTRAIR WHATSAPP E EMAIL DA DOCUMENTAÇÃO DA PROPOSTA
+                $documentacao = json_decode($proposta->documentacao ?? '{}', true);
+                $whatsappCliente = null;
+                $emailCliente = null;
+
+                // Buscar whatsapp e email da UC específica na documentação
+                if (isset($documentacao[$numeroUC])) {
+                    $whatsappCliente = $documentacao[$numeroUC]['whatsappRepresentante'] ?? null;
+                    $emailCliente = $documentacao[$numeroUC]['emailRepresentante'] ?? null;
+                }
+
+                // Fallback: buscar nos campos gerais da documentação (caso não esteja por UC)
+                if (!$whatsappCliente) {
+                    $whatsappCliente = $documentacao['whatsappRepresentante'] ?? null;
+                }
+                if (!$emailCliente) {
+                    $emailCliente = $documentacao['emailRepresentante'] ?? null;
+                }
+
+                Log::info('Dados de contato extraídos da proposta', [
+                    'proposta_id' => $proposta_id,
+                    'numero_uc' => $numeroUC,
+                    'whatsapp' => $whatsappCliente,
+                    'email' => $emailCliente
+                ]);
+
                 DB::insert("
                     INSERT INTO controle_clube (
                         id, proposta_id, uc_id, calibragem, valor_calibrado,
                         desconto_tarifa, desconto_bandeira,
+                        whatsapp, email,
                         data_entrada_controle, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW())
                 ", [
                     $controleId,
                     $proposta_id,
@@ -1870,16 +1922,20 @@ class PropostaController extends Controller
                     0, // calibragem padrão
                     floatval($ucEspecifica['consumo_medio'] ?? $ucEspecifica['media'] ?? 0),
                     $proposta->desconto_tarifa,
-                    $proposta->desconto_bandeira
+                    $proposta->desconto_bandeira,
+                    $whatsappCliente,
+                    $emailCliente
                 ]);
 
-                Log::info('Novo controle criado para UC com descontos', [
+                Log::info('Novo controle criado para UC com descontos e contatos', [
                     'controle_id' => $controleId,
                     'proposta_id' => $proposta_id,
                     'uc_id' => $ucIdFinal,
                     'numero_uc' => $numeroUC,
                     'desconto_tarifa' => $proposta->desconto_tarifa,
-                    'desconto_bandeira' => $proposta->desconto_bandeira
+                    'desconto_bandeira' => $proposta->desconto_bandeira,
+                    'whatsapp' => $whatsappCliente,
+                    'email' => $emailCliente
                 ]);
             }
 
