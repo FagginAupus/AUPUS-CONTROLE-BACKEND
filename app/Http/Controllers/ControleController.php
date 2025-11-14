@@ -59,6 +59,7 @@ class ControleController extends Controller
                 cc.data_entrada_controle,
                 cc.data_em_andamento,
                 cc.data_assinatura,
+                cc.data_alocacao_ug,
                 cc.created_at,
                 cc.updated_at,
                 p.numero_proposta,
@@ -173,12 +174,32 @@ class ControleController extends Controller
             $total = $totalResult->total ?? 0;
 
             // Ordenação e paginação
-            $orderBy = $request->get('sort_by', 'created_at');
-            $orderDirection = in_array($request->get('sort_direction', 'desc'), ['asc', 'desc']) 
-                ? $request->get('sort_direction', 'desc') 
+            $orderBy = $request->get('sort_by', 'urgencia');
+            $orderDirection = in_array($request->get('sort_direction', 'desc'), ['asc', 'desc'])
+                ? $request->get('sort_direction', 'desc')
                 : 'desc';
 
-            $query .= " ORDER BY cc.{$orderBy} {$orderDirection}";
+            // Ordenação por urgência (mais dias = mais urgente)
+            if ($orderBy === 'urgencia') {
+                $query .= " ORDER BY
+                    CASE
+                        -- Associados sem UG: dias desde data_titularidade
+                        WHEN cc.status_troca = 'Associado' AND cc.ug_id IS NULL AND cc.data_titularidade IS NOT NULL
+                            THEN EXTRACT(DAY FROM (NOW() - cc.data_titularidade))
+                        -- Em andamento: dias desde data_em_andamento
+                        WHEN cc.status_troca = 'Em andamento' AND cc.data_em_andamento IS NOT NULL
+                            THEN EXTRACT(DAY FROM (NOW() - cc.data_em_andamento))
+                        -- Esteira: dias desde data_assinatura ou data_entrada_controle
+                        WHEN cc.status_troca = 'Esteira' AND cc.data_assinatura IS NOT NULL
+                            THEN EXTRACT(DAY FROM (NOW() - cc.data_assinatura))
+                        WHEN cc.status_troca = 'Esteira' AND cc.data_entrada_controle IS NOT NULL
+                            THEN EXTRACT(DAY FROM (NOW() - cc.data_entrada_controle))
+                        -- Outros casos: 0 dias (menor prioridade)
+                        ELSE 0
+                    END DESC NULLS LAST";
+            } else {
+                $query .= " ORDER BY cc.{$orderBy} {$orderDirection}";
+            }
             $query .= " LIMIT ? OFFSET ?";
             $params[] = $perPage;
             $params[] = ($page - 1) * $perPage;
@@ -373,10 +394,10 @@ class ControleController extends Controller
 
                 // Remover UC dos detalhes da UG
                 $this->removerUcDaUg($ugAtual, $controle->uc_id);
-                
-                // Limpar UG do controle
+
+                // Limpar UG do controle e zerar data de alocação (para reiniciar contagem)
                 DB::update(
-                    "UPDATE controle_clube SET ug_id = NULL WHERE id = ?",
+                    "UPDATE controle_clube SET ug_id = NULL, data_alocacao_ug = NULL WHERE id = ?",
                     [$id]
                 );
             }
@@ -666,10 +687,10 @@ class ControleController extends Controller
                 ], 400);
             }
 
-            // Atualizar controle - APENAS isso é necessário agora
+            // Atualizar controle - setar UG e registrar data de alocação
             DB::update("
-                UPDATE controle_clube 
-                SET ug_id = ?, updated_at = NOW()
+                UPDATE controle_clube
+                SET ug_id = ?, data_alocacao_ug = NOW(), updated_at = NOW()
                 WHERE id = ?
             ", [$request->ug_id, $id]);
 
@@ -2254,12 +2275,17 @@ class ControleController extends Controller
                     break;
 
                 case 'Associado':
-                    // Dias em "Associado" = NOW - data_titularidade
-                    if ($controle->data_titularidade) {
-                        $dataInicio = new \DateTime($controle->data_titularidade);
-                        return $now->diff($dataInicio)->days;
+                    // Dias em "Associado" SEM UG = NOW - data_titularidade (ou desde desalocação)
+                    // Se tem UG, não calcular; se não tem, calcular desde quando ficou sem
+                    if (!$controle->ug_id) {
+                        // Sem UG: calcular desde quando foi desalocado (data_alocacao_ug NULL) ou associado
+                        if ($controle->data_titularidade) {
+                            $dataInicio = new \DateTime($controle->data_titularidade);
+                            return $now->diff($dataInicio)->days;
+                        }
                     }
-                    break;
+                    // Com UG: retornar null (não mostrar contador)
+                    return null;
 
                 default:
                     // Para outros status, usar data_entrada_controle
@@ -2292,15 +2318,20 @@ class ControleController extends Controller
         // Status que devem gerar alertas quando passam de 7 dias
         $statusComAlerta = ['Esteira', 'Em andamento'];
 
-        if ($diasNoStatus !== null && in_array($statusTroca, $statusComAlerta)) {
+        // Associados sem UG também devem ter alerta
+        $isAssociadoSemUG = ($statusTroca === 'Associado' && !$controle->ug_id);
+
+        if ($diasNoStatus !== null && (in_array($statusTroca, $statusComAlerta) || $isAssociadoSemUG)) {
+            $mensagemContexto = $isAssociadoSemUG
+                ? "UC associada há {$diasNoStatus} dias sem UG atribuída"
+                : "UC em '{$statusTroca}' há {$diasNoStatus} dias";
+
             return [
                 'tem_alerta' => $diasNoStatus > 7,
                 'dias' => $diasNoStatus,
                 'status' => $statusTroca,
                 'nivel' => $diasNoStatus > 14 ? 'critico' : ($diasNoStatus > 7 ? 'atencao' : 'normal'),
-                'mensagem' => $diasNoStatus > 7
-                    ? "UC em '{$statusTroca}' há {$diasNoStatus} dias"
-                    : null
+                'mensagem' => $diasNoStatus > 7 ? $mensagemContexto : null
             ];
         }
 
