@@ -2861,7 +2861,8 @@ class DocumentController extends Controller
             // 1. VALIDAÇÕES
             $validator = Validator::make($request->all(), [
                 'arquivo' => 'required|mimes:pdf|max:10240', // 10MB máximo
-                'numeroUC' => 'required|string'
+                'numeroUC' => 'required|string',
+                'dataAssinatura' => 'required|date|before_or_equal:today' // ✅ Data de assinatura obrigatória
             ]);
 
             if ($validator->fails()) {
@@ -2870,19 +2871,21 @@ class DocumentController extends Controller
                 ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Arquivo inválido',
+                    'message' => 'Dados inválidos. Verifique se todos os campos foram preenchidos corretamente.',
                     'errors' => $validator->errors()
                 ], 422);
             }
 
-            // 2. BUSCAR PROPOSTA
+            // 2. BUSCAR PROPOSTA E EXTRAIR DATA DE ASSINATURA
             $proposta = Proposta::findOrFail($propostaId);
             $numeroUC = $request->numeroUC;
-            
+            $dataAssinatura = $request->dataAssinatura; // ✅ Data de assinatura do upload manual
+
             Log::info('📋 Proposta encontrada', [
                 'proposta_numero' => $proposta->numero_proposta,
                 'proposta_cliente' => $proposta->nome_cliente,
-                'numero_uc' => $numeroUC
+                'numero_uc' => $numeroUC,
+                'data_assinatura' => $dataAssinatura
             ]);
             
             // 3. VERIFICAR SE JÁ EXISTE DOCUMENTO ATIVO PARA ESTA UC
@@ -3000,7 +3003,8 @@ class DocumentController extends Controller
                 'nomeCliente' => $nomeCliente,
                 'tipo_upload' => 'manual',
                 'nome_arquivo_salvo' => $nomeArquivo,
-                'arquivo_original' => $arquivo->getClientOriginalName()
+                'arquivo_original' => $arquivo->getClientOriginalName(),
+                'data_assinatura' => $dataAssinatura // ✅ Incluir data de assinatura
             ];
             
             Log::info('🗄️ Criando registro na tabela documents', [
@@ -3205,12 +3209,41 @@ class DocumentController extends Controller
             // 2. ✅ ADICIONAR AO CONTROLE AUTOMATICAMENTE (com try-catch)
             try {
                 app(PropostaController::class)->popularControleAutomaticoParaUC($document->proposta_id, $numeroUC);
-                
+
                 Log::info('🔄 UC ADICIONADA AO CONTROLE AUTOMATICAMENTE (UPLOAD MANUAL)', [
                     'proposta_id' => $document->proposta_id,
                     'numero_uc' => $numeroUC,
                     'metodo' => 'upload_manual'
                 ]);
+
+                // ✅ ATUALIZAR DATA DE ASSINATURA NO CONTROLE
+                $dadosDocumento = $document->document_data;
+                $dataAssinatura = $dadosDocumento['data_assinatura'] ?? null;
+
+                if ($dataAssinatura) {
+                    try {
+                        DB::statement("
+                            UPDATE controle_clube
+                            SET data_assinatura = ?
+                            WHERE proposta_id = ?
+                            AND uc_id = (SELECT id FROM unidades_consumidoras WHERE numero_unidade = ? LIMIT 1)
+                            AND deleted_at IS NULL
+                        ", [$dataAssinatura, $document->proposta_id, $numeroUC]);
+
+                        Log::info('✅ Data de assinatura atualizada no controle (UPLOAD MANUAL)', [
+                            'proposta_id' => $document->proposta_id,
+                            'numero_uc' => $numeroUC,
+                            'data_assinatura' => $dataAssinatura
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::warning('⚠️ Erro ao atualizar data de assinatura no controle', [
+                            'proposta_id' => $document->proposta_id,
+                            'numero_uc' => $numeroUC,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                }
+
             } catch (\Exception $e) {
                 Log::error('❌ Erro ao adicionar UC ao controle automaticamente', [
                     'proposta_id' => $document->proposta_id,
