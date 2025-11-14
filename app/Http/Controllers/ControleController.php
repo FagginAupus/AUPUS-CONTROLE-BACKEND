@@ -55,6 +55,7 @@ class ControleController extends Controller
                 cc.whatsapp,
                 cc.email,
                 cc.status_troca,
+                cc.observacao_status,
                 cc.data_titularidade,
                 cc.data_entrada_controle,
                 cc.data_em_andamento,
@@ -347,7 +348,9 @@ class ControleController extends Controller
 
         $validator = Validator::make($request->all(), [
             'status_troca' => 'required|in:Esteira,Em andamento,Associado',
-            'data_titularidade' => 'required|date|before_or_equal:today'
+            'data_titularidade' => 'required|date|before_or_equal:today',
+            'observacao_status' => 'nullable|string|max:100',
+            'limpar_observacao' => 'nullable|boolean'
         ]);
 
         if ($validator->fails()) {
@@ -414,6 +417,14 @@ class ControleController extends Controller
                     'status_anterior' => $statusAnterior,
                     'status_novo' => $novoStatus
                 ]);
+            }
+
+            // ✅ Atualizar observação do status
+            if ($request->has('limpar_observacao') && $request->limpar_observacao) {
+                $updateQuery .= ", observacao_status = NULL";
+            } elseif ($request->filled('observacao_status')) {
+                $updateQuery .= ", observacao_status = ?";
+                $updateParams[] = $request->observacao_status;
             }
 
             $updateQuery .= " WHERE id = ?";
