@@ -422,7 +422,7 @@ class ControleController extends Controller
             // ✅ Atualizar observação do status
             if ($request->has('limpar_observacao') && $request->limpar_observacao) {
                 $updateQuery .= ", observacao_status = NULL";
-            } elseif ($request->filled('observacao_status')) {
+            } elseif ($request->has('observacao_status')) {
                 $updateQuery .= ", observacao_status = ?";
                 $updateParams[] = $request->observacao_status;
             }
