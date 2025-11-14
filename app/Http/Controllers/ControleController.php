@@ -44,7 +44,7 @@ class ControleController extends Controller
                 ? PHP_INT_MAX 
                 : min(1000, max(1, (int)$request->get('per_page', 50)));
 
-            // ✅ QUERY COM NOVOS CAMPOS
+            // ✅ QUERY COM NOVOS CAMPOS + DATAS DE STATUS
             $query = "SELECT
                 cc.id,
                 cc.proposta_id,
@@ -57,6 +57,8 @@ class ControleController extends Controller
                 cc.status_troca,
                 cc.data_titularidade,
                 cc.data_entrada_controle,
+                cc.data_em_andamento,
+                cc.data_assinatura,
                 cc.created_at,
                 cc.updated_at,
                 p.numero_proposta,
@@ -213,6 +215,14 @@ class ControleController extends Controller
                     'status_troca' => $controle->status_troca ?? 'Aguardando',
                     'dataTitularidade' => $controle->data_titularidade,
                     'data_titularidade' => $controle->data_titularidade,
+                    'dataEmAndamento' => $controle->data_em_andamento,
+                    'data_em_andamento' => $controle->data_em_andamento,
+                    'dataAssinatura' => $controle->data_assinatura,
+                    'data_assinatura' => $controle->data_assinatura,
+
+                    // ✅ NOVO: Indicadores de tempo em cada status
+                    'diasNoStatus' => $this->calcularDiasNoStatus($controle),
+                    'alertaStatus' => $this->verificarAlertaStatus($controle),
 
                     // Dados da UG
                     'ug' => $controle->ug_nome,
@@ -371,13 +381,24 @@ class ControleController extends Controller
                 );
             }
 
-            // Atualizar status e data
-            DB::update(
-                "UPDATE controle_clube 
-                 SET status_troca = ?, data_titularidade = ?, updated_at = NOW()
-                 WHERE id = ?",
-                [$novoStatus, $request->data_titularidade, $id]
-            );
+            // ✅ ATUALIZAR STATUS E DATA + REGISTRAR DATA_EM_ANDAMENTO
+            $updateQuery = "UPDATE controle_clube SET status_troca = ?, data_titularidade = ?, updated_at = NOW()";
+            $updateParams = [$novoStatus, $request->data_titularidade];
+
+            // ✅ Se mudou para "Em andamento" pela primeira vez, registrar data
+            if ($novoStatus === 'Em andamento' && $statusAnterior !== 'Em andamento') {
+                $updateQuery .= ", data_em_andamento = NOW()";
+                Log::info('Registrando data_em_andamento', [
+                    'controle_id' => $id,
+                    'status_anterior' => $statusAnterior,
+                    'status_novo' => $novoStatus
+                ]);
+            }
+
+            $updateQuery .= " WHERE id = ?";
+            $updateParams[] = $id;
+
+            DB::update($updateQuery, $updateParams);
 
             // ✅ REGISTRAR EVENTO DE AUDITORIA - MUDANÇA DE STATUS
             $eventoData = [
@@ -2200,6 +2221,96 @@ class ControleController extends Controller
                 'message' => 'Erro ao buscar documentação: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * ✅ CALCULAR DIAS NO STATUS ATUAL
+     * Baseado no status_troca, calcula quantos dias a UC está no status atual
+     */
+    private function calcularDiasNoStatus($controle): ?int
+    {
+        $now = new \DateTime();
+        $statusTroca = $controle->status_troca ?? 'Aguardando';
+
+        try {
+            switch ($statusTroca) {
+                case 'Esteira':
+                    // Dias em Esteira = NOW - data_assinatura (ou data_entrada_controle se não houver assinatura)
+                    if ($controle->data_assinatura) {
+                        $dataInicio = new \DateTime($controle->data_assinatura);
+                        return $now->diff($dataInicio)->days;
+                    } elseif ($controle->data_entrada_controle) {
+                        $dataInicio = new \DateTime($controle->data_entrada_controle);
+                        return $now->diff($dataInicio)->days;
+                    }
+                    break;
+
+                case 'Em andamento':
+                    // Dias em "Em andamento" = NOW - data_em_andamento
+                    if ($controle->data_em_andamento) {
+                        $dataInicio = new \DateTime($controle->data_em_andamento);
+                        return $now->diff($dataInicio)->days;
+                    }
+                    break;
+
+                case 'Associado':
+                    // Dias em "Associado" = NOW - data_titularidade
+                    if ($controle->data_titularidade) {
+                        $dataInicio = new \DateTime($controle->data_titularidade);
+                        return $now->diff($dataInicio)->days;
+                    }
+                    break;
+
+                default:
+                    // Para outros status, usar data_entrada_controle
+                    if ($controle->data_entrada_controle) {
+                        $dataInicio = new \DateTime($controle->data_entrada_controle);
+                        return $now->diff($dataInicio)->days;
+                    }
+                    break;
+            }
+        } catch (\Exception $e) {
+            Log::warning('Erro ao calcular dias no status', [
+                'controle_id' => $controle->id ?? 'desconhecido',
+                'status_troca' => $statusTroca,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * ✅ VERIFICAR SE O STATUS ESTÁ COM ALERTA (>7 DIAS)
+     * Retorna um objeto com informações sobre o alerta
+     */
+    private function verificarAlertaStatus($controle): array
+    {
+        $diasNoStatus = $this->calcularDiasNoStatus($controle);
+        $statusTroca = $controle->status_troca ?? 'Aguardando';
+
+        // Status que devem gerar alertas quando passam de 7 dias
+        $statusComAlerta = ['Esteira', 'Em andamento'];
+
+        if ($diasNoStatus !== null && in_array($statusTroca, $statusComAlerta)) {
+            return [
+                'tem_alerta' => $diasNoStatus > 7,
+                'dias' => $diasNoStatus,
+                'status' => $statusTroca,
+                'nivel' => $diasNoStatus > 14 ? 'critico' : ($diasNoStatus > 7 ? 'atencao' : 'normal'),
+                'mensagem' => $diasNoStatus > 7
+                    ? "UC em '{$statusTroca}' há {$diasNoStatus} dias"
+                    : null
+            ];
+        }
+
+        return [
+            'tem_alerta' => false,
+            'dias' => $diasNoStatus,
+            'status' => $statusTroca,
+            'nivel' => 'normal',
+            'mensagem' => null
+        ];
     }
 
 }
