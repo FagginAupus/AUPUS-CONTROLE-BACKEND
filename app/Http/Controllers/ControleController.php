@@ -1643,6 +1643,11 @@ class ControleController extends Controller
                 // Valores ATUAIS da controle_clube (podem ser null = usa proposta)
                 'desconto_tarifa' => $controle->desconto_tarifa, // null ou "25%" por exemplo
                 'desconto_bandeira' => $controle->desconto_bandeira, // null ou "15%" por exemplo
+
+                // ✅ NOVOS CAMPOS - INTEGRAÇÃO MICROSERVIÇOS
+                'compensacao_completa' => $controle->compensacao_completa ?? true,
+                'cobrar_multa' => $controle->cobrar_multa ?? false,
+                'dia_vencimento' => $controle->dia_vencimento ?? 20,
             ];
 
             return response()->json([
@@ -1887,7 +1892,36 @@ class ControleController extends Controller
                 $updateParams[] = $request->email;
             }
 
-            // ✅ 5. Documentação de Troca de Titularidade
+            // ✅ 7. Compensação Completa (para microserviços)
+            if ($request->has('compensacao_completa')) {
+                $updateFields[] = 'compensacao_completa = ?';
+                $updateParams[] = $request->compensacao_completa ? true : false;
+                Log::info('Configurando compensacao_completa', ['valor' => $request->compensacao_completa]);
+            }
+
+            // ✅ 8. Cobrar Multa (para microserviços)
+            if ($request->has('cobrar_multa')) {
+                $updateFields[] = 'cobrar_multa = ?';
+                $updateParams[] = $request->cobrar_multa ? true : false;
+                Log::info('Configurando cobrar_multa', ['valor' => $request->cobrar_multa]);
+            }
+
+            // ✅ 9. Dia de Vencimento (para microserviços)
+            if ($request->has('dia_vencimento')) {
+                $diaVencimento = intval($request->dia_vencimento);
+                // Validar range 1-28
+                if ($diaVencimento < 1 || $diaVencimento > 28) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Dia de vencimento deve estar entre 1 e 28'
+                    ], 400);
+                }
+                $updateFields[] = 'dia_vencimento = ?';
+                $updateParams[] = $diaVencimento;
+                Log::info('Configurando dia_vencimento', ['valor' => $diaVencimento]);
+            }
+
+            // ✅ 10. Documentação de Troca de Titularidade
             if ($request->has('documentacao_troca_titularidade')) {
                 $updateFields[] = 'documentacao_troca_titularidade = ?';
                 $updateParams[] = $request->documentacao_troca_titularidade;
