@@ -1557,25 +1557,33 @@ class ControleController extends Controller
                 SELECT
                     cc.*,
                     uc.numero_unidade,
-                    uc.apelido,
+                    uc.apelido as uc_apelido,
                     uc.consumo_medio,
                     uc.ligacao,
                     uc.distribuidora,
+                    -- Campos de endereço da UC
+                    uc.endereco_completo as uc_endereco_completo,
+                    uc.bairro as uc_bairro,
+                    uc.cidade as uc_cidade,
+                    uc.estado as uc_estado,
+                    uc.cep as uc_cep,
                     p.numero_proposta,
-                    p.nome_cliente,
+                    p.nome_cliente as proposta_nome_cliente,
                     p.desconto_tarifa as proposta_desconto_tarifa,
                     p.desconto_bandeira as proposta_desconto_bandeira,
                     consultor.nome as consultor_nome,
+                    -- CPF/CNPJ da documentação da proposta (fallback)
                     COALESCE(
                         NULLIF(p.documentacao->uc.numero_unidade::text->>'cpf', 'null'),
                         NULLIF(p.documentacao->uc.numero_unidade::text->>'cnpj', 'null'),
                         ''
-                    ) as cpf_cnpj,
+                    ) as proposta_cpf_cnpj,
+                    -- Endereço da documentação da proposta (fallback)
                     COALESCE(
                         NULLIF(p.documentacao->uc.numero_unidade::text->>'logradouroUC', 'null'),
                         NULLIF(p.documentacao->uc.numero_unidade::text->>'enderecoUC', 'null'),
                         ''
-                    ) as endereco_uc,
+                    ) as proposta_endereco_uc,
                     ug.nome_usina as ug_nome
                 FROM controle_clube cc
                 JOIN unidades_consumidoras uc ON cc.uc_id = uc.id
@@ -1606,7 +1614,9 @@ class ControleController extends Controller
                 'controle_id' => $controle->id,
                 'proposta_id' => $controle->proposta_id,
                 'numero_proposta' => $controle->numero_proposta,
-                'nome_cliente' => $controle->nome_cliente,
+                // Nome do cliente: prioridade para controle, fallback para proposta
+                'nome_cliente' => $controle->nome_cliente ?? $controle->proposta_nome_cliente,
+                'proposta_nome_cliente' => $controle->proposta_nome_cliente,
                 'consultor' => $controle->consultor_nome ?? 'Sem consultor',
                 'consultor_nome' => $controle->consultor_nome ?? 'Sem consultor',
 
@@ -1614,12 +1624,23 @@ class ControleController extends Controller
                 'uc_id' => $controle->uc_id,
                 'numero_uc' => $controle->numero_unidade,
                 'numero_unidade' => $controle->numero_unidade,
-                'apelido' => $controle->apelido,
+                // Apelido: prioridade para controle, fallback para UC
+                'apelido' => $controle->apelido_uc ?? $controle->uc_apelido,
+                'apelido_original' => $controle->uc_apelido,
                 'consumo_medio' => floatval($controle->consumo_medio),
                 'ligacao' => $controle->ligacao,
                 'distribuidora' => $controle->distribuidora,
-                'cpf_cnpj' => $this->formatarCpfCnpj($controle->cpf_cnpj ?? ''),
-                'endereco_completo' => $controle->endereco_uc ?? '',
+                // CPF/CNPJ: prioridade para controle, fallback para proposta
+                'cpf_cnpj' => $this->formatarCpfCnpj($controle->cpf_cnpj ?? $controle->proposta_cpf_cnpj ?? ''),
+                'proposta_cpf_cnpj' => $this->formatarCpfCnpj($controle->proposta_cpf_cnpj ?? ''),
+
+                // Endereço: prioridade para UC, fallback para proposta
+                'endereco_completo' => $controle->uc_endereco_completo ?? $controle->proposta_endereco_uc ?? '',
+                'bairro' => $controle->uc_bairro ?? '',
+                'cidade' => $controle->uc_cidade ?? '',
+                'estado' => $controle->uc_estado ?? '',
+                'cep' => $controle->uc_cep ?? '',
+                'proposta_endereco' => $controle->proposta_endereco_uc ?? '',
 
                 // Dados do controle
                 'ug_id' => $controle->ug_id,
@@ -1930,6 +1951,64 @@ class ControleController extends Controller
                     'controle_id' => $controleId,
                     'arquivo' => $request->documentacao_troca_titularidade
                 ]);
+            }
+
+            // ✅ 11. Nome do Cliente (independente da proposta)
+            if ($request->has('nome_cliente')) {
+                $updateFields[] = 'nome_cliente = ?';
+                $updateParams[] = $request->nome_cliente;
+                Log::info('Atualizando nome_cliente no controle', ['valor' => $request->nome_cliente]);
+            }
+
+            // ✅ 12. Apelido da UC (independente da proposta)
+            if ($request->has('apelido_uc')) {
+                $updateFields[] = 'apelido_uc = ?';
+                $updateParams[] = $request->apelido_uc;
+                Log::info('Atualizando apelido_uc no controle', ['valor' => $request->apelido_uc]);
+            }
+
+            // ✅ 13. CPF/CNPJ (independente da proposta)
+            if ($request->has('cpf_cnpj')) {
+                $updateFields[] = 'cpf_cnpj = ?';
+                $updateParams[] = $request->cpf_cnpj;
+                Log::info('Atualizando cpf_cnpj no controle', ['valor' => $request->cpf_cnpj]);
+            }
+
+            // ✅ 14. Endereço na tabela unidades_consumidoras
+            $ucUpdateFields = [];
+            $ucUpdateParams = [];
+
+            if ($request->has('endereco_completo')) {
+                $ucUpdateFields[] = 'endereco_completo = ?';
+                $ucUpdateParams[] = $request->endereco_completo;
+            }
+            if ($request->has('bairro')) {
+                $ucUpdateFields[] = 'bairro = ?';
+                $ucUpdateParams[] = $request->bairro;
+            }
+            if ($request->has('cidade')) {
+                $ucUpdateFields[] = 'cidade = ?';
+                $ucUpdateParams[] = $request->cidade;
+            }
+            if ($request->has('estado')) {
+                $ucUpdateFields[] = 'estado = ?';
+                $ucUpdateParams[] = $request->estado;
+            }
+            if ($request->has('cep')) {
+                $ucUpdateFields[] = 'cep = ?';
+                $ucUpdateParams[] = $request->cep;
+            }
+
+            if (!empty($ucUpdateFields)) {
+                $ucSql = "UPDATE unidades_consumidoras SET " . implode(', ', $ucUpdateFields) . ", updated_at = NOW() WHERE id = ?";
+                $ucUpdateParams[] = $controle->uc_id;
+
+                Log::info('Executando SQL de atualização de endereço UC', [
+                    'sql' => $ucSql,
+                    'params' => $ucUpdateParams
+                ]);
+
+                DB::update($ucSql, $ucUpdateParams);
             }
 
             // ✅ EXECUTAR atualizações
