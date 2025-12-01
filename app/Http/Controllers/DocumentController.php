@@ -2461,21 +2461,43 @@ class DocumentController extends Controller
             ];
 
             if ($request->whatsappRepresentante && $request->boolean('enviar_whatsapp', false)) {
-                // Formatação do telefone (manter como está)
+                // Formatação do telefone para padrão internacional brasileiro
                 $telefone = preg_replace('/\D/', '', $request->whatsappRepresentante);
-                
+
+                // Remover +55 se já existir no início
+                if (substr($telefone, 0, 2) === '55' && strlen($telefone) >= 12) {
+                    $telefone = substr($telefone, 2);
+                }
+
+                // Agora telefone deve ter 10 ou 11 dígitos (DDD + número)
                 if (strlen($telefone) === 11) {
+                    // Formato correto: DDD (2) + 9 + número (8) = 11 dígitos
                     $telefone = '+55' . $telefone;
                 } elseif (strlen($telefone) === 10) {
-                    $telefone = '+559' . $telefone;
-                } elseif (strlen($telefone) === 13 && substr($telefone, 0, 2) === '55') {
-                    $telefone = '+' . $telefone;
+                    // Falta o 9: DDD (2) + número (8) = 10 dígitos
+                    // Inserir o 9 após o DDD
+                    $ddd = substr($telefone, 0, 2);
+                    $numero = substr($telefone, 2);
+                    $telefone = '+55' . $ddd . '9' . $numero;
+                } elseif (strlen($telefone) === 9) {
+                    // Apenas número sem DDD - não é possível processar corretamente
+                    // Assumir DDD padrão não é seguro, lançar erro
+                    Log::warning('⚠️ Telefone sem DDD', ['telefone_original' => $request->whatsappRepresentante]);
+                    $telefone = '+55' . $telefone; // Tentar mesmo assim
                 } else {
+                    // Outros casos: apenas adicionar +55 se não tiver
                     if (strlen($telefone) >= 10) {
                         $telefone = '+55' . $telefone;
                     }
                 }
-                
+
+                Log::info('📱 Telefone formatado para Autentique', [
+                    'original' => $request->whatsappRepresentante,
+                    'formatado' => $telefone,
+                    'tamanho_original' => strlen(preg_replace('/\D/', '', $request->whatsappRepresentante)),
+                    'tamanho_final' => strlen($telefone)
+                ]);
+
                 $signatario['phone_number'] = $telefone;
                 
                 Log::info('✅ WhatsApp adicionado ao signatário', [

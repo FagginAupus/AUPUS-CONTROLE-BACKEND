@@ -1666,7 +1666,7 @@ class ControleController extends Controller
                 'desconto_bandeira' => $controle->desconto_bandeira, // null ou "15%" por exemplo
 
                 // ✅ NOVOS CAMPOS - INTEGRAÇÃO MICROSERVIÇOS
-                'compensacao_completa' => $controle->compensacao_completa ?? true,
+                'compensacao_completa' => $controle->compensacao_completa ?? false,
                 'cobrar_multa' => $controle->cobrar_multa ?? false,
                 'dia_vencimento' => $controle->dia_vencimento ?? 20,
             ];
