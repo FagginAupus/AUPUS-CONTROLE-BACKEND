@@ -18,6 +18,7 @@ class UnidadeConsumidora extends Model
     protected $fillable = [
         // Relacionamentos
         'usuario_id',
+        'associado_id',
         'concessionaria_id',
         'endereco_id',
         'proposta_id',
@@ -151,6 +152,14 @@ class UnidadeConsumidora extends Model
     public function proposta(): BelongsTo
     {
         return $this->belongsTo(Proposta::class, 'proposta_id', 'id');
+    }
+
+    /**
+     * Relacionamento com Associado
+     */
+    public function associado(): BelongsTo
+    {
+        return $this->belongsTo(Associado::class, 'associado_id', 'id');
     }
 
     /**

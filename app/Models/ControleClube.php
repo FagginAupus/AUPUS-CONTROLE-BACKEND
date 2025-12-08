@@ -29,6 +29,7 @@ class ControleClube extends Model
         'id',
         'proposta_id',
         'uc_id',
+        'associado_id',
         'ug_id',
         'calibragem',
         'calibragem_individual',
@@ -54,6 +55,7 @@ class ControleClube extends Model
         'id' => 'string',
         'proposta_id' => 'string',
         'uc_id' => 'string',
+        'associado_id' => 'string',
         'ug_id' => 'string',
         'calibragem' => 'decimal:2',
         'calibragem_individual' => 'decimal:2',
@@ -88,6 +90,14 @@ class ControleClube extends Model
     public function proposta()
     {
         return $this->belongsTo(Proposta::class, 'proposta_id', 'id');
+    }
+
+    /**
+     * Relacionamento com Associado
+     */
+    public function associado()
+    {
+        return $this->belongsTo(Associado::class, 'associado_id', 'id');
     }
 
       public function getDescontoTarifaNumericoAttribute(): float

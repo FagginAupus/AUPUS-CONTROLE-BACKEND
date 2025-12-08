@@ -11,6 +11,7 @@ use App\Http\Controllers\ConfiguracaoController;
 use App\Http\Controllers\NotificacaoController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\AuditoriaController;
+use App\Http\Controllers\AssociadoController;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 /*
@@ -660,6 +661,26 @@ Route::middleware('auth:api')->group(function () {
         Route::get('modulo/{modulo}', [AuditoriaController::class, 'eventosPorModulo']);
         Route::get('historico/{entidade}/{entidadeId}', [AuditoriaController::class, 'historicoEntidade']);
         Route::get('estatisticas', [AuditoriaController::class, 'estatisticas']);
+    });
+
+    // ==========================================
+    // ASSOCIADOS - Gestão de Associados do Clube
+    // ==========================================
+    Route::prefix('associados')->group(function () {
+        // CRUD básico
+        Route::get('/', [AssociadoController::class, 'index']);
+        Route::post('/', [AssociadoController::class, 'store']);
+
+        // Rotas específicas ANTES das rotas com parâmetro {id}
+        Route::get('buscar-cpf-cnpj', [AssociadoController::class, 'buscarPorCpfCnpj']);
+        Route::get('pendentes-validacao', [AssociadoController::class, 'listarPendentesValidacao']);
+        Route::get('validar/{proposta_id}/{numero_uc}', [AssociadoController::class, 'obterDadosValidacao']);
+        Route::post('confirmar/{proposta_id}/{numero_uc}', [AssociadoController::class, 'confirmarValidacao']);
+
+        // Rotas com parâmetro {id} - DEVEM ficar por último
+        Route::get('{id}', [AssociadoController::class, 'show']);
+        Route::put('{id}', [AssociadoController::class, 'update']);
+        Route::delete('{id}', [AssociadoController::class, 'destroy']);
     });
 
 });

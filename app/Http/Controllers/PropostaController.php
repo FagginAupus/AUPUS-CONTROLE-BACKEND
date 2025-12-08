@@ -769,9 +769,11 @@ class PropostaController extends Controller
                 throw new \Exception('Proposta não encontrada após inserção');
             }
             
-            if (isset($updateParams['status']) && $updateParams['status'] === 'Fechada' && 
+            // ✅ NOVO FLUXO: Ao fechar proposta, mudar status para "Pendente Validação"
+            // O controle será criado apenas após validação do associado
+            if (isset($updateParams['status']) && $updateParams['status'] === 'Fechada' &&
                 isset($propostaOriginal) && $propostaOriginal->status !== 'Fechada') {
-                $this->popularControleAutomatico($id);
+                $this->marcarUCsParaValidacao($id);
             }
 
             DB::commit();
@@ -1402,9 +1404,10 @@ class PropostaController extends Controller
 
             $numeroUC = $request->get('numeroUC') ?? $request->get('numero_unidade');
 
-            // Verificação para status geral da proposta (manter código existente)
+            // ✅ NOVO FLUXO: Ao fechar proposta, mudar status para "Pendente Validação"
+            // O controle será criado apenas após validação do associado
             if ($request->has('status') && !$numeroUC && $request->status === 'Fechada') {
-                $this->popularControleAutomatico($id);
+                $this->marcarUCsParaValidacao($id);
             }
 
             DB::commit();
@@ -1552,6 +1555,16 @@ class PropostaController extends Controller
                     'uc_data' => $uc
                 ]);
 
+                // ✅ BUSCAR DADOS DE ENDEREÇO DA DOCUMENTAÇÃO DA PROPOSTA
+                $documentacao = json_decode($proposta->documentacao ?? '{}', true);
+                $docUC = $documentacao[$numeroUC] ?? [];
+
+                $bairroUC = $docUC['Bairro_UC'] ?? null;
+                $cidadeUC = $docUC['Cidade_UC'] ?? null;
+                $estadoUC = $docUC['Estado_UC'] ?? null;
+                $cepUC = $docUC['CEP_UC'] ?? null;
+                $enderecoCompleto = $docUC['logradouroUC'] ?? $docUC['enderecoUC'] ?? null;
+
                 // ✅ VERIFICAR SE UC JÁ EXISTE NA TABELA unidades_consumidoras (apenas não deletadas)
                 $ucExistente = DB::selectOne(
                     "SELECT id FROM unidades_consumidoras WHERE numero_unidade = ? AND deleted_at IS NULL",
@@ -1562,14 +1575,15 @@ class PropostaController extends Controller
                     // ✅ GERAR ULID PARA A UC
                     $ucId = \Illuminate\Support\Str::ulid()->toString();
                     
-                    // ✅ INSERIR UC NA TABELA unidades_consumidoras
+                    // ✅ INSERIR UC NA TABELA unidades_consumidoras (COM DADOS DE ENDEREÇO)
                     DB::insert("
                         INSERT INTO unidades_consumidoras (
-                            id, usuario_id, concessionaria_id, endereco_id, numero_unidade, 
+                            id, usuario_id, concessionaria_id, endereco_id, numero_unidade,
                             apelido, consumo_medio, ligacao, distribuidora, proposta_id,
                             localizacao, is_ug, grupo, desconto_fatura, desconto_bandeira,
+                            bairro, cidade, estado, cep, endereco_completo,
                             created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                     ", [
                         $ucId,                                          // id (ULID)
                         $currentUser->id,                               // usuario_id (usuário logado)
@@ -1586,6 +1600,11 @@ class PropostaController extends Controller
                         'B',                                           // grupo (ADICIONADO)
                         $this->extrairValorDesconto($proposta->desconto_tarifa), // desconto_fatura (ADICIONADO)
                         $this->extrairValorDesconto($proposta->desconto_bandeira), // desconto_bandeira (ADICIONADO)
+                        $bairroUC,                                      // bairro
+                        $cidadeUC,                                      // cidade
+                        $estadoUC,                                      // estado
+                        $cepUC,                                         // cep
+                        $enderecoCompleto,                              // endereco_completo
                     ]);
 
                     Log::info('UC criada na tabela unidades_consumidoras', [
@@ -1598,6 +1617,38 @@ class PropostaController extends Controller
                     $ucIdFinal = $ucId;
                 } else {
                     $ucIdFinal = $ucExistente->id;
+
+                    // ✅ ATUALIZAR DADOS DE ENDEREÇO SE ESTIVEREM FALTANDO NA UC EXISTENTE
+                    if ($bairroUC || $cidadeUC || $estadoUC || $cepUC) {
+                        DB::update("
+                            UPDATE unidades_consumidoras
+                            SET
+                                bairro = COALESCE(NULLIF(bairro, ''), ?),
+                                cidade = COALESCE(NULLIF(cidade, ''), ?),
+                                estado = COALESCE(NULLIF(estado, ''), ?),
+                                cep = COALESCE(NULLIF(cep, ''), ?),
+                                endereco_completo = COALESCE(NULLIF(endereco_completo, ''), ?),
+                                updated_at = NOW()
+                            WHERE id = ?
+                        ", [
+                            $bairroUC,
+                            $cidadeUC,
+                            $estadoUC,
+                            $cepUC,
+                            $enderecoCompleto,
+                            $ucIdFinal
+                        ]);
+
+                        Log::info('Dados de endereço atualizados na UC existente', [
+                            'uc_id' => $ucIdFinal,
+                            'numero_unidade' => $numeroUC,
+                            'bairro' => $bairroUC,
+                            'cidade' => $cidadeUC,
+                            'estado' => $estadoUC,
+                            'cep' => $cepUC
+                        ]);
+                    }
+
                     Log::info('UC já existia na tabela', [
                         'uc_id' => $ucIdFinal,
                         'numero_unidade' => $numeroUC
@@ -1687,6 +1738,74 @@ class PropostaController extends Controller
     }
 
     /**
+     * ✅ MARCAR UCs PARA VALIDAÇÃO DE ASSOCIADO
+     * Chamado quando proposta é fechada - muda status das UCs de "Fechada" para "Pendente Validação"
+     */
+    public function marcarUCsParaValidacao($proposta_id)
+    {
+        try {
+            Log::info('Marcando UCs para validação', ['proposta_id' => $proposta_id]);
+
+            // Buscar proposta
+            $proposta = DB::selectOne("SELECT * FROM propostas WHERE id = ?", [$proposta_id]);
+
+            if (!$proposta) {
+                Log::warning('Proposta não encontrada para validação', ['proposta_id' => $proposta_id]);
+                return false;
+            }
+
+            // Buscar UCs da proposta
+            $unidadesConsumidoras = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+
+            if (empty($unidadesConsumidoras)) {
+                Log::warning('Nenhuma UC encontrada na proposta', ['proposta_id' => $proposta_id]);
+                return false;
+            }
+
+            // Atualizar status de cada UC para "Pendente Validação"
+            $alterado = false;
+            foreach ($unidadesConsumidoras as &$uc) {
+                $statusAtual = $uc['status'] ?? 'Aguardando';
+
+                // Só mudar se estava em Fechada ou se acabou de ser fechada
+                if ($statusAtual === 'Fechada' || $statusAtual === 'Aguardando') {
+                    $uc['status'] = 'Pendente Validação';
+                    $alterado = true;
+
+                    Log::info('UC marcada para validação', [
+                        'proposta_id' => $proposta_id,
+                        'numero_uc' => $uc['numero_unidade'] ?? $uc['numeroUC'] ?? 'N/A',
+                        'status_anterior' => $statusAtual
+                    ]);
+                }
+            }
+
+            if ($alterado) {
+                // Salvar as alterações
+                DB::update(
+                    "UPDATE propostas SET unidades_consumidoras = ?, updated_at = NOW() WHERE id = ?",
+                    [json_encode($unidadesConsumidoras), $proposta_id]
+                );
+
+                Log::info('UCs marcadas para validação com sucesso', [
+                    'proposta_id' => $proposta_id,
+                    'total_ucs' => count($unidadesConsumidoras)
+                ]);
+            }
+
+            return true;
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao marcar UCs para validação', [
+                'proposta_id' => $proposta_id,
+                'error' => $e->getMessage(),
+                'line' => $e->getLine()
+            ]);
+            return false;
+        }
+    }
+
+    /**
      * ✅ POPULAR CONTROLE AUTOMATICAMENTE PARA UMA UC ESPECÍFICA
      */
     public function popularControleAutomaticoParaUC($proposta_id, $numero_uc)
@@ -1763,6 +1882,16 @@ class PropostaController extends Controller
                 'uc_data' => $ucEspecifica
             ]);
 
+            // ✅ BUSCAR DADOS DE ENDEREÇO DA DOCUMENTAÇÃO DA PROPOSTA
+            $documentacao = json_decode($proposta->documentacao ?? '{}', true);
+            $docUC = $documentacao[$numeroUC] ?? [];
+
+            $bairroUC = $docUC['Bairro_UC'] ?? null;
+            $cidadeUC = $docUC['Cidade_UC'] ?? null;
+            $estadoUC = $docUC['Estado_UC'] ?? null;
+            $cepUC = $docUC['CEP_UC'] ?? null;
+            $enderecoCompleto = $docUC['logradouroUC'] ?? $docUC['enderecoUC'] ?? null;
+
             // ✅ VERIFICAR SE UC JÁ EXISTE NA TABELA unidades_consumidoras (apenas não deletadas)
             $ucExistente = DB::selectOne(
                 "SELECT id FROM unidades_consumidoras WHERE numero_unidade = ? AND deleted_at IS NULL",
@@ -1773,14 +1902,15 @@ class PropostaController extends Controller
                 // ✅ GERAR ULID PARA A UC
                 $ucId = \Illuminate\Support\Str::ulid()->toString();
                 
-                // ✅ INSERIR UC NA TABELA com os campos corretos
+                // ✅ INSERIR UC NA TABELA com os campos corretos (COM DADOS DE ENDEREÇO)
                 DB::insert("
                     INSERT INTO unidades_consumidoras (
-                        id, usuario_id, concessionaria_id, endereco_id, numero_unidade, 
+                        id, usuario_id, concessionaria_id, endereco_id, numero_unidade,
                         apelido, consumo_medio, ligacao, distribuidora, proposta_id,
                         localizacao, gerador, grupo, desconto_fatura, desconto_bandeira,
+                        bairro, cidade, estado, cep, endereco_completo,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 ", [
                     $ucId,                                          // id (ULID)
                     $usuarioId,                                     // usuario_id
@@ -1797,6 +1927,11 @@ class PropostaController extends Controller
                     'B',                                           // grupo
                     $this->extrairValorDesconto($proposta->desconto_tarifa), // desconto_fatura
                     $this->extrairValorDesconto($proposta->desconto_bandeira), // desconto_bandeira
+                    $bairroUC,                                      // bairro
+                    $cidadeUC,                                      // cidade
+                    $estadoUC,                                      // estado
+                    $cepUC,                                         // cep
+                    $enderecoCompleto,                              // endereco_completo
                 ]);
 
                 Log::info('UC criada na tabela unidades_consumidoras', [
@@ -1809,6 +1944,38 @@ class PropostaController extends Controller
                 $ucIdFinal = $ucId;
             } else {
                 $ucIdFinal = $ucExistente->id;
+
+                // ✅ ATUALIZAR DADOS DE ENDEREÇO SE ESTIVEREM FALTANDO NA UC EXISTENTE
+                if ($bairroUC || $cidadeUC || $estadoUC || $cepUC) {
+                    DB::update("
+                        UPDATE unidades_consumidoras
+                        SET
+                            bairro = COALESCE(NULLIF(bairro, ''), ?),
+                            cidade = COALESCE(NULLIF(cidade, ''), ?),
+                            estado = COALESCE(NULLIF(estado, ''), ?),
+                            cep = COALESCE(NULLIF(cep, ''), ?),
+                            endereco_completo = COALESCE(NULLIF(endereco_completo, ''), ?),
+                            updated_at = NOW()
+                        WHERE id = ?
+                    ", [
+                        $bairroUC,
+                        $cidadeUC,
+                        $estadoUC,
+                        $cepUC,
+                        $enderecoCompleto,
+                        $ucIdFinal
+                    ]);
+
+                    Log::info('Dados de endereço atualizados na UC existente', [
+                        'uc_id' => $ucIdFinal,
+                        'numero_unidade' => $numeroUC,
+                        'bairro' => $bairroUC,
+                        'cidade' => $cidadeUC,
+                        'estado' => $estadoUC,
+                        'cep' => $cepUC
+                    ]);
+                }
+
                 Log::info('UC já existia na tabela', [
                     'uc_id' => $ucIdFinal,
                     'numero_unidade' => $numeroUC
