@@ -64,7 +64,8 @@ class ControleController extends Controller
                 cc.created_at,
                 cc.updated_at,
                 p.numero_proposta,
-                p.nome_cliente,
+                -- ✅ ALTERAÇÃO: Usar nome_cliente e cpf_cnpj do controle_clube (cc) ao invés de propostas (p)
+                COALESCE(cc.nome_cliente, p.nome_cliente) as nome_cliente,
                 COALESCE(u_consultor.nome, 'Sem consultor') as consultor_nome,
                 p.data_proposta,
                 p.usuario_id,
@@ -80,12 +81,8 @@ class ControleController extends Controller
                 cc.desconto_bandeira,
                 p.desconto_tarifa as proposta_desconto_tarifa,
                 p.desconto_bandeira as proposta_desconto_bandeira,
-                -- ✅ NOVO: Extrair CPF/CNPJ do JSON documentacao (preferir cpf, senão cnpj)
-                COALESCE(
-                    NULLIF(p.documentacao->uc.numero_unidade::text->>'cpf', 'null'),
-                    NULLIF(p.documentacao->uc.numero_unidade::text->>'cnpj', 'null'),
-                    ''
-                ) as cpf_cnpj
+                -- ✅ ALTERAÇÃO: Usar cpf_cnpj do controle_clube
+                COALESCE(cc.cpf_cnpj, '') as cpf_cnpj
             FROM controle_clube cc
             LEFT JOIN propostas p ON cc.proposta_id = p.id
             LEFT JOIN usuarios u_consultor ON p.consultor_id = u_consultor.id
@@ -157,7 +154,9 @@ class ControleController extends Controller
 
             if ($request->filled('search')) {
                 $search = $request->search;
-                $query .= " AND (p.nome_cliente ILIKE ? OR p.numero_proposta ILIKE ? OR uc.numero_unidade::text ILIKE ? OR uc.apelido ILIKE ?)";
+                // ✅ ALTERAÇÃO: Buscar também em cc.nome_cliente (controle_clube)
+                $query .= " AND (cc.nome_cliente ILIKE ? OR p.nome_cliente ILIKE ? OR p.numero_proposta ILIKE ? OR uc.numero_unidade::text ILIKE ? OR uc.apelido ILIKE ?)";
+                $params[] = "%{$search}%";
                 $params[] = "%{$search}%";
                 $params[] = "%{$search}%";
                 $params[] = "%{$search}%";
