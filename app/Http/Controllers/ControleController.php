@@ -1464,6 +1464,9 @@ class ControleController extends Controller
                     cc.id as controle_id,
                     cc.desconto_tarifa,
                     cc.desconto_bandeira,
+                    cc.data_assinatura,
+                    cc.whatsapp,
+                    cc.email,
                     uc.numero_unidade,
                     uc.apelido,
                     uc.consumo_medio,
@@ -1525,7 +1528,11 @@ class ControleController extends Controller
                     'cep_uc' => $controle->cep_uc ?? '',
                     'bairro_uc' => $controle->bairro_uc ?? '',
                     'cidade_uc' => $controle->cidade_uc ?? '',
-                    'estado_uc' => $controle->estado_uc ?? ''
+                    'estado_uc' => $controle->estado_uc ?? '',
+                    // ✅ NOVAS COLUNAS: Data Assinatura, WhatsApp e Email
+                    'data_assinatura' => $controle->data_assinatura,
+                    'whatsapp' => $controle->whatsapp ?? '',
+                    'email' => $controle->email ?? ''
                 ];
             }
 
