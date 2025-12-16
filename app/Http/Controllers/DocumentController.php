@@ -836,7 +836,9 @@ class DocumentController extends Controller
         ]);
 
         // ✅ REGISTRAR EVENTO DE AUDITORIA - DOCUMENTO ASSINADO
-        AuditoriaService::registrar('propostas', $localDocument->proposta_id, 'TERMO_ASSINADO', [
+        // Usar o usuário que enviou o termo (created_by) para registrar quem validou
+        $usuarioValidador = $localDocument->created_by;
+        $optionsAuditoria = [
             'evento_tipo' => 'TERMO_ASSINADO',
             'descricao_evento' => "Termo de adesão assinado digitalmente",
             'modulo' => 'propostas',
@@ -848,9 +850,17 @@ class DocumentController extends Controller
                 'status_novo' => Document::STATUS_SIGNED,
                 'numero_uc' => $localDocument->document_data['numeroUC'] ?? null,
                 'nome_cliente' => $localDocument->document_data['nomeCliente'] ?? null,
+                'usuario_validador' => $usuarioValidador,
                 'timestamp' => now()->toISOString()
             ]
-        ]);
+        ];
+
+        // Se temos o usuário que enviou o termo, usar registrarComUsuario
+        if ($usuarioValidador) {
+            AuditoriaService::registrarComUsuario('propostas', $localDocument->proposta_id, 'TERMO_ASSINADO', $usuarioValidador, $optionsAuditoria);
+        } else {
+            AuditoriaService::registrar('propostas', $localDocument->proposta_id, 'TERMO_ASSINADO', $optionsAuditoria);
+        }
 
         Log::info('🎉 DOCUMENTO TOTALMENTE ASSINADO!', [
             'document_id' => $localDocument->autentique_id,
@@ -898,82 +908,42 @@ class DocumentController extends Controller
                     foreach ($unidadesConsumidoras as &$uc) {
                         if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
                             $statusAnterior = $uc['status'] ?? null;
-                            $uc['status'] = 'Fechada';
-                            
-                            Log::info('✅ STATUS UC ALTERADO AUTOMATICAMENTE APÓS ASSINATURA', [
+                            // ✅ CORREÇÃO: Marcar como "Pendente Validação" ao invés de "Fechada"
+                            // A UC deve passar pela página de Validação antes de ir para o Controle
+                            $uc['status'] = 'Pendente Validação';
+
+                            // Salvar a data de assinatura no JSON da UC para uso posterior na validação
+                            if ($dataAssinaturaAutentique) {
+                                $uc['data_assinatura_termo'] = $dataAssinaturaAutentique;
+                            } else {
+                                $uc['data_assinatura_termo'] = now()->toISOString();
+                            }
+
+                            Log::info('✅ STATUS UC ALTERADO PARA PENDENTE VALIDAÇÃO APÓS ASSINATURA', [
                                 'proposta_id' => $localDocument->proposta_id,
                                 'numero_uc' => $numeroUC,
                                 'status_anterior' => $statusAnterior,
-                                'status_novo' => 'Fechada'
+                                'status_novo' => 'Pendente Validação',
+                                'data_assinatura_termo' => $uc['data_assinatura_termo']
                             ]);
                             break;
                         }
                     }
-                    
+
                     $proposta->update([
                         'unidades_consumidoras' => json_encode($unidadesConsumidoras)
                     ]);
-                    
-                    // Adicionar ao controle automaticamente
-                    try {
-                        app(PropostaController::class)->popularControleAutomaticoParaUC($localDocument->proposta_id, $numeroUC);
-                        Log::info('🔄 UC ADICIONADA AO CONTROLE AUTOMATICAMENTE', [
-                            'proposta_id' => $localDocument->proposta_id,
-                            'numero_uc' => $numeroUC
-                        ]);
 
-                        // ✅ ATUALIZAR DATA DE ASSINATURA NO CONTROLE
-                        try {
-                            // Usar data real da Autentique ou NOW() como fallback
-                            if ($dataAssinaturaAutentique) {
-                                DB::statement("
-                                    UPDATE controle_clube cc
-                                    SET data_assinatura = ?
-                                    FROM unidades_consumidoras uc
-                                    WHERE cc.uc_id = uc.id
-                                        AND uc.numero_unidade = ?
-                                        AND cc.proposta_id = ?
-                                        AND cc.data_assinatura IS NULL
-                                ", [$dataAssinaturaAutentique, $numeroUC, $localDocument->proposta_id]);
+                    // ✅ NÃO adicionar ao controle automaticamente
+                    // A UC agora aparecerá na página de Validação para revisão manual
+                    Log::info('📋 UC aguardando validação manual', [
+                        'proposta_id' => $localDocument->proposta_id,
+                        'numero_uc' => $numeroUC,
+                        'proximo_passo' => 'Usuário deve validar na página de Validação'
+                    ]);
 
-                                Log::info('📅 Data de assinatura atualizada no controle (data real da Autentique)', [
-                                    'proposta_id' => $localDocument->proposta_id,
-                                    'numero_uc' => $numeroUC,
-                                    'data_assinatura' => $dataAssinaturaAutentique
-                                ]);
-                            } else {
-                                DB::statement("
-                                    UPDATE controle_clube cc
-                                    SET data_assinatura = NOW()
-                                    FROM unidades_consumidoras uc
-                                    WHERE cc.uc_id = uc.id
-                                        AND uc.numero_unidade = ?
-                                        AND cc.proposta_id = ?
-                                        AND cc.data_assinatura IS NULL
-                                ", [$numeroUC, $localDocument->proposta_id]);
-
-                                Log::info('📅 Data de assinatura atualizada no controle (fallback NOW())', [
-                                    'proposta_id' => $localDocument->proposta_id,
-                                    'numero_uc' => $numeroUC
-                                ]);
-                            }
-                        } catch (\Exception $e) {
-                            Log::error('❌ Erro ao atualizar data de assinatura no controle', [
-                                'error' => $e->getMessage(),
-                                'proposta_id' => $localDocument->proposta_id,
-                                'numero_uc' => $numeroUC
-                            ]);
-                        }
-
-                        // ✅ LIMPAR FLAGS APÓS PROCESSAMENTO AUTOMÁTICO
-                        session()->forget(['skip_proposta_log', 'alteracao_documentacao_apenas']);
-                    } catch (\Exception $e) {
-                        Log::error('❌ Erro ao adicionar UC ao controle automaticamente', [
-                            'error' => $e->getMessage(),
-                            'proposta_id' => $localDocument->proposta_id,
-                            'numero_uc' => $numeroUC
-                        ]);
-                    }
+                    // Limpar flags
+                    session()->forget(['skip_proposta_log', 'alteracao_documentacao_apenas']);
 
                     // Enviar notificação para admins e analistas
                     try {

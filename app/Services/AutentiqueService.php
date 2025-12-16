@@ -559,8 +559,9 @@ class AutentiqueService
     private function executePostSignatureActions($localDocument)
     {
         try {
-            // Registrar auditoria
-            \App\Services\AuditoriaService::registrar('propostas', $localDocument->proposta_id, 'TERMO_ASSINADO', [
+            // Registrar auditoria - usando o usuário que enviou o termo
+            $usuarioValidador = $localDocument->created_by;
+            $optionsAuditoria = [
                 'evento_tipo' => 'TERMO_ASSINADO_SYNC',
                 'descricao_evento' => "Termo de adesão assinado (sincronizado manualmente)",
                 'modulo' => 'propostas',
@@ -570,10 +571,17 @@ class AutentiqueService
                     'document_name' => $localDocument->name,
                     'numero_uc' => $localDocument->document_data['numeroUC'] ?? null,
                     'nome_cliente' => $localDocument->document_data['nomeCliente'] ?? null,
+                    'usuario_validador' => $usuarioValidador,
                     'timestamp' => now()->toISOString(),
                     'sync_manual' => true
                 ]
-            ]);
+            ];
+
+            if ($usuarioValidador) {
+                \App\Services\AuditoriaService::registrarComUsuario('propostas', $localDocument->proposta_id, 'TERMO_ASSINADO', $usuarioValidador, $optionsAuditoria);
+            } else {
+                \App\Services\AuditoriaService::registrar('propostas', $localDocument->proposta_id, 'TERMO_ASSINADO', $optionsAuditoria);
+            }
 
             // Atualizar status da UC e adicionar ao controle
             if ($localDocument->proposta_id && $localDocument->document_data) {
@@ -601,7 +609,8 @@ class AutentiqueService
                         'remover'
                     );
 
-                    // Atualizar status da UC para "Fechada"
+                    // ✅ CORREÇÃO: Atualizar status da UC para "Pendente Validação" ao invés de "Fechada"
+                    // A UC deve passar pela página de Validação antes de ir para o Controle
                     $proposta = \App\Models\Proposta::find($localDocument->proposta_id);
                     if ($proposta) {
                         $unidadesConsumidoras = $proposta->unidades_consumidoras;
@@ -614,13 +623,16 @@ class AutentiqueService
                         foreach ($unidadesConsumidoras as &$uc) {
                             if (($uc['numero_unidade'] ?? $uc['numeroUC']) == $numeroUC) {
                                 $statusAnterior = $uc['status'] ?? null;
-                                $uc['status'] = 'Fechada';
+                                $uc['status'] = 'Pendente Validação';
 
-                                Log::info('✅ STATUS UC ALTERADO APÓS SINCRONIZAÇÃO', [
+                                // Salvar a data de assinatura no JSON da UC para uso posterior na validação
+                                $uc['data_assinatura_termo'] = now()->toISOString();
+
+                                Log::info('✅ STATUS UC ALTERADO PARA PENDENTE VALIDAÇÃO APÓS SINCRONIZAÇÃO', [
                                     'proposta_id' => $localDocument->proposta_id,
                                     'numero_uc' => $numeroUC,
                                     'status_anterior' => $statusAnterior,
-                                    'status_novo' => 'Fechada'
+                                    'status_novo' => 'Pendente Validação'
                                 ]);
                                 break;
                             }
@@ -630,13 +642,12 @@ class AutentiqueService
                             'unidades_consumidoras' => json_encode($unidadesConsumidoras)
                         ]);
 
-                        // Adicionar ao controle automaticamente
-                        try {
-                            app(\App\Http\Controllers\PropostaController::class)->popularControleAutomaticoParaUC($localDocument->proposta_id, $numeroUC);
-                            Log::info('✅ UC adicionada ao controle após sincronização');
-                        } catch (\Exception $e) {
-                            Log::warning('UC pode já estar no controle', ['error' => $e->getMessage()]);
-                        }
+                        // ✅ NÃO adicionar ao controle automaticamente
+                        // A UC agora aparecerá na página de Validação para revisão manual
+                        Log::info('📋 UC aguardando validação manual (sync)', [
+                            'proposta_id' => $localDocument->proposta_id,
+                            'numero_uc' => $numeroUC
+                        ]);
                     }
                 }
             }
