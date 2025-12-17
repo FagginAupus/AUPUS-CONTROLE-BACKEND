@@ -438,8 +438,20 @@ class AssociadoController extends Controller
                 ], 404);
             }
 
-            $ucs = json_decode($proposta->unidades_consumidoras ?? '[]', true);
-            $documentacao = json_decode($proposta->documentacao ?? '{}', true);
+            // Verificar se já é array ou precisa decodificar
+            $ucs = $proposta->unidades_consumidoras;
+            if (is_string($ucs)) {
+                $ucs = json_decode($ucs, true) ?? [];
+            } elseif (!is_array($ucs)) {
+                $ucs = [];
+            }
+
+            $documentacao = $proposta->documentacao;
+            if (is_string($documentacao)) {
+                $documentacao = json_decode($documentacao, true) ?? [];
+            } elseif (!is_array($documentacao)) {
+                $documentacao = [];
+            }
 
             // Encontrar a UC específica
             $ucEncontrada = null;
