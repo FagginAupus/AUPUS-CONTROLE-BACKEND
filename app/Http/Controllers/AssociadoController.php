@@ -374,6 +374,11 @@ class AssociadoController extends Controller
                         $numeroUC = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
                         $docUC = $documentacao[$numeroUC] ?? [];
 
+                        // Buscar dados em vários locais possíveis
+                        $cpfCnpj = $docUC['cpfCnpj'] ?? $docUC['CPF_CNPJ'] ?? $docUC['cpf_cnpj'] ?? $proposta->cpf_cnpj ?? null;
+                        $whatsapp = $docUC['whatsapp'] ?? $docUC['Whatsapp'] ?? $docUC['telefone'] ?? $proposta->whatsapp ?? $proposta->telefone ?? null;
+                        $email = $docUC['email'] ?? $docUC['Email'] ?? $proposta->email ?? null;
+
                         $resultado[] = [
                             'proposta_id' => $proposta->id,
                             'numero_proposta' => $proposta->numero_proposta,
@@ -389,14 +394,14 @@ class AssociadoController extends Controller
                                 'ligacao' => $uc['ligacao'] ?? null,
                                 'consumo_medio' => $uc['consumo_medio'] ?? $uc['media'] ?? null,
                                 'distribuidora' => $uc['distribuidora'] ?? null,
-                                'cpf_cnpj' => $docUC['cpfCnpj'] ?? $docUC['CPF_CNPJ'] ?? null,
-                                'endereco' => $docUC['logradouroUC'] ?? $docUC['enderecoUC'] ?? null,
-                                'bairro' => $docUC['Bairro_UC'] ?? null,
-                                'cidade' => $docUC['Cidade_UC'] ?? null,
-                                'estado' => $docUC['Estado_UC'] ?? null,
-                                'cep' => $docUC['CEP_UC'] ?? null,
-                                'whatsapp' => $docUC['whatsapp'] ?? $docUC['Whatsapp'] ?? null,
-                                'email' => $docUC['email'] ?? $docUC['Email'] ?? null
+                                'cpf_cnpj' => $cpfCnpj,
+                                'endereco' => $docUC['logradouroUC'] ?? $docUC['enderecoUC'] ?? $docUC['endereco'] ?? null,
+                                'bairro' => $docUC['Bairro_UC'] ?? $docUC['bairro'] ?? null,
+                                'cidade' => $docUC['Cidade_UC'] ?? $docUC['cidade'] ?? null,
+                                'estado' => $docUC['Estado_UC'] ?? $docUC['estado'] ?? $docUC['uf'] ?? null,
+                                'cep' => $docUC['CEP_UC'] ?? $docUC['cep'] ?? null,
+                                'whatsapp' => $whatsapp,
+                                'email' => $email
                             ]
                         ];
                     }
@@ -471,7 +476,15 @@ class AssociadoController extends Controller
             }
 
             $docUC = $documentacao[$numero_uc] ?? [];
-            $cpfCnpj = $docUC['cpfCnpj'] ?? $docUC['CPF_CNPJ'] ?? null;
+
+            // Buscar CPF/CNPJ em vários locais possíveis
+            $cpfCnpj = $docUC['cpfCnpj'] ?? $docUC['CPF_CNPJ'] ?? $docUC['cpf_cnpj'] ?? $proposta->cpf_cnpj ?? null;
+
+            // Buscar whatsapp em vários locais possíveis
+            $whatsapp = $docUC['whatsapp'] ?? $docUC['Whatsapp'] ?? $docUC['telefone'] ?? $proposta->whatsapp ?? $proposta->telefone ?? null;
+
+            // Buscar email em vários locais possíveis
+            $email = $docUC['email'] ?? $docUC['Email'] ?? $proposta->email ?? null;
 
             // Buscar se já existe associado com esse CPF/CNPJ
             $associadoExistente = null;
@@ -509,13 +522,13 @@ class AssociadoController extends Controller
                     'cliente' => [
                         'nome' => $proposta->nome_cliente,
                         'cpf_cnpj' => $cpfCnpj,
-                        'endereco' => $docUC['logradouroUC'] ?? $docUC['enderecoUC'] ?? null,
-                        'bairro' => $docUC['Bairro_UC'] ?? null,
-                        'cidade' => $docUC['Cidade_UC'] ?? null,
-                        'estado' => $docUC['Estado_UC'] ?? null,
-                        'cep' => $docUC['CEP_UC'] ?? null,
-                        'whatsapp' => $docUC['whatsapp'] ?? $docUC['Whatsapp'] ?? null,
-                        'email' => $docUC['email'] ?? $docUC['Email'] ?? null
+                        'endereco' => $docUC['logradouroUC'] ?? $docUC['enderecoUC'] ?? $docUC['endereco'] ?? null,
+                        'bairro' => $docUC['Bairro_UC'] ?? $docUC['bairro'] ?? null,
+                        'cidade' => $docUC['Cidade_UC'] ?? $docUC['cidade'] ?? null,
+                        'estado' => $docUC['Estado_UC'] ?? $docUC['estado'] ?? $docUC['uf'] ?? null,
+                        'cep' => $docUC['CEP_UC'] ?? $docUC['cep'] ?? null,
+                        'whatsapp' => $whatsapp,
+                        'email' => $email
                     ],
                     'associado_existente' => $associadoExistente
                 ]
