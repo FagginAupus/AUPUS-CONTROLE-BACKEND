@@ -375,9 +375,9 @@ class AssociadoController extends Controller
                         $docUC = $documentacao[$numeroUC] ?? [];
 
                         // Buscar dados em vários locais possíveis
-                        $cpfCnpj = $docUC['cpfCnpj'] ?? $docUC['CPF_CNPJ'] ?? $docUC['cpf_cnpj'] ?? $proposta->cpf_cnpj ?? null;
-                        $whatsapp = $docUC['whatsapp'] ?? $docUC['Whatsapp'] ?? $docUC['telefone'] ?? $proposta->whatsapp ?? $proposta->telefone ?? null;
-                        $email = $docUC['email'] ?? $docUC['Email'] ?? $proposta->email ?? null;
+                        $cpfCnpj = $docUC['cpfCnpj'] ?? $docUC['CPF_CNPJ'] ?? $docUC['cpf_cnpj'] ?? $docUC['cpf'] ?? $docUC['cnpj'] ?? null;
+                        $whatsapp = $docUC['whatsapp'] ?? $docUC['Whatsapp'] ?? $docUC['whatsappRepresentante'] ?? $docUC['telefone'] ?? null;
+                        $email = $docUC['email'] ?? $docUC['Email'] ?? $docUC['emailRepresentante'] ?? null;
 
                         $resultado[] = [
                             'proposta_id' => $proposta->id,
@@ -478,13 +478,13 @@ class AssociadoController extends Controller
             $docUC = $documentacao[$numero_uc] ?? [];
 
             // Buscar CPF/CNPJ em vários locais possíveis
-            $cpfCnpj = $docUC['cpfCnpj'] ?? $docUC['CPF_CNPJ'] ?? $docUC['cpf_cnpj'] ?? $proposta->cpf_cnpj ?? null;
+            $cpfCnpj = $docUC['cpfCnpj'] ?? $docUC['CPF_CNPJ'] ?? $docUC['cpf_cnpj'] ?? $docUC['cpf'] ?? $docUC['cnpj'] ?? null;
 
             // Buscar whatsapp em vários locais possíveis
-            $whatsapp = $docUC['whatsapp'] ?? $docUC['Whatsapp'] ?? $docUC['telefone'] ?? $proposta->whatsapp ?? $proposta->telefone ?? null;
+            $whatsapp = $docUC['whatsapp'] ?? $docUC['Whatsapp'] ?? $docUC['whatsappRepresentante'] ?? $docUC['telefone'] ?? null;
 
             // Buscar email em vários locais possíveis
-            $email = $docUC['email'] ?? $docUC['Email'] ?? $proposta->email ?? null;
+            $email = $docUC['email'] ?? $docUC['Email'] ?? $docUC['emailRepresentante'] ?? null;
 
             // Buscar se já existe associado com esse CPF/CNPJ
             $associadoExistente = null;
