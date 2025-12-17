@@ -582,7 +582,13 @@ class AssociadoController extends Controller
                 'consumo_medio' => 'nullable|numeric',
                 'associado_id' => 'nullable|string|max:36', // Se vincular a existente
                 // Consultor (se alterado, atualiza na proposta)
-                'consultor_id' => 'nullable|string|max:36'
+                'consultor_id' => 'nullable|string|max:36',
+                // Campos de faturamento (salvos na UC)
+                'nome_faturamento' => 'nullable|string|max:200',
+                'cpf_cnpj_faturamento' => 'nullable|string|max:20',
+                'whatsapp_faturamento' => 'nullable|string|max:20',
+                'email_faturamento_1' => 'nullable|email|max:255',
+                'email_faturamento_2' => 'nullable|email|max:255'
             ]);
 
             if ($validator->fails()) {
@@ -682,8 +688,10 @@ class AssociadoController extends Controller
                         apelido, consumo_medio, ligacao, distribuidora, proposta_id,
                         bairro, cidade, estado, cep, endereco_completo,
                         grupo, desconto_fatura, desconto_bandeira,
+                        nome_faturamento, cpf_cnpj_faturamento, whatsapp_faturamento,
+                        email_faturamento_1, email_faturamento_2,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 ", [
                     $ucId,
                     $currentUser->id,
@@ -702,7 +710,12 @@ class AssociadoController extends Controller
                     $request->endereco,
                     'B',
                     $this->extrairValorDesconto($proposta->desconto_tarifa),
-                    $this->extrairValorDesconto($proposta->desconto_bandeira)
+                    $this->extrairValorDesconto($proposta->desconto_bandeira),
+                    $request->nome_faturamento,
+                    $request->cpf_cnpj_faturamento,
+                    $request->whatsapp_faturamento,
+                    $request->email_faturamento_1,
+                    $request->email_faturamento_2
                 ]);
 
                 Log::info('UC criada', ['uc_id' => $ucId, 'numero_uc' => $numero_uc]);
@@ -710,7 +723,7 @@ class AssociadoController extends Controller
             } else {
                 $ucId = $ucExistente->id;
 
-                // Atualizar UC existente com associado_id
+                // Atualizar UC existente com associado_id e dados de faturamento
                 DB::update("
                     UPDATE unidades_consumidoras
                     SET associado_id = ?,
@@ -719,6 +732,11 @@ class AssociadoController extends Controller
                         estado = COALESCE(?, estado),
                         cep = COALESCE(?, cep),
                         endereco_completo = COALESCE(?, endereco_completo),
+                        nome_faturamento = COALESCE(?, nome_faturamento),
+                        cpf_cnpj_faturamento = COALESCE(?, cpf_cnpj_faturamento),
+                        whatsapp_faturamento = COALESCE(?, whatsapp_faturamento),
+                        email_faturamento_1 = COALESCE(?, email_faturamento_1),
+                        email_faturamento_2 = COALESCE(?, email_faturamento_2),
                         updated_at = NOW()
                     WHERE id = ?
                 ", [
@@ -728,6 +746,11 @@ class AssociadoController extends Controller
                     $request->estado,
                     $request->cep,
                     $request->endereco,
+                    $request->nome_faturamento,
+                    $request->cpf_cnpj_faturamento,
+                    $request->whatsapp_faturamento,
+                    $request->email_faturamento_1,
+                    $request->email_faturamento_2,
                     $ucId
                 ]);
 
