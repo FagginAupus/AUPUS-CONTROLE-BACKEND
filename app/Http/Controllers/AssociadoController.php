@@ -88,7 +88,9 @@ class AssociadoController extends Controller
             $buscaLimpa = preg_replace('/[^0-9]/', '', $busca);
 
             // Buscar associados por nome, CPF/CNPJ ou email
-            $query = Associado::with(['unidadesConsumidoras'])
+            // Carrega controles e conta total para exibir na busca
+            $query = Associado::with(['unidadesConsumidoras', 'controles'])
+                ->withCount('controles')
                 ->where(function($q) use ($busca, $buscaLimpa) {
                     // Busca por nome (parcial)
                     $q->where('nome', 'ILIKE', "%{$busca}%")
