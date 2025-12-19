@@ -68,42 +68,81 @@ class AssociadoController extends Controller
     }
 
     /**
-     * Buscar associado por CPF/CNPJ
-     * Usado no modal para verificar se associado já existe
+     * Buscar associado por CPF/CNPJ, nome, email ou número UC
+     * Usado no modal de validação para vincular a associado existente
      */
     public function buscarPorCpfCnpj(Request $request)
     {
         try {
-            $cpfCnpj = $request->get('cpf_cnpj');
+            // Aceita tanto cpf_cnpj quanto busca genérica
+            $busca = $request->get('busca') ?? $request->get('cpf_cnpj');
 
-            if (empty($cpfCnpj)) {
+            if (empty($busca) || strlen($busca) < 3) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'CPF/CNPJ é obrigatório'
+                    'message' => 'Digite pelo menos 3 caracteres para buscar'
                 ], 400);
             }
 
-            $associado = Associado::with(['unidadesConsumidoras.controles'])
-                ->porCpfCnpj($cpfCnpj)
-                ->first();
+            // Limpar formatação para busca numérica
+            $buscaLimpa = preg_replace('/[^0-9]/', '', $busca);
 
-            if ($associado) {
+            // Buscar associados por nome, CPF/CNPJ ou email
+            $query = Associado::with(['unidadesConsumidoras'])
+                ->where(function($q) use ($busca, $buscaLimpa) {
+                    // Busca por nome (parcial)
+                    $q->where('nome', 'ILIKE', "%{$busca}%")
+                      // Busca por email (parcial)
+                      ->orWhere('email', 'ILIKE', "%{$busca}%")
+                      // Busca por CPF/CNPJ (exato ou parcial)
+                      ->orWhere('cpf_cnpj', 'ILIKE', "%{$busca}%");
+
+                    // Se tem números, buscar também sem formatação
+                    if (!empty($buscaLimpa) && strlen($buscaLimpa) >= 3) {
+                        $q->orWhereRaw("REPLACE(REPLACE(REPLACE(cpf_cnpj, '.', ''), '-', ''), '/', '') ILIKE ?", ["%{$buscaLimpa}%"]);
+                    }
+                });
+
+            // Buscar também por número de UC vinculada
+            if (!empty($buscaLimpa) && strlen($buscaLimpa) >= 3) {
+                $query->orWhereHas('unidadesConsumidoras', function($ucQuery) use ($busca, $buscaLimpa) {
+                    $ucQuery->where('numero_unidade', 'ILIKE', "%{$busca}%")
+                            ->orWhere('numero_unidade', 'ILIKE', "%{$buscaLimpa}%");
+                });
+            }
+
+            $associados = $query->limit(10)->get();
+
+            if ($associados->count() > 0) {
+                // Se encontrou apenas um, retorna no formato antigo para compatibilidade
+                if ($associados->count() === 1) {
+                    return response()->json([
+                        'success' => true,
+                        'encontrado' => true,
+                        'data' => $associados->first(),
+                        'total' => 1
+                    ]);
+                }
+
+                // Se encontrou múltiplos, retorna lista
                 return response()->json([
                     'success' => true,
                     'encontrado' => true,
-                    'data' => $associado
+                    'data' => $associados,
+                    'total' => $associados->count(),
+                    'multiplos' => true
                 ]);
             }
 
             return response()->json([
                 'success' => true,
                 'encontrado' => false,
-                'message' => 'Associado não encontrado'
+                'message' => 'Nenhum associado encontrado'
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Erro ao buscar associado por CPF/CNPJ', [
-                'cpf_cnpj' => $request->get('cpf_cnpj'),
+            Log::error('Erro ao buscar associado', [
+                'busca' => $request->get('busca') ?? $request->get('cpf_cnpj'),
                 'error' => $e->getMessage()
             ]);
 
@@ -494,10 +533,11 @@ class AssociadoController extends Controller
                     ->first();
             }
 
-            // Buscar consultor
+            // Buscar consultor (usa consultor_id ou usuario_id como fallback)
             $consultor = null;
-            if ($proposta->consultor_id) {
-                $consultor = DB::selectOne("SELECT id, nome FROM usuarios WHERE id = ?", [$proposta->consultor_id]);
+            $consultorId = $proposta->consultor_id ?? $proposta->usuario_id;
+            if ($consultorId) {
+                $consultor = DB::selectOne("SELECT id, nome FROM usuarios WHERE id = ?", [$consultorId]);
             }
 
             return response()->json([
@@ -509,7 +549,7 @@ class AssociadoController extends Controller
                         'nome_cliente' => $proposta->nome_cliente,
                         'desconto_tarifa' => $proposta->desconto_tarifa,
                         'desconto_bandeira' => $proposta->desconto_bandeira,
-                        'consultor_id' => $proposta->consultor_id,
+                        'consultor_id' => $consultorId,
                         'consultor_nome' => $consultor->nome ?? null
                     ],
                     'uc' => [
