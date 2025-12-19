@@ -88,9 +88,8 @@ class AssociadoController extends Controller
             $buscaLimpa = preg_replace('/[^0-9]/', '', $busca);
 
             // Buscar associados por nome, CPF/CNPJ ou email
-            // Carrega controles e conta total para exibir na busca
-            $query = Associado::with(['unidadesConsumidoras', 'controles'])
-                ->withCount('controles')
+            // Só conta os controles (não carrega a relação completa para evitar erro no toArray)
+            $query = Associado::withCount('controles')
                 ->where(function($q) use ($busca, $buscaLimpa) {
                     // Busca por nome (parcial)
                     $q->where('nome', 'ILIKE', "%{$busca}%")
@@ -611,7 +610,7 @@ class AssociadoController extends Controller
                 'nome' => 'required|string|max:200',
                 'cpf_cnpj' => 'required|string|max:18',
                 'whatsapp' => 'nullable|string|max:20',
-                'email' => 'nullable|email|max:255',
+                'email' => 'required|email|max:255', // Email é obrigatório
                 // Campos de endereço ficam no controle_clube
                 'endereco' => 'nullable|string|max:255',
                 'bairro' => 'nullable|string|max:100',
@@ -667,17 +666,11 @@ class AssociadoController extends Controller
             $associadoId = $request->associado_id;
 
             if ($associadoId) {
-                // Vincular a associado existente
+                // Vincular a associado existente - NÃO atualiza dados do associado (ficam inalteráveis)
                 $associado = Associado::find($associadoId);
                 if (!$associado) {
                     throw new \Exception('Associado não encontrado');
                 }
-
-                // Atualizar dados do associado se necessário (apenas whatsapp e email)
-                $associado->update([
-                    'whatsapp' => $request->whatsapp ?? $associado->whatsapp,
-                    'email' => $request->email ?? $associado->email
-                ]);
 
                 Log::info('Vinculando UC a associado existente', [
                     'associado_id' => $associadoId,
@@ -685,34 +678,56 @@ class AssociadoController extends Controller
                 ]);
 
             } else {
-                // Verificar se já existe associado com esse CPF/CNPJ
-                $associado = Associado::buscarPorCpfCnpj($request->cpf_cnpj);
+                // SEM VINCULAÇÃO MANUAL - Verificar se já existe associado com CPF/CNPJ ou email
+                $associadoPorCpf = Associado::buscarPorCpfCnpj($request->cpf_cnpj);
+                $associadoPorEmail = Associado::where('email', 'ILIKE', $request->email)->first();
 
-                if ($associado) {
-                    // Já existe, usar o existente
-                    $associadoId = $associado->id;
-
-                    Log::info('Associado já existente encontrado', [
-                        'associado_id' => $associadoId,
-                        'cpf_cnpj' => $request->cpf_cnpj
-                    ]);
-                } else {
-                    // Criar novo associado (sem campos de endereço - estes ficam no controle)
-                    $associado = Associado::create([
-                        'nome' => $request->nome,
-                        'cpf_cnpj' => $request->cpf_cnpj,
-                        'whatsapp' => $request->whatsapp,
-                        'email' => $request->email
-                    ]);
-
-                    $associadoId = $associado->id;
-
-                    Log::info('Novo associado criado', [
-                        'associado_id' => $associadoId,
-                        'nome' => $associado->nome,
-                        'cpf_cnpj' => $associado->cpf_cnpj
-                    ]);
+                // Coletar associados conflitantes
+                $conflitos = [];
+                if ($associadoPorCpf) {
+                    $conflitos[] = [
+                        'id' => $associadoPorCpf->id,
+                        'nome' => $associadoPorCpf->nome,
+                        'cpf_cnpj' => $associadoPorCpf->cpf_cnpj,
+                        'email' => $associadoPorCpf->email,
+                        'motivo' => 'CPF/CNPJ já cadastrado'
+                    ];
                 }
+                if ($associadoPorEmail && (!$associadoPorCpf || $associadoPorEmail->id !== $associadoPorCpf->id)) {
+                    $conflitos[] = [
+                        'id' => $associadoPorEmail->id,
+                        'nome' => $associadoPorEmail->nome,
+                        'cpf_cnpj' => $associadoPorEmail->cpf_cnpj,
+                        'email' => $associadoPorEmail->email,
+                        'motivo' => 'Email já cadastrado'
+                    ];
+                }
+
+                // Se houver conflitos, bloquear e pedir vinculação
+                if (!empty($conflitos)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Já existe(m) associado(s) com este CPF/CNPJ ou email. Vincule a um dos associados existentes.',
+                        'conflitos' => $conflitos,
+                        'requer_vinculacao' => true
+                    ], 409);
+                }
+
+                // Criar novo associado (sem campos de endereço - estes ficam no controle)
+                $associado = Associado::create([
+                    'nome' => $request->nome,
+                    'cpf_cnpj' => $request->cpf_cnpj,
+                    'whatsapp' => $request->whatsapp,
+                    'email' => $request->email
+                ]);
+
+                $associadoId = $associado->id;
+
+                Log::info('Novo associado criado', [
+                    'associado_id' => $associadoId,
+                    'nome' => $associado->nome,
+                    'cpf_cnpj' => $associado->cpf_cnpj
+                ]);
             }
 
             // 3. Criar ou buscar UC
