@@ -905,7 +905,14 @@ class AssociadoController extends Controller
             }
 
             // 5. Atualizar status da UC na proposta para "Associado"
-            $ucs = json_decode($proposta->unidades_consumidoras ?? '[]', true);
+            // Verificar se já é array (cast do Model) ou string JSON
+            $ucs = $proposta->unidades_consumidoras;
+            if (is_string($ucs)) {
+                $ucs = json_decode($ucs, true) ?? [];
+            } elseif (!is_array($ucs)) {
+                $ucs = [];
+            }
+
             foreach ($ucs as &$uc) {
                 $ucNumero = $uc['numero_unidade'] ?? $uc['numeroUC'] ?? null;
                 if ($ucNumero == $numero_uc) {
