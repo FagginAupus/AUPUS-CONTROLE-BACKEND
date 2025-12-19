@@ -814,13 +814,15 @@ class AssociadoController extends Controller
                 Log::info('UC existente atualizada', ['uc_id' => $ucId, 'numero_uc' => $numero_uc]);
             }
 
-            // 4. Criar Controle
+            // 4. Criar ou restaurar Controle
+            // Buscar incluindo soft-deletados para evitar violação de constraint unique
             $controleExistente = DB::selectOne(
-                "SELECT id FROM controle_clube WHERE proposta_id = ? AND uc_id = ? AND deleted_at IS NULL",
+                "SELECT id, deleted_at FROM controle_clube WHERE proposta_id = ? AND uc_id = ?",
                 [$proposta_id, $ucId]
             );
 
             if (!$controleExistente) {
+                // Não existe, criar novo
                 $controleId = \Illuminate\Support\Str::ulid()->toString();
 
                 DB::insert("
@@ -852,8 +854,33 @@ class AssociadoController extends Controller
                     'associado_id' => $associadoId
                 ]);
 
+            } else if ($controleExistente->deleted_at !== null) {
+                // Existe mas está soft-deletado - restaurar e atualizar
+                DB::update("
+                    UPDATE controle_clube
+                    SET associado_id = ?,
+                        whatsapp = ?,
+                        email = ?,
+                        nome_cliente = ?,
+                        apelido_uc = ?,
+                        cpf_cnpj = ?,
+                        deleted_at = NULL,
+                        updated_at = NOW()
+                    WHERE id = ?
+                ", [
+                    $associadoId,
+                    $request->whatsapp,
+                    $request->email,
+                    $request->nome,
+                    $request->apelido_uc ?? 'UC ' . $numero_uc,
+                    $request->cpf_cnpj,
+                    $controleExistente->id
+                ]);
+
+                Log::info('Controle restaurado de soft-delete', ['controle_id' => $controleExistente->id]);
+
             } else {
-                // Atualizar controle existente
+                // Existe e está ativo - apenas atualizar
                 DB::update("
                     UPDATE controle_clube
                     SET associado_id = ?,
