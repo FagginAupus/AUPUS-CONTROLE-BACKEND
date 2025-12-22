@@ -1573,6 +1573,12 @@ class ControleController extends Controller
                     uc.cidade as uc_cidade,
                     uc.estado as uc_estado,
                     uc.cep as uc_cep,
+                    -- Campos de faturamento da UC
+                    uc.nome_faturamento,
+                    uc.cpf_cnpj_faturamento,
+                    uc.whatsapp_faturamento,
+                    uc.email_faturamento_1,
+                    uc.email_faturamento_2,
                     p.numero_proposta,
                     p.nome_cliente as proposta_nome_cliente,
                     p.desconto_tarifa as proposta_desconto_tarifa,
@@ -1675,6 +1681,13 @@ class ControleController extends Controller
                 'compensacao_completa' => $controle->compensacao_completa ?? false,
                 'cobrar_multa' => $controle->cobrar_multa ?? false,
                 'dia_vencimento' => $controle->dia_vencimento ?? 20,
+
+                // ✅ CAMPOS DE FATURAMENTO
+                'nome_faturamento' => $controle->nome_faturamento ?? '',
+                'cpf_cnpj_faturamento' => $controle->cpf_cnpj_faturamento ?? '',
+                'whatsapp_faturamento' => $controle->whatsapp_faturamento ?? '',
+                'email_faturamento_1' => $controle->email_faturamento_1 ?? '',
+                'email_faturamento_2' => $controle->email_faturamento_2 ?? '',
             ];
 
             return response()->json([
@@ -2005,11 +2018,33 @@ class ControleController extends Controller
                 $ucUpdateParams[] = $request->cep;
             }
 
+            // ✅ 15. Dados de Faturamento na tabela unidades_consumidoras
+            if ($request->has('nome_faturamento')) {
+                $ucUpdateFields[] = 'nome_faturamento = ?';
+                $ucUpdateParams[] = $request->nome_faturamento;
+            }
+            if ($request->has('cpf_cnpj_faturamento')) {
+                $ucUpdateFields[] = 'cpf_cnpj_faturamento = ?';
+                $ucUpdateParams[] = $request->cpf_cnpj_faturamento;
+            }
+            if ($request->has('whatsapp_faturamento')) {
+                $ucUpdateFields[] = 'whatsapp_faturamento = ?';
+                $ucUpdateParams[] = $request->whatsapp_faturamento;
+            }
+            if ($request->has('email_faturamento_1')) {
+                $ucUpdateFields[] = 'email_faturamento_1 = ?';
+                $ucUpdateParams[] = $request->email_faturamento_1;
+            }
+            if ($request->has('email_faturamento_2')) {
+                $ucUpdateFields[] = 'email_faturamento_2 = ?';
+                $ucUpdateParams[] = $request->email_faturamento_2;
+            }
+
             if (!empty($ucUpdateFields)) {
                 $ucSql = "UPDATE unidades_consumidoras SET " . implode(', ', $ucUpdateFields) . ", updated_at = NOW() WHERE id = ?";
                 $ucUpdateParams[] = $controle->uc_id;
 
-                Log::info('Executando SQL de atualização de endereço UC', [
+                Log::info('Executando SQL de atualização de UC (endereço e faturamento)', [
                     'sql' => $ucSql,
                     'params' => $ucUpdateParams
                 ]);
