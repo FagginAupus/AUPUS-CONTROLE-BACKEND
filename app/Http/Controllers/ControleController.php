@@ -2027,9 +2027,10 @@ class ControleController extends Controller
                 $ucUpdateFields[] = 'cpf_cnpj_faturamento = ?';
                 $ucUpdateParams[] = $request->cpf_cnpj_faturamento;
             }
-            if ($request->has('whatsapp_faturamento')) {
+            if ($request->has('whatsapp_faturamento') || $request->exists('whatsapp_faturamento')) {
                 $ucUpdateFields[] = 'whatsapp_faturamento = ?';
-                $ucUpdateParams[] = $request->whatsapp_faturamento;
+                $ucUpdateParams[] = $request->input('whatsapp_faturamento', '');
+                Log::info('Atualizando whatsapp_faturamento', ['valor' => $request->input('whatsapp_faturamento')]);
             }
             if ($request->has('email_faturamento_1')) {
                 $ucUpdateFields[] = 'email_faturamento_1 = ?';
