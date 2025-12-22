@@ -210,6 +210,22 @@ class ControleClube extends Model
     }
 
     /**
+     * Verificar se tem calibragem definida (individual ou global)
+     */
+    public function temCalibragem(): bool
+    {
+        return $this->calibragem_individual !== null || \App\Models\Configuracao::getCalibragemGlobal() > 0;
+    }
+
+    /**
+     * Verificar se tem valor calibrado
+     */
+    public function temValorCalibrado(): bool
+    {
+        return !is_null($this->valor_calibrado) && $this->valor_calibrado > 0;
+    }
+
+    /**
      * Obter controles ativos (não excluídos)
      */
     public static function ativos()
