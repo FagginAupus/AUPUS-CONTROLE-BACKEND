@@ -20,17 +20,24 @@ class AssociadoController extends Controller
     public function index(Request $request)
     {
         try {
-            $query = Associado::with(['unidadesConsumidoras'])
+            $query = Associado::withCount('controles')
                 ->whereNull('deleted_at');
 
-            // Filtro por nome
+            // Filtro por nome, CPF/CNPJ ou email
             if ($request->has('nome') && !empty($request->nome)) {
-                $query->where('nome', 'ILIKE', '%' . $request->nome . '%');
-            }
+                $busca = $request->nome;
+                $buscaLimpa = preg_replace('/[^0-9]/', '', $busca);
 
-            // Filtro por CPF/CNPJ
-            if ($request->has('cpf_cnpj') && !empty($request->cpf_cnpj)) {
-                $query->porCpfCnpj($request->cpf_cnpj);
+                $query->where(function($q) use ($busca, $buscaLimpa) {
+                    $q->where('nome', 'ILIKE', '%' . $busca . '%')
+                      ->orWhere('cpf_cnpj', 'ILIKE', '%' . $busca . '%')
+                      ->orWhere('email', 'ILIKE', '%' . $busca . '%');
+
+                    // Se tem números, buscar também sem formatação
+                    if (!empty($buscaLimpa) && strlen($buscaLimpa) >= 3) {
+                        $q->orWhereRaw("REPLACE(REPLACE(REPLACE(cpf_cnpj, '.', ''), '-', ''), '/', '') ILIKE ?", ['%' . $buscaLimpa . '%']);
+                    }
+                });
             }
 
             // Ordenação
@@ -175,7 +182,7 @@ class AssociadoController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $associado
+                'data' => $associado->toArray()
             ]);
 
         } catch (\Exception $e) {
