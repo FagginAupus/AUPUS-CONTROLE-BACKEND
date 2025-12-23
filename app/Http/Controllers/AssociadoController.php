@@ -308,7 +308,10 @@ class AssociadoController extends Controller
                 if (!$request->input('confirmar_unificacao')) {
                     // Retornar pedindo confirmação
                     $qtdControles = DB::selectOne("SELECT COUNT(*) as total FROM controle_clube WHERE associado_id = ? AND deleted_at IS NULL", [$duplicado->id])->total ?? 0;
-                    $qtdUcs = DB::selectOne("SELECT COUNT(*) as total FROM unidades_consumidoras WHERE associado_id = ? AND deleted_at IS NULL", [$duplicado->id])->total ?? 0;
+                    // Contar UCs diretas + UCs via controle
+                    $qtdUcsDiretas = DB::selectOne("SELECT COUNT(*) as total FROM unidades_consumidoras WHERE associado_id = ? AND deleted_at IS NULL", [$duplicado->id])->total ?? 0;
+                    $qtdUcsViaControle = DB::selectOne("SELECT COUNT(DISTINCT uc_id) as total FROM controle_clube WHERE associado_id = ? AND deleted_at IS NULL AND uc_id IS NOT NULL", [$duplicado->id])->total ?? 0;
+                    $qtdUcs = max($qtdUcsDiretas, $qtdUcsViaControle);
 
                     return response()->json([
                         'success' => false,
