@@ -434,6 +434,11 @@ class AssociadoController extends Controller
             WHERE associado_id = ? AND deleted_at IS NULL
         ", [$manter->id, $remover->id]);
 
+        // Limpar CPF/CNPJ do duplicado para evitar violação de constraint única
+        // (necessário porque a constraint não considera deleted_at)
+        $remover->cpf_cnpj = 'UNIFICADO_' . $remover->id;
+        $remover->save();
+
         // Soft delete do associado duplicado
         $remover->delete();
 
