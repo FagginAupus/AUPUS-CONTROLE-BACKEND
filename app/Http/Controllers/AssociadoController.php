@@ -280,8 +280,8 @@ class AssociadoController extends Controller
 
             $validator = Validator::make($request->all(), [
                 'nome' => 'sometimes|string|max:200',
-                'cpf_cnpj' => 'sometimes|string|max:18',
-                'whatsapp' => 'nullable|string|max:20',
+                'cpf_cnpj' => 'sometimes|string|max:20',
+                'whatsapp' => 'nullable|string|max:25',
                 'email' => 'nullable|email|max:255'
             ]);
 
@@ -293,15 +293,45 @@ class AssociadoController extends Controller
                 ], 422);
             }
 
-            // Atualizar o associado primeiro
-            $associado->update($request->all());
+            // Verificar ANTES de atualizar se vai criar duplicado completo
+            $dadosNovos = [
+                'nome' => $request->input('nome', $associado->nome),
+                'cpf_cnpj' => $request->input('cpf_cnpj', $associado->cpf_cnpj),
+                'whatsapp' => $request->input('whatsapp', $associado->whatsapp),
+                'email' => $request->input('email', $associado->email),
+            ];
 
-            // Verificar se existe outro associado com TODOS os dados iguais
-            $duplicado = $this->buscarDuplicadoCompleto($associado);
+            $duplicado = $this->buscarDuplicadoComDados($id, $dadosNovos);
 
             if ($duplicado) {
-                // Unificar: transferir UCs e controles do duplicado para este associado
+                // Verificar se o usuário confirmou a unificação
+                if (!$request->input('confirmar_unificacao')) {
+                    // Retornar pedindo confirmação
+                    $qtdControles = DB::selectOne("SELECT COUNT(*) as total FROM controle_clube WHERE associado_id = ? AND deleted_at IS NULL", [$duplicado->id])->total ?? 0;
+                    $qtdUcs = DB::selectOne("SELECT COUNT(*) as total FROM unidades_consumidoras WHERE associado_id = ? AND deleted_at IS NULL", [$duplicado->id])->total ?? 0;
+
+                    return response()->json([
+                        'success' => false,
+                        'requer_confirmacao' => true,
+                        'message' => 'Já existe um associado com os mesmos dados. Deseja unificar os registros?',
+                        'duplicado' => [
+                            'id' => $duplicado->id,
+                            'nome' => $duplicado->nome,
+                            'cpf_cnpj' => $duplicado->cpf_cnpj,
+                            'whatsapp' => $duplicado->whatsapp,
+                            'email' => $duplicado->email,
+                            'qtd_controles' => $qtdControles,
+                            'qtd_ucs' => $qtdUcs
+                        ]
+                    ], 200);
+                }
+
+                // Usuário confirmou - fazer a unificação
+                // Primeiro, transferir UCs e controles do duplicado para este associado
                 $this->unificarAssociados($associado, $duplicado);
+
+                // Agora atualizar os dados do associado que ficou
+                $associado->update($request->except('confirmar_unificacao'));
 
                 Log::info('Associados unificados', [
                     'associado_mantido' => $associado->id,
@@ -313,11 +343,14 @@ class AssociadoController extends Controller
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'Associado atualizado e unificado com registro duplicado',
+                    'message' => 'Associados unificados com sucesso! UCs e controles foram transferidos.',
                     'data' => $associado->fresh(),
                     'unificado' => true
                 ]);
             }
+
+            // Sem duplicado - atualização normal
+            $associado->update($request->all());
 
             DB::commit();
 
@@ -349,15 +382,15 @@ class AssociadoController extends Controller
     }
 
     /**
-     * Buscar associado duplicado com TODOS os dados iguais
+     * Buscar associado duplicado com TODOS os dados iguais (usando dados novos)
      */
-    private function buscarDuplicadoCompleto(Associado $associado): ?Associado
+    private function buscarDuplicadoComDados(string $idAtual, array $dados): ?Associado
     {
         // Normalizar dados para comparação
-        $nomeNormalizado = strtolower(trim($associado->nome ?? ''));
-        $cpfNormalizado = preg_replace('/[^0-9]/', '', $associado->cpf_cnpj ?? '');
-        $whatsappNormalizado = preg_replace('/[^0-9]/', '', $associado->whatsapp ?? '');
-        $emailNormalizado = strtolower(trim($associado->email ?? ''));
+        $nomeNormalizado = strtolower(trim($dados['nome'] ?? ''));
+        $cpfNormalizado = preg_replace('/[^0-9]/', '', $dados['cpf_cnpj'] ?? '');
+        $whatsappNormalizado = preg_replace('/[^0-9]/', '', $dados['whatsapp'] ?? '');
+        $emailNormalizado = strtolower(trim($dados['email'] ?? ''));
 
         // Buscar outro associado com todos os dados iguais
         $duplicado = DB::selectOne("
@@ -370,7 +403,7 @@ class AssociadoController extends Controller
               AND REGEXP_REPLACE(COALESCE(whatsapp, ''), '[^0-9]', '', 'g') = ?
               AND LOWER(TRIM(COALESCE(email, ''))) = ?
             LIMIT 1
-        ", [$associado->id, $nomeNormalizado, $cpfNormalizado, $whatsappNormalizado, $emailNormalizado]);
+        ", [$idAtual, $nomeNormalizado, $cpfNormalizado, $whatsappNormalizado, $emailNormalizado]);
 
         if ($duplicado) {
             return Associado::find($duplicado->id);
@@ -385,14 +418,14 @@ class AssociadoController extends Controller
     private function unificarAssociados(Associado $manter, Associado $remover): void
     {
         // Transferir controles do duplicado para o associado que vai ficar
-        DB::update("
+        $controlesTransferidos = DB::update("
             UPDATE controle_clube
             SET associado_id = ?, updated_at = NOW()
             WHERE associado_id = ? AND deleted_at IS NULL
         ", [$manter->id, $remover->id]);
 
         // Transferir unidades consumidoras do duplicado
-        DB::update("
+        $ucsTransferidas = DB::update("
             UPDATE unidades_consumidoras
             SET associado_id = ?, updated_at = NOW()
             WHERE associado_id = ? AND deleted_at IS NULL
@@ -404,7 +437,8 @@ class AssociadoController extends Controller
         Log::info('Unificação concluída', [
             'mantido_id' => $manter->id,
             'removido_id' => $remover->id,
-            'controles_transferidos' => DB::select("SELECT COUNT(*) as total FROM controle_clube WHERE associado_id = ?", [$manter->id])[0]->total ?? 0
+            'controles_transferidos' => $controlesTransferidos,
+            'ucs_transferidas' => $ucsTransferidas
         ]);
     }
 
