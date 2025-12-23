@@ -436,7 +436,7 @@ class AssociadoController extends Controller
 
         // Limpar CPF/CNPJ do duplicado para evitar violação de constraint única
         // (necessário porque a constraint não considera deleted_at)
-        $remover->cpf_cnpj = 'UNIFICADO_' . $remover->id;
+        $remover->cpf_cnpj = 'DEL_' . substr($remover->id, 0, 14);
         $remover->save();
 
         // Soft delete do associado duplicado
