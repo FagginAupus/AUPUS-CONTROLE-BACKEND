@@ -346,7 +346,7 @@ class ControleController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'status_troca' => 'required|in:Esteira,Em andamento,Associado',
+            'status_troca' => 'required|in:Esteira,Em andamento,Associado,Saindo',
             'data_titularidade' => 'required|date|before_or_equal:today',
             'observacao_status' => 'nullable|string|max:100',
             'limpar_observacao' => 'nullable|boolean'
@@ -380,11 +380,16 @@ class ControleController extends Controller
             }
 
             // Verificar se está tentando SAIR de "Associado" com UG atribuída
+            // OU se está mudando para "Saindo" (sempre desatribui UG)
             $statusAnterior = $controle->status_troca;
             $novoStatus = $request->status_troca;
             $ugAtual = $controle->ug_id;
 
-            if ($statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual) {
+            // Desatribuir UG se: saindo de Associado OU entrando em "Saindo"
+            $deveDesatribuirUg = ($statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual)
+                              || ($novoStatus === 'Saindo' && $ugAtual);
+
+            if ($deveDesatribuirUg) {
                 // Desatribuir UG automaticamente
                 Log::info('Desatribuindo UG por mudança de status', [
                     'controle_id' => $id,
@@ -444,7 +449,7 @@ class ControleController extends Controller
                 'dados_novos' => [
                     'status_troca' => $novoStatus,
                     'data_titularidade' => $request->data_titularidade,
-                    'ug_desatribuida' => $statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual
+                    'ug_desatribuida' => $deveDesatribuirUg
                 ],
                 'dados_contexto' => [
                     'nome_cliente' => $controle->nome_cliente ?? null,
@@ -454,8 +459,8 @@ class ControleController extends Controller
                 ]
             ];
 
-            // Crítico apenas quando UC sai do controle (desatribuição de UG por mudança de status)
-            if ($statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual) {
+            // Crítico quando desatribui UG (saindo de Associado ou entrando em Saindo)
+            if ($deveDesatribuirUg) {
                 $eventoData['evento_critico'] = true;
             }
 
@@ -485,7 +490,7 @@ class ControleController extends Controller
 
             DB::commit();
 
-            $mensagem = $statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual
+            $mensagem = $deveDesatribuirUg
                 ? "Status atualizado e UG '{$controle->ug_nome}' foi desatribuída"
                 : 'Status de troca atualizado com sucesso';
 
@@ -495,7 +500,7 @@ class ControleController extends Controller
                 'data' => [
                     'status_troca' => $novoStatus,
                     'data_titularidade' => $request->data_titularidade,
-                    'ug_desatribuida' => $statusAnterior === 'Associado' && $novoStatus !== 'Associado' && $ugAtual
+                    'ug_desatribuida' => $deveDesatribuirUg
                 ]
             ]);
 
@@ -668,6 +673,14 @@ class ControleController extends Controller
 
             if (!$controle) {
                 return response()->json(['success' => false, 'message' => 'Controle não encontrado'], 404);
+            }
+
+            // Impedir atribuição de UG quando status é "Saindo"
+            if ($controle->status_troca === 'Saindo') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Não é possível atribuir UG a uma UC com status "Saindo". O cliente está em processo de saída do consórcio.'
+                ], 400);
             }
 
             // Buscar UG - SEM as colunas redundantes
