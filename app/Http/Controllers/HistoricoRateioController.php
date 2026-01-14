@@ -97,8 +97,20 @@ class HistoricoRateioController extends Controller
                 'data_envio' => 'nullable|date',
                 'data_efetivacao' => 'nullable|date',
                 'observacoes' => 'nullable|string|max:500',
-                'arquivo' => 'nullable|file|mimes:xlsx,xls,csv|max:10240' // 10MB max
+                'arquivo' => 'nullable|file|max:10240' // 10MB max
             ]);
+
+            // Validação manual da extensão do arquivo (mais confiável que mimes)
+            if ($request->hasFile('arquivo')) {
+                $ext = strtolower($request->file('arquivo')->getClientOriginalExtension());
+                if (!in_array($ext, ['xlsx', 'xls', 'csv'])) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Formato de arquivo inválido',
+                        'errors' => ['arquivo' => ['O arquivo deve ser do tipo: xlsx, xls ou csv']]
+                    ], 422);
+                }
+            }
 
             if ($validator->fails()) {
                 Log::error('Validação falhou', ['errors' => $validator->errors()->toArray()]);
