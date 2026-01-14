@@ -86,8 +86,14 @@ class HistoricoRateioController extends Controller
                 return response()->json(['success' => false, 'message' => 'Não autenticado'], 401);
             }
 
+            Log::info('Dados recebidos para criar rateio', [
+                'all' => $request->all(),
+                'ug_id' => $request->ug_id,
+                'has_file' => $request->hasFile('arquivo')
+            ]);
+
             $validator = Validator::make($request->all(), [
-                'ug_id' => 'required|string|exists:unidades_consumidoras,id',
+                'ug_id' => 'required|string',
                 'data_envio' => 'nullable|date',
                 'data_efetivacao' => 'nullable|date',
                 'observacoes' => 'nullable|string|max:500',
@@ -95,10 +101,22 @@ class HistoricoRateioController extends Controller
             ]);
 
             if ($validator->fails()) {
+                Log::error('Validação falhou', ['errors' => $validator->errors()->toArray()]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Dados inválidos',
                     'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Verificar se a UG existe
+            $ugExists = DB::table('unidades_consumidoras')->where('id', $request->ug_id)->exists();
+            if (!$ugExists) {
+                Log::error('UG não encontrada', ['ug_id' => $request->ug_id]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'UG não encontrada',
+                    'errors' => ['ug_id' => ['A UG selecionada não existe']]
                 ], 422);
             }
 
