@@ -38,7 +38,7 @@ class HistoricoRateioController extends Controller
                     'hr.arquivo_path',
                     'hr.observacoes',
                     'hr.usuario_id',
-                    'u.name as usuario_nome',
+                    'u.nome as usuario_nome',
                     'hr.created_at',
                     'hr.updated_at'
                 ])
@@ -163,7 +163,7 @@ class HistoricoRateioController extends Controller
             Log::info('Histórico de rateio criado', [
                 'id' => $id,
                 'ug_id' => $request->ug_id,
-                'usuario' => $currentUser->name
+                'usuario' => $currentUser->nome
             ]);
 
             return response()->json([
@@ -265,7 +265,7 @@ class HistoricoRateioController extends Controller
 
             Log::info('Histórico de rateio atualizado', [
                 'id' => $id,
-                'usuario' => $currentUser->name
+                'usuario' => $currentUser->nome
             ]);
 
             return response()->json([
@@ -320,7 +320,7 @@ class HistoricoRateioController extends Controller
 
             Log::info('Histórico de rateio excluído', [
                 'id' => $id,
-                'usuario' => $currentUser->name
+                'usuario' => $currentUser->nome
             ]);
 
             return response()->json([
