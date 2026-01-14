@@ -683,6 +683,18 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('{id}', [AssociadoController::class, 'destroy']);
     });
 
+    // ==========================================
+    // HISTÓRICO DE RATEIOS
+    // ==========================================
+    Route::prefix('historico-rateios')->group(function () {
+        Route::get('/', [\App\Http\Controllers\HistoricoRateioController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\HistoricoRateioController::class, 'store']);
+        Route::get('ugs', [\App\Http\Controllers\HistoricoRateioController::class, 'listarUGs']);
+        Route::get('{id}/download', [\App\Http\Controllers\HistoricoRateioController::class, 'downloadArquivo']);
+        Route::put('{id}', [\App\Http\Controllers\HistoricoRateioController::class, 'update']);
+        Route::delete('{id}', [\App\Http\Controllers\HistoricoRateioController::class, 'destroy']);
+    });
+
 });
 
 // Webhook da Autentique (público - sem autenticação)
