@@ -10,7 +10,8 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth;
-use App\Models\HistoricoRateio;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\Csv;
 
 class HistoricoRateioController extends Controller
 {
@@ -50,9 +51,17 @@ class HistoricoRateioController extends Controller
 
             $rateios = $query->paginate($perPage);
 
+            // Adicionar contagem de itens para cada rateio
+            $rateiosComItens = collect($rateios->items())->map(function ($rateio) {
+                $rateio->total_itens = DB::table('historico_rateio_itens')
+                    ->where('historico_rateio_id', $rateio->id)
+                    ->count();
+                return $rateio;
+            });
+
             return response()->json([
                 'success' => true,
-                'data' => $rateios->items(),
+                'data' => $rateiosComItens,
                 'pagination' => [
                     'current_page' => $rateios->currentPage(),
                     'last_page' => $rateios->lastPage(),
@@ -132,9 +141,12 @@ class HistoricoRateioController extends Controller
                 ], 422);
             }
 
+            DB::beginTransaction();
+
             $id = (string) Str::ulid();
             $arquivoNome = null;
             $arquivoPath = null;
+            $itensProcessados = [];
 
             // Upload do arquivo se enviado
             if ($request->hasFile('arquivo')) {
@@ -145,6 +157,14 @@ class HistoricoRateioController extends Controller
                     $id . '_' . $arquivoNome,
                     'public'
                 );
+
+                // Processar o arquivo e extrair itens de rateio
+                $itensProcessados = $this->processarArquivoRateio($arquivo);
+
+                Log::info('Arquivo de rateio processado', [
+                    'arquivo' => $arquivoNome,
+                    'itens_encontrados' => count($itensProcessados)
+                ]);
             }
 
             DB::table('historico_rateios')->insert([
@@ -160,22 +180,45 @@ class HistoricoRateioController extends Controller
                 'updated_at' => now()
             ]);
 
+            // Inserir itens do rateio
+            if (!empty($itensProcessados)) {
+                foreach ($itensProcessados as $item) {
+                    DB::table('historico_rateio_itens')->insert([
+                        'id' => (string) Str::ulid(),
+                        'historico_rateio_id' => $id,
+                        'numero_uc' => $item['numero_uc'],
+                        'porcentagem' => $item['porcentagem'],
+                        'consumo_kwh' => $item['consumo_kwh'] ?? null,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+            }
+
+            DB::commit();
+
             Log::info('Histórico de rateio criado', [
                 'id' => $id,
                 'ug_id' => $request->ug_id,
-                'usuario' => $currentUser->nome
+                'usuario' => $currentUser->nome,
+                'total_itens' => count($itensProcessados)
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Histórico de rateio criado com sucesso',
-                'data' => ['id' => $id]
+                'data' => [
+                    'id' => $id,
+                    'itens_processados' => count($itensProcessados)
+                ]
             ], 201);
 
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Erro ao criar histórico de rateio', [
                 'error' => $e->getMessage(),
-                'line' => $e->getLine()
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
@@ -183,6 +226,162 @@ class HistoricoRateioController extends Controller
                 'message' => 'Erro ao criar histórico de rateio: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Processar arquivo Excel/CSV e extrair dados de rateio
+     */
+    private function processarArquivoRateio($arquivo): array
+    {
+        $itens = [];
+        $ext = strtolower($arquivo->getClientOriginalExtension());
+        $tempPath = $arquivo->getRealPath();
+
+        try {
+            if ($ext === 'csv') {
+                $reader = new Csv();
+                $reader->setDelimiter(';'); // Padrão brasileiro
+                $reader->setEnclosure('"');
+                $spreadsheet = $reader->load($tempPath);
+            } else {
+                $spreadsheet = IOFactory::load($tempPath);
+            }
+
+            $worksheet = $spreadsheet->getActiveSheet();
+            $rows = $worksheet->toArray();
+
+            Log::info('Arquivo carregado para processamento', [
+                'total_linhas' => count($rows),
+                'primeiras_linhas' => array_slice($rows, 0, 10)
+            ]);
+
+            // Formato esperado (baseado no export da página de UGs):
+            // Linha 1: Código da UC Geradora: | (vazio) | [número da UG]
+            // Linha 2: Titular da UC: | (vazio) | [titular]
+            // Linha 3: CNPJ/CPF: | (vazio) | [documento]
+            // Linha 4: Lista de unidades consumidoras...
+            // Linha 5: UC Beneficiaria | (vazio) | Porcentagem de rateio
+            // Linha 6+: [número UC] | (vazio) | [porcentagem]%
+
+            $inicioItens = false;
+            foreach ($rows as $index => $row) {
+                // Verificar se chegou na linha de cabeçalho "UC Beneficiaria"
+                $primeiraColuna = trim($row[0] ?? '');
+
+                if (stripos($primeiraColuna, 'UC Beneficiaria') !== false ||
+                    stripos($primeiraColuna, 'UC Beneficiária') !== false) {
+                    $inicioItens = true;
+                    continue;
+                }
+
+                // Processar linhas de dados após o cabeçalho
+                if ($inicioItens && !empty($primeiraColuna)) {
+                    // Pular linhas de cabeçalho ou totais
+                    if (stripos($primeiraColuna, 'Total') !== false ||
+                        stripos($primeiraColuna, 'Código') !== false ||
+                        stripos($primeiraColuna, 'Lista') !== false) {
+                        continue;
+                    }
+
+                    // Extrair número da UC (primeira coluna)
+                    $numeroUC = preg_replace('/[^0-9]/', '', $primeiraColuna);
+
+                    if (empty($numeroUC)) {
+                        continue;
+                    }
+
+                    // Extrair porcentagem (terceira coluna ou última coluna não vazia)
+                    $porcentagemStr = '';
+                    for ($i = count($row) - 1; $i >= 0; $i--) {
+                        $valor = trim($row[$i] ?? '');
+                        if (!empty($valor) && $valor !== $primeiraColuna) {
+                            $porcentagemStr = $valor;
+                            break;
+                        }
+                    }
+
+                    // Limpar e converter porcentagem
+                    $porcentagemStr = str_replace(['%', ' '], '', $porcentagemStr);
+                    $porcentagemStr = str_replace(',', '.', $porcentagemStr);
+                    $porcentagem = floatval($porcentagemStr);
+
+                    if ($porcentagem > 0 && $porcentagem <= 100) {
+                        $itens[] = [
+                            'numero_uc' => $numeroUC,
+                            'porcentagem' => $porcentagem,
+                            'consumo_kwh' => null
+                        ];
+
+                        Log::info('Item de rateio extraído', [
+                            'linha' => $index + 1,
+                            'numero_uc' => $numeroUC,
+                            'porcentagem' => $porcentagem
+                        ]);
+                    }
+                }
+            }
+
+            // Se não encontrou itens no formato padrão, tentar formato alternativo
+            if (empty($itens)) {
+                $itens = $this->processarFormatoAlternativo($rows);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao processar arquivo de rateio', [
+                'error' => $e->getMessage(),
+                'linha' => $e->getLine()
+            ]);
+        }
+
+        return $itens;
+    }
+
+    /**
+     * Processar formato alternativo (UC na coluna A, Porcentagem na coluna B ou C)
+     */
+    private function processarFormatoAlternativo(array $rows): array
+    {
+        $itens = [];
+
+        foreach ($rows as $index => $row) {
+            // Pular linhas vazias ou de cabeçalho
+            if ($index < 1) continue;
+
+            $col0 = trim($row[0] ?? '');
+            $col1 = trim($row[1] ?? '');
+            $col2 = trim($row[2] ?? '');
+
+            // Tentar extrair número da UC da primeira coluna
+            $numeroUC = preg_replace('/[^0-9]/', '', $col0);
+
+            if (strlen($numeroUC) >= 5) { // UC válida tem pelo menos 5 dígitos
+                // Procurar porcentagem nas outras colunas
+                $porcentagem = 0;
+
+                foreach ([$col2, $col1] as $valor) {
+                    if (!empty($valor)) {
+                        $valorLimpo = str_replace(['%', ' '], '', $valor);
+                        $valorLimpo = str_replace(',', '.', $valorLimpo);
+                        $numerico = floatval($valorLimpo);
+
+                        if ($numerico > 0 && $numerico <= 100) {
+                            $porcentagem = $numerico;
+                            break;
+                        }
+                    }
+                }
+
+                if ($porcentagem > 0) {
+                    $itens[] = [
+                        'numero_uc' => $numeroUC,
+                        'porcentagem' => $porcentagem,
+                        'consumo_kwh' => null
+                    ];
+                }
+            }
+        }
+
+        return $itens;
     }
 
     /**
@@ -209,11 +408,23 @@ class HistoricoRateioController extends Controller
                 ], 404);
             }
 
+            // Validação manual da extensão do arquivo
+            if ($request->hasFile('arquivo')) {
+                $ext = strtolower($request->file('arquivo')->getClientOriginalExtension());
+                if (!in_array($ext, ['xlsx', 'xls', 'csv'])) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Formato de arquivo inválido',
+                        'errors' => ['arquivo' => ['O arquivo deve ser do tipo: xlsx, xls ou csv']]
+                    ], 422);
+                }
+            }
+
             $validator = Validator::make($request->all(), [
                 'data_envio' => 'nullable|date',
                 'data_efetivacao' => 'nullable|date',
                 'observacoes' => 'nullable|string|max:500',
-                'arquivo' => 'nullable|file|mimes:xlsx,xls,csv|max:10240'
+                'arquivo' => 'nullable|file|max:10240'
             ]);
 
             if ($validator->fails()) {
@@ -223,6 +434,8 @@ class HistoricoRateioController extends Controller
                     'errors' => $validator->errors()
                 ], 422);
             }
+
+            DB::beginTransaction();
 
             $dadosAtualizacao = [
                 'updated_at' => now()
@@ -257,11 +470,39 @@ class HistoricoRateioController extends Controller
 
                 $dadosAtualizacao['arquivo_nome'] = $arquivoNome;
                 $dadosAtualizacao['arquivo_path'] = $arquivoPath;
+
+                // Reprocessar arquivo e atualizar itens
+                $itensProcessados = $this->processarArquivoRateio($arquivo);
+
+                // Remover itens antigos
+                DB::table('historico_rateio_itens')
+                    ->where('historico_rateio_id', $id)
+                    ->delete();
+
+                // Inserir novos itens
+                foreach ($itensProcessados as $item) {
+                    DB::table('historico_rateio_itens')->insert([
+                        'id' => (string) Str::ulid(),
+                        'historico_rateio_id' => $id,
+                        'numero_uc' => $item['numero_uc'],
+                        'porcentagem' => $item['porcentagem'],
+                        'consumo_kwh' => $item['consumo_kwh'] ?? null,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+
+                Log::info('Itens de rateio atualizados', [
+                    'historico_rateio_id' => $id,
+                    'total_itens' => count($itensProcessados)
+                ]);
             }
 
             DB::table('historico_rateios')
                 ->where('id', $id)
                 ->update($dadosAtualizacao);
+
+            DB::commit();
 
             Log::info('Histórico de rateio atualizado', [
                 'id' => $id,
@@ -274,6 +515,7 @@ class HistoricoRateioController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            DB::rollBack();
             Log::error('Erro ao atualizar histórico de rateio', [
                 'error' => $e->getMessage(),
                 'line' => $e->getLine()
@@ -310,7 +552,7 @@ class HistoricoRateioController extends Controller
                 ], 404);
             }
 
-            // Soft delete
+            // Soft delete (os itens ficam para histórico, ou podem ser deletados em cascade)
             DB::table('historico_rateios')
                 ->where('id', $id)
                 ->update([
@@ -409,6 +651,64 @@ class HistoricoRateioController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao listar UGs'
+            ], 500);
+        }
+    }
+
+    /**
+     * Listar itens de um rateio específico
+     */
+    public function listarItens(string $id): JsonResponse
+    {
+        try {
+            $rateio = DB::table('historico_rateios')
+                ->where('id', $id)
+                ->whereNull('deleted_at')
+                ->first();
+
+            if (!$rateio) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Rateio não encontrado'
+                ], 404);
+            }
+
+            $itens = DB::table('historico_rateio_itens')
+                ->where('historico_rateio_id', $id)
+                ->select(['id', 'numero_uc', 'porcentagem', 'consumo_kwh', 'created_at'])
+                ->orderBy('porcentagem', 'desc')
+                ->get();
+
+            // Buscar informações adicionais das UCs (se existirem no controle)
+            $itensComInfo = $itens->map(function ($item) {
+                $ucInfo = DB::table('controle_clube as c')
+                    ->join('unidades_consumidoras as uc', 'c.uc_id', '=', 'uc.id')
+                    ->where('uc.numero_unidade', $item->numero_uc)
+                    ->select(['c.nome_cliente', 'uc.id as uc_id'])
+                    ->first();
+
+                $item->nome_cliente = $ucInfo->nome_cliente ?? null;
+                $item->uc_id = $ucInfo->uc_id ?? null;
+
+                return $item;
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $itensComInfo,
+                'total' => $itens->count(),
+                'soma_porcentagens' => $itens->sum('porcentagem')
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao listar itens do rateio', [
+                'error' => $e->getMessage(),
+                'rateio_id' => $id
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao listar itens do rateio'
             ], 500);
         }
     }

@@ -691,6 +691,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/', [\App\Http\Controllers\HistoricoRateioController::class, 'store']);
         Route::get('ugs', [\App\Http\Controllers\HistoricoRateioController::class, 'listarUGs']);
         Route::get('{id}/download', [\App\Http\Controllers\HistoricoRateioController::class, 'downloadArquivo']);
+        Route::get('{id}/itens', [\App\Http\Controllers\HistoricoRateioController::class, 'listarItens']);
         Route::put('{id}', [\App\Http\Controllers\HistoricoRateioController::class, 'update']);
         Route::delete('{id}', [\App\Http\Controllers\HistoricoRateioController::class, 'destroy']);
     });
