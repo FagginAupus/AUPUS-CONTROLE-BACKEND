@@ -41,9 +41,9 @@ class PDFGeneratorService
                 "text_5gmab" => $dadosFormatados['representanteLegal'] ?? '',
                 "textarea_6xurw" => $dadosFormatados['numeroUnidade'] ?? '',
                 "textarea_7ejcl" => $dadosFormatados['logradouro'] ?? '',
-                "text_11lwbh" => $dadosFormatados['dia'] ?? '',
-                "text_12yecv" => $dadosFormatados['mes'] ?? '',
-                "text_13drqy" => $dadosFormatados['economia'] ?? ''
+                "text_11lwbh" => $dadosFormatados['economia'] ?? '',
+                "text_12yecv" => $dadosFormatados['dia'] ?? '',
+                "text_13drqy" => $dadosFormatados['mes'] ?? ''
             ];
 
             Log::info('📋 Mapeamento de campos preparado', [
@@ -91,9 +91,9 @@ class PDFGeneratorService
                 "text_5gmab" => $dadosFormatados['representanteLegal'] ?? '',
                 "textarea_6xurw" => $dadosFormatados['numeroUnidade'] ?? '',
                 "textarea_7ejcl" => $dadosFormatados['logradouro'] ?? '',
-                "text_11lwbh" => $dadosFormatados['dia'] ?? '',
-                "text_12yecv" => $dadosFormatados['mes'] ?? '',
-                "text_13drqy" => $dadosFormatados['economia'] ?? ''
+                "text_11lwbh" => $dadosFormatados['economia'] ?? '',
+                "text_12yecv" => $dadosFormatados['dia'] ?? '',
+                "text_13drqy" => $dadosFormatados['mes'] ?? ''
             ];
 
             // Criar arquivo FDF (Form Data Format)
