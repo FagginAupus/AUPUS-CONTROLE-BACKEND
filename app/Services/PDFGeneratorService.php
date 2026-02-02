@@ -32,18 +32,18 @@ class PDFGeneratorService
             // 1. Preparar dados formatados
             $dadosFormatados = $this->prepararDadosParaPDF($dados);
             
-            // 2. Criar mapeamento de campos
+            // 2. Criar mapeamento de campos (atualizado para novo PDF 2026)
             $mapeamento = [
-                "text_1semi" => $dadosFormatados['nomeAssociado'] ?? '',
-                "text_2jyxc" => $dadosFormatados['endereco'] ?? '',
-                "text_3qmpl" => $dadosFormatados['formaPagamento'] ?? 'Boleto',
-                "text_4nirf" => $dadosFormatados['cpf'] ?? '',
-                "text_5igbr" => $dadosFormatados['representanteLegal'] ?? '',
-                "textarea_6pyef" => $dadosFormatados['numeroUnidade'] ?? '',
-                "textarea_7wrsb" => $dadosFormatados['logradouro'] ?? '',
-                "text_15goku" => $dadosFormatados['dia'] ?? '',
-                "text_16bzyc" => $dadosFormatados['mes'] ?? '',
-                "text_13gmsz" => $dadosFormatados['economia'] ?? ''
+                "text_1hfet" => $dadosFormatados['nomeAssociado'] ?? '',
+                "text_2mymr" => $dadosFormatados['endereco'] ?? '',
+                "text_3uupn" => $dadosFormatados['formaPagamento'] ?? 'Boleto',
+                "text_4ybz" => $dadosFormatados['cpf'] ?? '',
+                "text_5gmab" => $dadosFormatados['representanteLegal'] ?? '',
+                "textarea_6xurw" => $dadosFormatados['numeroUnidade'] ?? '',
+                "textarea_7ejcl" => $dadosFormatados['logradouro'] ?? '',
+                "text_11lwbh" => $dadosFormatados['dia'] ?? '',
+                "text_12yecv" => $dadosFormatados['mes'] ?? '',
+                "text_13drqy" => $dadosFormatados['economia'] ?? ''
             ];
 
             Log::info('📋 Mapeamento de campos preparado', [
@@ -81,19 +81,19 @@ class PDFGeneratorService
         Log::info('🔧 Tentando usar PDFtk para preenchimento');
 
         try {
-            // Preparar dados
+            // Preparar dados (atualizado para novo PDF 2026)
             $dadosFormatados = $this->prepararDadosParaPDF($dados);
             $mapeamento = [
-                "text_1semi" => $dadosFormatados['nomeAssociado'] ?? '',
-                "text_2jyxc" => $dadosFormatados['endereco'] ?? '',
-                "text_3qmpl" => $dadosFormatados['formaPagamento'] ?? 'Boleto',
-                "text_4nirf" => $dadosFormatados['cpf'] ?? '',
-                "text_5igbr" => $dadosFormatados['representanteLegal'] ?? '',
-                "textarea_6pyef" => $dadosFormatados['numeroUnidade'] ?? '',
-                "textarea_7wrsb" => $dadosFormatados['logradouro'] ?? '',
-                "text_15goku" => $dadosFormatados['dia'] ?? '',
-                "text_16bzyc" => $dadosFormatados['mes'] ?? '',
-                "text_13gmsz" => $dadosFormatados['economia'] ?? ''
+                "text_1hfet" => $dadosFormatados['nomeAssociado'] ?? '',
+                "text_2mymr" => $dadosFormatados['endereco'] ?? '',
+                "text_3uupn" => $dadosFormatados['formaPagamento'] ?? 'Boleto',
+                "text_4ybz" => $dadosFormatados['cpf'] ?? '',
+                "text_5gmab" => $dadosFormatados['representanteLegal'] ?? '',
+                "textarea_6xurw" => $dadosFormatados['numeroUnidade'] ?? '',
+                "textarea_7ejcl" => $dadosFormatados['logradouro'] ?? '',
+                "text_11lwbh" => $dadosFormatados['dia'] ?? '',
+                "text_12yecv" => $dadosFormatados['mes'] ?? '',
+                "text_13drqy" => $dadosFormatados['economia'] ?? ''
             ];
 
             // Criar arquivo FDF (Form Data Format)
