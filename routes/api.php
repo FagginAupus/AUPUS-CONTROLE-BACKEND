@@ -310,7 +310,14 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/', [ControleController::class, 'index']);
         Route::post('/', [ControleController::class, 'store']);
         Route::get('statistics', [ControleController::class, 'statistics']);
-        
+
+        // ✅ HISTÓRICO MENSAL DE ASSOCIADOS
+        Route::get('historico-mensal', [\App\Http\Controllers\HistoricoMensalController::class, 'index']);
+        Route::get('historico-mensal/gerar-mes-anterior', [\App\Http\Controllers\HistoricoMensalController::class, 'gerarMesAnterior']);
+        Route::post('historico-mensal/gerar-retroativo', [\App\Http\Controllers\HistoricoMensalController::class, 'gerarRetroativo']);
+        Route::get('historico-mensal/{anoMes}', [\App\Http\Controllers\HistoricoMensalController::class, 'show']);
+        Route::get('historico-mensal/{anoMes}/exportar', [\App\Http\Controllers\HistoricoMensalController::class, 'exportar']);
+
         // ✅ NOVAS ROTAS ESPECÍFICAS (ANTES das genéricas {id})
         Route::get('ugs-disponiveis', [ControleController::class, 'getUgsDisponiveis']);
         Route::patch('{id}/status-troca', [ControleController::class, 'updateStatusTroca']);
