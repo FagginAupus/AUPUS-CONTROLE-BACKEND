@@ -2228,7 +2228,7 @@ class PropostaController extends Controller
             // ✅ VALIDAÇÕES DE ARQUIVO (como nas correções anteriores)
             $extensao = strtolower($arquivo->getClientOriginalExtension());
             $mimeType = $arquivo->getMimeType();
-            $tamanhoMaximo = 10 * 1024 * 1024; // 10MB
+            $tamanhoMaximo = 25 * 1024 * 1024; // 25MB
             
             $extensoesPermitidas = ['pdf', 'jpg', 'jpeg', 'png'];
             $mimeTypesPermitidos = [
