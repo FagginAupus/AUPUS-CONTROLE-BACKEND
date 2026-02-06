@@ -2502,19 +2502,29 @@ class PropostaController extends Controller
             else {
                 // ✅ Verificar se é um documento extra
                 if (strpos($tipoDocumento, 'documentoExtra_') === 0) {
-                    // Inicializar array de documentos extras se não existir
-                    if (!isset($documentacaoAtual['documentosExtras'])) {
-                        $documentacaoAtual['documentosExtras'] = [];
-                    }
-
                     // Extrair índice do documento extra (ex: documentoExtra_0, documentoExtra_1)
                     $indexExtra = str_replace('documentoExtra_', '', $tipoDocumento);
 
-                    // Adicionar documento extra ao array
+                    // ✅ Salvar dentro da UC específica (estrutura que o frontend lê)
+                    if ($numeroUC) {
+                        if (!isset($documentacaoAtual[$numeroUC])) {
+                            $documentacaoAtual[$numeroUC] = [];
+                        }
+                        if (!isset($documentacaoAtual[$numeroUC]['documentosExtras'])) {
+                            $documentacaoAtual[$numeroUC]['documentosExtras'] = [];
+                        }
+                        $documentacaoAtual[$numeroUC]['documentosExtras'][$indexExtra] = $nomeArquivo;
+                    }
+
+                    // Manter também no nível raiz para compatibilidade
+                    if (!isset($documentacaoAtual['documentosExtras'])) {
+                        $documentacaoAtual['documentosExtras'] = [];
+                    }
                     $documentacaoAtual['documentosExtras'][$indexExtra] = $nomeArquivo;
 
                     Log::info('Documento extra adicionado à documentação', [
                         'proposta_id' => $propostaId,
+                        'numero_uc' => $numeroUC,
                         'index' => $indexExtra,
                         'arquivo' => $nomeArquivo
                     ]);
